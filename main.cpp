@@ -20,6 +20,8 @@
 #include "gvte/platform/surface.hpp"
 #include "gvte/terminal.hpp"
 
+#include "event_router.hpp"
+
 #include "vibe.h"
 
 namespace {
@@ -137,12 +139,6 @@ int main(int argc, char **argv) {
         }
         gvte::Session &session = *p.running;
 
-        // Set whenever this iteration hands bytes to the child. If we wrote
-        // input, we briefly wait for and drain the child's echo BEFORE
-        // rendering, so the typed glyph appears in the very same frame instead
-        // of a vsync interval later (local-echo latency: 2 frames -> 1 frame).
-        bool wrote_input = false;
-
         // Reflect the terminal's OSC 0/2 title onto the window when it changes.
         if (std::string t = session.window_title(); t != last_title) {
             surf.set_title(t);
@@ -154,134 +150,12 @@ int main(int argc, char **argv) {
             surf.set_clipboard(*clip);
         }
 
-        surf.poll_events([&](const gvte::platform::Event &ev) {
-            std::visit(
-                [&](auto &&e) {
-                    using T = std::decay_t<decltype(e)>;
-                    if constexpr (std::is_same_v<T, gvte::platform::CloseRequested>) {
-                        running = false;
-                    } else if constexpr (std::is_same_v<T, gvte::platform::Resized>) {
-                        px = e.size;
-                        // TEA: window resize is a Msg; update() resizes the grid
-                        // and returns a ResizePty Cmd that run() applies.
-                        session.run(session.update(gvte::Resized{px}));
-                    } else if constexpr (std::is_same_v<T, gvte::platform::KeyPressed>) {
-                        const auto *sk = std::get_if<gvte::SpecialKey>(&e.key.key);
-                        // Shift+PageUp/Down scroll the scrollback (primary screen only).
-                        if (sk && e.key.mods.shift &&
-                            (*sk == gvte::SpecialKey::PageUp ||
-                             *sk == gvte::SpecialKey::PageDown)) {
-                            if (!session.on_alt_screen()) {
-                                const int page = session.grid_size().rows - 1;
-                                session.scroll(*sk == gvte::SpecialKey::PageUp ? page : -page);
-                            } else {
-                                session.run(session.update(gvte::Key{e.key})); // let the app page
-                                wrote_input = true;
-                            }
-                            return;
-                        }
-                        // Ctrl+Shift+V pastes the clipboard into the child,
-                        // bracketed when the app requested it (CSI ?2004).
-                        const auto *txt = std::get_if<gvte::TextInput>(&e.key.key);
-                        if (txt && e.key.mods.ctrl && e.key.mods.shift &&
-                            (txt->utf8 == "v" || txt->utf8 == "V")) {
-                            std::string clip = surf.get_clipboard();
-                            if (!clip.empty()) {
-                                // A real clipboard paste: the Paste Msg brackets
-                                // it (ESC[200~ / ESC[201~) iff the app enabled
-                                // bracketed paste. This is the ONLY paste path.
-                                session.run(session.update(gvte::Paste{std::move(clip)}));
-                                wrote_input = true;
-                            }
-                            return;
-                        }
-                        // Ctrl+Shift+C copies the current selection to the clipboard.
-                        if (txt && e.key.mods.ctrl && e.key.mods.shift &&
-                            (txt->utf8 == "c" || txt->utf8 == "C")) {
-                            if (session.has_selection()) {
-                                std::string sel = session.selected_text();
-                                if (!sel.empty()) surf.set_clipboard(sel);
-                            }
-                            return;
-                        }
-                        // Everything else is child input: hand it to the TEA
-                        // pipeline — update() encodes it, run() writes it.
-                        session.run(session.update(gvte::Key{e.key}));
-                        wrote_input = true;
-                    } else if constexpr (std::is_same_v<T, gvte::platform::TextEntered>) {
-                        // Typed/composed text is ordinary keyboard input — send
-                        // it as a Key so it is NOT wrapped in bracketed-paste
-                        // markers. Only real clipboard pastes (Ctrl+Shift+V,
-                        // middle-click) are Paste, below.
-                        gvte::KeyEvent k;
-                        k.key = gvte::TextInput{std::string{e.utf8}};
-                        session.run(session.update(gvte::Key{k}));
-                        wrote_input = true;
-                    } else if constexpr (std::is_same_v<T, gvte::platform::MouseDown>) {
-                        const int col = e.x / std::max(1, session.cell_width());
-                        const int vrow = e.y / std::max(1, session.cell_height());
-                        // When the app tracks the mouse (and Shift isn't held to
-                        // override), report the event to it instead of selecting.
-                        if (session.wants_mouse() && !e.mods.shift) {
-                            int btn = (e.button == gvte::platform::MouseButton::right)  ? 2
-                                      : (e.button == gvte::platform::MouseButton::middle) ? 1
-                                                                                          : 0;
-                            session.report_mouse(gvte::Session::MouseEvent::press, btn, col, vrow,
-                                                 e.mods.shift, e.mods.alt, e.mods.ctrl);
-                        } else if (e.button == gvte::platform::MouseButton::left) {
-                            if (e.click_count >= 3) {
-                                session.select_line(vrow, col);
-                            } else if (e.click_count == 2) {
-                                session.select_word(vrow, col);
-                            } else {
-                                session.select_begin(vrow, col, 0);
-                            }
-                        } else if (e.button == gvte::platform::MouseButton::middle) {
-                            std::string clip = surf.get_clipboard();
-                            if (!clip.empty()) {
-                                session.run(session.update(gvte::Paste{std::move(clip)}));
-                                wrote_input = true;
-                            }
-                        }
-                    } else if constexpr (std::is_same_v<T, gvte::platform::MouseMove>) {
-                        const int col = e.x / std::max(1, session.cell_width());
-                        const int vrow = e.y / std::max(1, session.cell_height());
-                        if (session.wants_mouse() &&
-                            (session.wants_mouse_motion() ||
-                             (e.button_down && session.wants_mouse_drag()))) {
-                            const int btn = e.button_down ? 0 : 3;
-                            session.report_mouse(gvte::Session::MouseEvent::motion, btn, col, vrow,
-                                                 false, false, false);
-                        } else if (e.button_down) {
-                            session.select_extend(vrow, col);
-                        }
-                    } else if constexpr (std::is_same_v<T, gvte::platform::MouseUp>) {
-                        const int col = e.x / std::max(1, session.cell_width());
-                        const int vrow = e.y / std::max(1, session.cell_height());
-                        if (session.wants_mouse() && !e.mods.shift) {
-                            int btn = (e.button == gvte::platform::MouseButton::right)  ? 2
-                                      : (e.button == gvte::platform::MouseButton::middle) ? 1
-                                                                                          : 0;
-                            session.report_mouse(gvte::Session::MouseEvent::release, btn, col, vrow,
-                                                 e.mods.shift, e.mods.alt, e.mods.ctrl);
-                        } else if (e.button == gvte::platform::MouseButton::left &&
-                                   session.has_selection()) {
-                            std::string sel = session.selected_text();
-                            if (!sel.empty()) surf.set_clipboard(sel);
-                        }
-                    } else if constexpr (std::is_same_v<T, gvte::platform::MouseWheel>) {
-                        if (session.wants_mouse()) {
-                            // Wheel buttons in the xterm protocol: 64 up, 65 down.
-                            const int col = 0, vrow = 0;
-                            session.report_mouse(gvte::Session::MouseEvent::press,
-                                                 e.dy > 0 ? 64 : 65, col, vrow, false, false, false);
-                        } else if (!session.on_alt_screen()) {
-                            session.scroll(e.dy * 3); // 3 lines per wheel step
-                        }
-                    }
-                },
-                ev);
-        });
+        // Route this batch of window events through the exhaustive visitor. It
+        // reports whether any of them handed bytes to the child so we can
+        // coalesce the echo into this frame (below).
+        hand::EventRouter router{session, surf, px, running};
+        surf.poll_events([&](const gvte::platform::Event &ev) { std::visit(router, ev); });
+        const bool wrote_input = router.take_wrote_input();
 
         // Zero-latency local echo: if we just handed the child input, push it
         // out now and give the PTY a brief moment to echo, draining whatever
