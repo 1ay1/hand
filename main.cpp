@@ -279,14 +279,19 @@ int main(int argc, char **argv) {
         // blink timer fires — instead of busy-spinning at 100% CPU. This is the
         // classic terminal main loop: sleep until there's real work.
         surf.flush();
-        struct pollfd fds[2];
+        struct pollfd fds[3];
         fds[0].fd = session.pty_fd();
         fds[0].events = POLLIN;
         fds[0].revents = 0;
         fds[1].fd = surf.event_fd();
         fds[1].events = POLLIN;
         fds[1].revents = 0;
-        const int nfds = fds[1].fd >= 0 ? 2 : 1;
+        fds[2].fd = surf.repeat_fd(); // key-repeat timer (Wayland)
+        fds[2].events = POLLIN;
+        fds[2].revents = 0;
+        int nfds = 1;
+        if (fds[1].fd >= 0) fds[nfds++] = fds[1];
+        if (fds[2].fd >= 0) fds[nfds++] = fds[2];
         // 500ms cap keeps cursor-blink and resize responsive even when idle.
         (void)::poll(fds, static_cast<nfds_t>(nfds), 500);
     }
