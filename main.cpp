@@ -147,7 +147,17 @@ int main(int argc, char **argv) {
                         px = e.size;
                         session.resize(px);
                     } else if constexpr (std::is_same_v<T, gvte::platform::KeyPressed>) {
-                        session.send_key(e.key);
+                        // Shift+PageUp/Down scroll the scrollback locally; all
+                        // other keys go to the child.
+                        const auto *sk = std::get_if<gvte::SpecialKey>(&e.key.key);
+                        if (sk && e.key.mods.shift &&
+                            (*sk == gvte::SpecialKey::PageUp ||
+                             *sk == gvte::SpecialKey::PageDown)) {
+                            const int page = session.grid_size().rows - 1;
+                            session.scroll(*sk == gvte::SpecialKey::PageUp ? page : -page);
+                        } else {
+                            session.send_key(e.key);
+                        }
                     } else if constexpr (std::is_same_v<T, gvte::platform::TextEntered>) {
                         gvte::KeyEvent k;
                         k.key = gvte::TextInput{std::string{e.utf8}};
