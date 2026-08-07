@@ -123,12 +123,19 @@ int main(int argc, char **argv) {
     }
 
     bool running = true;
+    std::string last_title;
     while (running && !surf.should_close()) {
         gvte::Terminal::Poll p = term->poll();
         if (p.exited) {
             return p.exited->code;
         }
         gvte::Session &session = *p.running;
+
+        // Reflect the terminal's OSC 0/2 title onto the window when it changes.
+        if (std::string t = session.window_title(); t != last_title) {
+            surf.set_title(t);
+            last_title = std::move(t);
+        }
 
         surf.poll_events([&](const gvte::platform::Event &ev) {
             std::visit(
