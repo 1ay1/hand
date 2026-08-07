@@ -15,6 +15,7 @@
 
 #include <epoxy/gl.h>
 #include <poll.h>
+#include <chrono>
 
 #include "gvte/platform/surface.hpp"
 #include "gvte/terminal.hpp"
@@ -128,6 +129,7 @@ int main(int argc, char **argv) {
     std::string last_title;
     std::uint64_t last_gen = 0;
     bool need_render = true; // draw the first frame
+    bool last_cursor_on = true;
     while (running && !surf.should_close()) {
         gvte::Terminal::Poll p = term->poll();
         if (p.exited) {
@@ -270,12 +272,19 @@ int main(int argc, char **argv) {
         });
 
         // Render only when the terminal's damage counter advanced — no wasted
-        // GPU frames while idle.
-        if (const std::uint64_t g = session.generation(); g != last_gen || need_render) {
+        // GPU frames while idle. The cursor blinks on a ~530ms wall-clock phase;
+        // a phase flip also triggers a redraw.
+        const auto now = std::chrono::steady_clock::now();
+        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            now.time_since_epoch()).count();
+        const bool cursor_on = (ms / 530) % 2 == 0;
+        if (const std::uint64_t g = session.generation();
+            g != last_gen || cursor_on != last_cursor_on || need_render) {
             last_gen = g;
+            last_cursor_on = cursor_on;
             need_render = false;
             glViewport(0, 0, px.w, px.h);
-            session.render(px);
+            session.render(px, cursor_on);
             surf.swap();
         }
 
@@ -297,7 +306,7 @@ int main(int argc, char **argv) {
         if (fds[1].fd >= 0) fds[nfds++] = fds[1];
         if (fds[2].fd >= 0) fds[nfds++] = fds[2];
         // 500ms cap keeps cursor-blink and resize responsive even when idle.
-        (void)::poll(fds, static_cast<nfds_t>(nfds), 500);
+        (void)::poll(fds, static_cast<nfds_t>(nfds), 250); // 250ms: crisp cursor blink
     }
 
     return 0;
