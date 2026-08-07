@@ -177,6 +177,15 @@ int main(int argc, char **argv) {
                             }
                             return;
                         }
+                        // Ctrl+Shift+C copies the current selection to the clipboard.
+                        if (txt && e.key.mods.ctrl && e.key.mods.shift &&
+                            (txt->utf8 == "c" || txt->utf8 == "C")) {
+                            if (session.has_selection()) {
+                                std::string sel = session.selected_text();
+                                if (!sel.empty()) surf.set_clipboard(sel);
+                            }
+                            return;
+                        }
                         session.send_key(e.key);
                     } else if constexpr (std::is_same_v<T, gvte::platform::TextEntered>) {
                         gvte::KeyEvent k;
