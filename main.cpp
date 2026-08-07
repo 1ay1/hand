@@ -151,7 +151,9 @@ int main(int argc, char **argv) {
                         running = false;
                     } else if constexpr (std::is_same_v<T, gvte::platform::Resized>) {
                         px = e.size;
-                        session.resize(px);
+                        // TEA: window resize is a Msg; update() resizes the grid
+                        // and returns a ResizePty Cmd that run() applies.
+                        session.run(session.update(gvte::Resized{px}));
                     } else if constexpr (std::is_same_v<T, gvte::platform::KeyPressed>) {
                         const auto *sk = std::get_if<gvte::SpecialKey>(&e.key.key);
                         // Shift+PageUp/Down scroll the scrollback (primary screen only).
@@ -162,7 +164,7 @@ int main(int argc, char **argv) {
                                 const int page = session.grid_size().rows - 1;
                                 session.scroll(*sk == gvte::SpecialKey::PageUp ? page : -page);
                             } else {
-                                session.send_key(e.key); // let the app page instead
+                                session.run(session.update(gvte::Key{e.key})); // let the app page
                             }
                             return;
                         }
@@ -192,11 +194,11 @@ int main(int argc, char **argv) {
                             }
                             return;
                         }
-                        session.send_key(e.key);
+                        // Everything else is child input: hand it to the TEA
+                        // pipeline — update() encodes it, run() writes it.
+                        session.run(session.update(gvte::Key{e.key}));
                     } else if constexpr (std::is_same_v<T, gvte::platform::TextEntered>) {
-                        gvte::KeyEvent k;
-                        k.key = gvte::TextInput{std::string{e.utf8}};
-                        session.send_key(k);
+                        session.run(session.update(gvte::Paste{std::string{e.utf8}}));
                     } else if constexpr (std::is_same_v<T, gvte::platform::MouseDown>) {
                         const int col = e.x / std::max(1, session.cell_width());
                         const int vrow = e.y / std::max(1, session.cell_height());
