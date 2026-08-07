@@ -148,20 +148,33 @@ int main(int argc, char **argv) {
                         session.resize(px);
                     } else if constexpr (std::is_same_v<T, gvte::platform::KeyPressed>) {
                         const auto *sk = std::get_if<gvte::SpecialKey>(&e.key.key);
-                        // Shift+PageUp/Down scroll the scrollback locally.
+                        // Shift+PageUp/Down scroll the scrollback (primary screen only).
                         if (sk && e.key.mods.shift &&
                             (*sk == gvte::SpecialKey::PageUp ||
                              *sk == gvte::SpecialKey::PageDown)) {
-                            const int page = session.grid_size().rows - 1;
-                            session.scroll(*sk == gvte::SpecialKey::PageUp ? page : -page);
+                            if (!session.on_alt_screen()) {
+                                const int page = session.grid_size().rows - 1;
+                                session.scroll(*sk == gvte::SpecialKey::PageUp ? page : -page);
+                            } else {
+                                session.send_key(e.key); // let the app page instead
+                            }
                             return;
                         }
-                        // Ctrl+Shift+V pastes the clipboard into the child.
+                        // Ctrl+Shift+V pastes the clipboard into the child,
+                        // bracketed when the app requested it (CSI ?2004).
                         const auto *txt = std::get_if<gvte::TextInput>(&e.key.key);
                         if (txt && e.key.mods.ctrl && e.key.mods.shift &&
                             (txt->utf8 == "v" || txt->utf8 == "V")) {
                             std::string clip = surf.get_clipboard();
-                            if (!clip.empty()) session.send_text(clip);
+                            if (!clip.empty()) {
+                                if (session.bracketed_paste()) {
+                                    session.send_text("\x1b[200~");
+                                    session.send_text(clip);
+                                    session.send_text("\x1b[201~");
+                                } else {
+                                    session.send_text(clip);
+                                }
+                            }
                             return;
                         }
                         session.send_key(e.key);
