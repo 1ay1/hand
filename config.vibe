@@ -1,0 +1,14 @@
+# hand — sample configuration (VIBE format)
+#
+# Copy to ~/.config/hand/config.vibe (or pass -c PATH).
+# VIBE syntax: `key value`, objects in { }, # comments, no = or :.
+
+font {
+    family "monospace"   # font family (fontconfig name)
+    size   11            # point size, scaled to pixels at 96 DPI
+}
+
+colors {
+    foreground "#dcdccc"
+    background "#171720"
+}

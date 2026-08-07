@@ -12,6 +12,7 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../gvte ${CMAKE_BINARY_DIR}/gvte)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(EPOXY REQUIRED IMPORTED_TARGET epoxy)
 
-add_executable(hand main.cpp)
+add_executable(hand main.cpp vendor/vibe_impl.c)
+target_include_directories(hand PRIVATE vendor)
 target_link_libraries(hand PRIVATE gvte::gvte PkgConfig::EPOXY)
 target_compile_options(hand PRIVATE -Wall -Wextra -Wpedantic)

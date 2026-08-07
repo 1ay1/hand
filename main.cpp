@@ -2,93 +2,41 @@
 //
 // hand — a terminal, a pun on foot. A native (Wayland/X11) keyboard-driven
 // terminal on libgvte with no GTK, no VTE, no SDL: the window comes from
-// gvte::platform, the terminal from gvte::Terminal. Reads an INI config for
-// font + colors (its own, falling back to termite's for compatibility).
+// gvte::platform, the terminal from gvte::Terminal. Configuration is a .vibe
+// file (the VIBE config format).
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <fstream>
 #include <optional>
 #include <sstream>
 #include <string>
-#include <unordered_map>
 
 #include <epoxy/gl.h>
 
 #include "gvte/platform/surface.hpp"
 #include "gvte/terminal.hpp"
 
+#include "vibe.h"
+
 namespace {
 
-// --- a tiny INI reader (section.key -> value) ------------------------------
-using Ini = std::unordered_map<std::string, std::string>;
-
-std::string trim(std::string s) {
-    const auto b = s.find_first_not_of(" \t\r\n");
-    if (b == std::string::npos) return "";
-    const auto e = s.find_last_not_of(" \t\r\n");
-    return s.substr(b, e - b + 1);
-}
-
-Ini parse_ini(const std::string &path) {
-    Ini ini;
-    std::ifstream in(path);
-    if (!in) return ini;
-    std::string line, section;
-    while (std::getline(in, line)) {
-        std::string s = trim(line);
-        if (s.empty() || s[0] == '#' || s[0] == ';') continue;
-        if (s.front() == '[' && s.back() == ']') {
-            section = s.substr(1, s.size() - 2);
-            continue;
-        }
-        const auto eq = s.find('=');
-        if (eq == std::string::npos) continue;
-        const std::string key = trim(s.substr(0, eq));
-        const std::string val = trim(s.substr(eq + 1));
-        ini[section + "." + key] = val;
-    }
-    return ini;
-}
-
-std::optional<std::string> get(const Ini &ini, const std::string &k) {
-    if (auto it = ini.find(k); it != ini.end()) return it->second;
-    return std::nullopt;
-}
-
-// Parse "#rrggbb" (the GTK/termite color form) into an Rgb.
-std::optional<gvte::Rgb> parse_color(const std::string &s) {
-    if (s.size() == 7 && s[0] == '#') {
-        auto hex = [&](int i) { return std::stoi(s.substr(static_cast<size_t>(i), 2), nullptr, 16); };
+// Parse "#rrggbb" into an Rgb.
+std::optional<gvte::Rgb> parse_color(const char *s) {
+    if (!s) return std::nullopt;
+    const std::string str{s};
+    if (str.size() == 7 && str[0] == '#') {
+        auto hex = [&](int i) {
+            return std::stoi(str.substr(static_cast<size_t>(i), 2), nullptr, 16);
+        };
         return gvte::rgb(static_cast<uint8_t>(hex(1)), static_cast<uint8_t>(hex(3)),
                          static_cast<uint8_t>(hex(5)));
     }
     return std::nullopt;
 }
 
-// Termite fonts look like "Monospace 9" / "DejaVu Sans Mono 11". Split the
-// trailing integer point-size off the family. gvte wants a pixel size, so we
-// scale points to pixels at a nominal 96 DPI (pt * 96/72 = pt * 4/3).
-void apply_font(const std::string &spec, gvte::Config &cfg) {
-    std::istringstream iss(spec);
-    std::string token, family;
-    int last_size = 0;
-    while (iss >> token) {
-        char *end = nullptr;
-        const long n = std::strtol(token.c_str(), &end, 10);
-        if (end && *end == '\0' && n > 0) {
-            last_size = static_cast<int>(n);
-        } else {
-            if (!family.empty()) family += ' ';
-            family += token;
-        }
-    }
-    if (!family.empty()) cfg.font_family = family;
-    if (last_size > 0) cfg.font_pixel_size = last_size * 4 / 3;
-}
-
-// Locate the config file: -c/--config, then $XDG_CONFIG_HOME/hand/config, then
-// ~/.config/hand/config, falling back to termite's paths for compatibility.
+// Locate the config file: -c/--config, then $XDG_CONFIG_HOME/hand/config.vibe,
+// then ~/.config/hand/config.vibe.
 std::string find_config(int argc, char **argv) {
     for (int i = 1; i + 1 < argc; ++i) {
         std::string a = argv[static_cast<size_t>(i)];
@@ -98,27 +46,60 @@ std::string find_config(int argc, char **argv) {
     const std::string home = std::getenv("HOME") ? std::getenv("HOME") : "";
     const std::string cfg_dir = base ? std::string{base} : (home + "/.config");
     if (cfg_dir.empty()) return "";
-
-    for (const char *app : {"hand", "termite"}) {
-        std::string p = cfg_dir + "/" + app + "/config";
-        if (std::ifstream{p}) return p;
-    }
-    return "";
+    return cfg_dir + "/hand/config.vibe";
 }
 
+// Read the .vibe config into a gvte::Config. Unknown or missing keys keep the
+// defaults; a parse error is reported but non-fatal (we fall back to defaults).
+//
+// Expected shape:
+//
+//     font {
+//         family "Monospace"
+//         size   11              # points; scaled to px at 96 DPI
+//     }
+//     colors {
+//         foreground "#dcdccc"
+//         background "#171720"
+//     }
 gvte::Config load_config(int argc, char **argv) {
     gvte::Config cfg;
     const std::string path = find_config(argc, argv);
     if (path.empty()) return cfg;
-    const Ini ini = parse_ini(path);
 
-    if (auto f = get(ini, "options.font")) apply_font(*f, cfg);
-    if (auto c = get(ini, "colors.foreground")) {
-        if (auto col = parse_color(*c)) cfg.default_fg = *col;
+    VibeParser *parser = vibe_parser_new();
+    if (!parser) return cfg;
+    VibeValue *root = vibe_parse_file(parser, path.c_str());
+    if (!root) {
+        VibeError err = vibe_get_last_error(parser);
+        if (err.code != VIBE_OK) {
+            std::fprintf(stderr, "hand: config %s: %s\n", path.c_str(),
+                         vibe_error_code_string(err.code));
+        }
+        vibe_parser_free(parser);
+        return cfg;
     }
-    if (auto c = get(ini, "colors.background")) {
-        if (auto col = parse_color(*c)) cfg.default_bg = *col;
+
+    if (VibeObject *font = vibe_get_object(root, "font")) {
+        if (VibeValue *fam = vibe_object_get(font, "family")) {
+            cfg.font_family = vibe_value_string_or(fam, cfg.font_family.c_str());
+        }
+        if (VibeValue *sz = vibe_object_get(font, "size")) {
+            const int64_t pt = vibe_value_int_or(sz, 0);
+            if (pt > 0) cfg.font_pixel_size = static_cast<int>(pt * 4 / 3); // pt -> px @96dpi
+        }
     }
+    if (VibeObject *colors = vibe_get_object(root, "colors")) {
+        if (VibeValue *fg = vibe_object_get(colors, "foreground")) {
+            if (auto c = parse_color(vibe_value_string_or(fg, nullptr))) cfg.default_fg = *c;
+        }
+        if (VibeValue *bg = vibe_object_get(colors, "background")) {
+            if (auto c = parse_color(vibe_value_string_or(bg, nullptr))) cfg.default_bg = *c;
+        }
+    }
+
+    vibe_value_free(root);
+    vibe_parser_free(parser);
     return cfg;
 }
 
