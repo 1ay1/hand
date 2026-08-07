@@ -138,6 +138,11 @@ int main(int argc, char **argv) {
             last_title = std::move(t);
         }
 
+        // Honor OSC 52 clipboard-set requests from the running app.
+        if (auto clip = session.take_clipboard_request()) {
+            surf.set_clipboard(*clip);
+        }
+
         surf.poll_events([&](const gvte::platform::Event &ev) {
             std::visit(
                 [&](auto &&e) {
@@ -204,8 +209,13 @@ int main(int argc, char **argv) {
                             session.report_mouse(gvte::Session::MouseEvent::press, btn, col, vrow,
                                                  e.mods.shift, e.mods.alt, e.mods.ctrl);
                         } else if (e.button == gvte::platform::MouseButton::left) {
-                            const int mode = (e.click_count >= 3) ? 1 : 0;
-                            session.select_begin(vrow, col, mode);
+                            if (e.click_count >= 3) {
+                                session.select_line(vrow, col);
+                            } else if (e.click_count == 2) {
+                                session.select_word(vrow, col);
+                            } else {
+                                session.select_begin(vrow, col, 0);
+                            }
                         } else if (e.button == gvte::platform::MouseButton::middle) {
                             std::string clip = surf.get_clipboard();
                             if (!clip.empty()) session.send_text(clip);
