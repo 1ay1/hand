@@ -178,13 +178,10 @@ int main(int argc, char **argv) {
                             (txt->utf8 == "v" || txt->utf8 == "V")) {
                             std::string clip = surf.get_clipboard();
                             if (!clip.empty()) {
-                                if (session.bracketed_paste()) {
-                                    session.send_text("\x1b[200~");
-                                    session.send_text(clip);
-                                    session.send_text("\x1b[201~");
-                                } else {
-                                    session.send_text(clip);
-                                }
+                                // A real clipboard paste: the Paste Msg brackets
+                                // it (ESC[200~ / ESC[201~) iff the app enabled
+                                // bracketed paste. This is the ONLY paste path.
+                                session.run(session.update(gvte::Paste{std::move(clip)}));
                             }
                             return;
                         }
@@ -201,7 +198,13 @@ int main(int argc, char **argv) {
                         // pipeline — update() encodes it, run() writes it.
                         session.run(session.update(gvte::Key{e.key}));
                     } else if constexpr (std::is_same_v<T, gvte::platform::TextEntered>) {
-                        session.run(session.update(gvte::Paste{std::string{e.utf8}}));
+                        // Typed/composed text is ordinary keyboard input — send
+                        // it as a Key so it is NOT wrapped in bracketed-paste
+                        // markers. Only real clipboard pastes (Ctrl+Shift+V,
+                        // middle-click) are Paste, below.
+                        gvte::KeyEvent k;
+                        k.key = gvte::TextInput{std::string{e.utf8}};
+                        session.run(session.update(gvte::Key{k}));
                     } else if constexpr (std::is_same_v<T, gvte::platform::MouseDown>) {
                         const int col = e.x / std::max(1, session.cell_width());
                         const int vrow = e.y / std::max(1, session.cell_height());
@@ -223,7 +226,8 @@ int main(int argc, char **argv) {
                             }
                         } else if (e.button == gvte::platform::MouseButton::middle) {
                             std::string clip = surf.get_clipboard();
-                            if (!clip.empty()) session.send_text(clip);
+                            if (!clip.empty())
+                                session.run(session.update(gvte::Paste{std::move(clip)}));
                         }
                     } else if constexpr (std::is_same_v<T, gvte::platform::MouseMove>) {
                         const int col = e.x / std::max(1, session.cell_width());
