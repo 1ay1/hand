@@ -193,33 +193,56 @@ int main(int argc, char **argv) {
                         k.key = gvte::TextInput{std::string{e.utf8}};
                         session.send_key(k);
                     } else if constexpr (std::is_same_v<T, gvte::platform::MouseDown>) {
-                        if (e.button == gvte::platform::MouseButton::left) {
-                            const int col = e.x / std::max(1, session.cell_width());
-                            const int vrow = e.y / std::max(1, session.cell_height());
-                            // 1 click = character, 3 clicks = line select.
+                        const int col = e.x / std::max(1, session.cell_width());
+                        const int vrow = e.y / std::max(1, session.cell_height());
+                        // When the app tracks the mouse (and Shift isn't held to
+                        // override), report the event to it instead of selecting.
+                        if (session.wants_mouse() && !e.mods.shift) {
+                            int btn = (e.button == gvte::platform::MouseButton::right)  ? 2
+                                      : (e.button == gvte::platform::MouseButton::middle) ? 1
+                                                                                          : 0;
+                            session.report_mouse(gvte::Session::MouseEvent::press, btn, col, vrow,
+                                                 e.mods.shift, e.mods.alt, e.mods.ctrl);
+                        } else if (e.button == gvte::platform::MouseButton::left) {
                             const int mode = (e.click_count >= 3) ? 1 : 0;
                             session.select_begin(vrow, col, mode);
                         } else if (e.button == gvte::platform::MouseButton::middle) {
-                            // Middle-click paste (PRIMARY convention -> clipboard here).
                             std::string clip = surf.get_clipboard();
                             if (!clip.empty()) session.send_text(clip);
                         }
                     } else if constexpr (std::is_same_v<T, gvte::platform::MouseMove>) {
-                        if (e.button_down) {
-                            const int col = e.x / std::max(1, session.cell_width());
-                            const int vrow = e.y / std::max(1, session.cell_height());
+                        const int col = e.x / std::max(1, session.cell_width());
+                        const int vrow = e.y / std::max(1, session.cell_height());
+                        if (session.wants_mouse() &&
+                            (session.wants_mouse_motion() ||
+                             (e.button_down && session.wants_mouse_drag()))) {
+                            const int btn = e.button_down ? 0 : 3;
+                            session.report_mouse(gvte::Session::MouseEvent::motion, btn, col, vrow,
+                                                 false, false, false);
+                        } else if (e.button_down) {
                             session.select_extend(vrow, col);
                         }
                     } else if constexpr (std::is_same_v<T, gvte::platform::MouseUp>) {
-                        // On release, copy the selection to the clipboard so it
-                        // can be pasted elsewhere (X11 PRIMARY-like behavior).
-                        if (e.button == gvte::platform::MouseButton::left &&
-                            session.has_selection()) {
+                        const int col = e.x / std::max(1, session.cell_width());
+                        const int vrow = e.y / std::max(1, session.cell_height());
+                        if (session.wants_mouse() && !e.mods.shift) {
+                            int btn = (e.button == gvte::platform::MouseButton::right)  ? 2
+                                      : (e.button == gvte::platform::MouseButton::middle) ? 1
+                                                                                          : 0;
+                            session.report_mouse(gvte::Session::MouseEvent::release, btn, col, vrow,
+                                                 e.mods.shift, e.mods.alt, e.mods.ctrl);
+                        } else if (e.button == gvte::platform::MouseButton::left &&
+                                   session.has_selection()) {
                             std::string sel = session.selected_text();
                             if (!sel.empty()) surf.set_clipboard(sel);
                         }
                     } else if constexpr (std::is_same_v<T, gvte::platform::MouseWheel>) {
-                        if (!session.on_alt_screen()) {
+                        if (session.wants_mouse()) {
+                            // Wheel buttons in the xterm protocol: 64 up, 65 down.
+                            const int col = 0, vrow = 0;
+                            session.report_mouse(gvte::Session::MouseEvent::press,
+                                                 e.dy > 0 ? 64 : 65, col, vrow, false, false, false);
+                        } else if (!session.on_alt_screen()) {
                             session.scroll(e.dy * 3); // 3 lines per wheel step
                         }
                     }
