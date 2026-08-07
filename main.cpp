@@ -137,6 +137,12 @@ int main(int argc, char **argv) {
         }
         gvte::Session &session = *p.running;
 
+        // Set whenever this iteration hands bytes to the child. If we wrote
+        // input, we briefly wait for and drain the child's echo BEFORE
+        // rendering, so the typed glyph appears in the very same frame instead
+        // of a vsync interval later (local-echo latency: 2 frames -> 1 frame).
+        bool wrote_input = false;
+
         // Reflect the terminal's OSC 0/2 title onto the window when it changes.
         if (std::string t = session.window_title(); t != last_title) {
             surf.set_title(t);
@@ -170,6 +176,7 @@ int main(int argc, char **argv) {
                                 session.scroll(*sk == gvte::SpecialKey::PageUp ? page : -page);
                             } else {
                                 session.run(session.update(gvte::Key{e.key})); // let the app page
+                                wrote_input = true;
                             }
                             return;
                         }
@@ -184,6 +191,7 @@ int main(int argc, char **argv) {
                                 // it (ESC[200~ / ESC[201~) iff the app enabled
                                 // bracketed paste. This is the ONLY paste path.
                                 session.run(session.update(gvte::Paste{std::move(clip)}));
+                                wrote_input = true;
                             }
                             return;
                         }
@@ -199,6 +207,7 @@ int main(int argc, char **argv) {
                         // Everything else is child input: hand it to the TEA
                         // pipeline — update() encodes it, run() writes it.
                         session.run(session.update(gvte::Key{e.key}));
+                        wrote_input = true;
                     } else if constexpr (std::is_same_v<T, gvte::platform::TextEntered>) {
                         // Typed/composed text is ordinary keyboard input — send
                         // it as a Key so it is NOT wrapped in bracketed-paste
@@ -207,6 +216,7 @@ int main(int argc, char **argv) {
                         gvte::KeyEvent k;
                         k.key = gvte::TextInput{std::string{e.utf8}};
                         session.run(session.update(gvte::Key{k}));
+                        wrote_input = true;
                     } else if constexpr (std::is_same_v<T, gvte::platform::MouseDown>) {
                         const int col = e.x / std::max(1, session.cell_width());
                         const int vrow = e.y / std::max(1, session.cell_height());
@@ -228,8 +238,10 @@ int main(int argc, char **argv) {
                             }
                         } else if (e.button == gvte::platform::MouseButton::middle) {
                             std::string clip = surf.get_clipboard();
-                            if (!clip.empty())
+                            if (!clip.empty()) {
                                 session.run(session.update(gvte::Paste{std::move(clip)}));
+                                wrote_input = true;
+                            }
                         }
                     } else if constexpr (std::is_same_v<T, gvte::platform::MouseMove>) {
                         const int col = e.x / std::max(1, session.cell_width());
@@ -271,6 +283,24 @@ int main(int argc, char **argv) {
                 ev);
         });
 
+        // Zero-latency local echo: if we just handed the child input, push it
+        // out now and give the PTY a brief moment to echo, draining whatever
+        // comes back so the typed glyph renders in THIS frame instead of after
+        // the next vsync. Shells echo within microseconds, so the deadline is
+        // essentially never hit; when the child is genuinely busy we bail fast
+        // and pick the output up on the next wake — never stalling the UI.
+        if (wrote_input) {
+            surf.flush(); // ensure any pending display writes don't head-of-line block
+            struct pollfd pf{session.pty_fd(), POLLIN, 0};
+            // poll() returns the instant the echo is readable; the 3ms is only a
+            // ceiling for a busy child (then we render without it and catch up
+            // on the next wake). A local shell echoes in tens of microseconds,
+            // so in practice this returns almost immediately.
+            if (::poll(&pf, 1, 3) > 0 && (pf.revents & POLLIN)) {
+                if (!session.pump_output()) need_render = true; // child gone
+            }
+        }
+
         // Render only when the terminal's damage counter advanced — no wasted
         // GPU frames while idle. The cursor blinks on a ~530ms wall-clock phase;
         // a phase flip also triggers a redraw.
@@ -291,7 +321,15 @@ int main(int argc, char **argv) {
         // Block until the child has output, a window event arrives, or the
         // blink timer fires — instead of busy-spinning at 100% CPU. This is the
         // classic terminal main loop: sleep until there's real work.
+        //
+        // EXCEPT during a flood: if the last drain hit its budget, the child
+        // still has output queued, so we skip the sleep and loop straight back
+        // to drain the next chunk — having just rendered an intermediate frame
+        // and processed input. That's what keeps the UI live under `yes`/`cat`.
         surf.flush();
+        if (session.output_pending()) {
+            continue;
+        }
         struct pollfd fds[3];
         fds[0].fd = session.pty_fd();
         fds[0].events = POLLIN;
