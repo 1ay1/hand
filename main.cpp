@@ -147,17 +147,24 @@ int main(int argc, char **argv) {
                         px = e.size;
                         session.resize(px);
                     } else if constexpr (std::is_same_v<T, gvte::platform::KeyPressed>) {
-                        // Shift+PageUp/Down scroll the scrollback locally; all
-                        // other keys go to the child.
                         const auto *sk = std::get_if<gvte::SpecialKey>(&e.key.key);
+                        // Shift+PageUp/Down scroll the scrollback locally.
                         if (sk && e.key.mods.shift &&
                             (*sk == gvte::SpecialKey::PageUp ||
                              *sk == gvte::SpecialKey::PageDown)) {
                             const int page = session.grid_size().rows - 1;
                             session.scroll(*sk == gvte::SpecialKey::PageUp ? page : -page);
-                        } else {
-                            session.send_key(e.key);
+                            return;
                         }
+                        // Ctrl+Shift+V pastes the clipboard into the child.
+                        const auto *txt = std::get_if<gvte::TextInput>(&e.key.key);
+                        if (txt && e.key.mods.ctrl && e.key.mods.shift &&
+                            (txt->utf8 == "v" || txt->utf8 == "V")) {
+                            std::string clip = surf.get_clipboard();
+                            if (!clip.empty()) session.send_text(clip);
+                            return;
+                        }
+                        session.send_key(e.key);
                     } else if constexpr (std::is_same_v<T, gvte::platform::TextEntered>) {
                         gvte::KeyEvent k;
                         k.key = gvte::TextInput{std::string{e.utf8}};
