@@ -14,6 +14,7 @@
 #include <string>
 
 #include <epoxy/gl.h>
+#include <poll.h>
 
 #include "gvte/platform/surface.hpp"
 #include "gvte/terminal.hpp"
@@ -125,6 +126,8 @@ int main(int argc, char **argv) {
 
     bool running = true;
     std::string last_title;
+    std::uint64_t last_gen = 0;
+    bool need_render = true; // draw the first frame
     while (running && !surf.should_close()) {
         gvte::Terminal::Poll p = term->poll();
         if (p.exited) {
@@ -262,9 +265,30 @@ int main(int argc, char **argv) {
                 ev);
         });
 
-        glViewport(0, 0, px.w, px.h);
-        session.render(px);
-        surf.swap();
+        // Render only when the terminal's damage counter advanced — no wasted
+        // GPU frames while idle.
+        if (const std::uint64_t g = session.generation(); g != last_gen || need_render) {
+            last_gen = g;
+            need_render = false;
+            glViewport(0, 0, px.w, px.h);
+            session.render(px);
+            surf.swap();
+        }
+
+        // Block until the child has output, a window event arrives, or the
+        // blink timer fires — instead of busy-spinning at 100% CPU. This is the
+        // classic terminal main loop: sleep until there's real work.
+        surf.flush();
+        struct pollfd fds[2];
+        fds[0].fd = session.pty_fd();
+        fds[0].events = POLLIN;
+        fds[0].revents = 0;
+        fds[1].fd = surf.event_fd();
+        fds[1].events = POLLIN;
+        fds[1].revents = 0;
+        const int nfds = fds[1].fd >= 0 ? 2 : 1;
+        // 500ms cap keeps cursor-blink and resize responsive even when idle.
+        (void)::poll(fds, static_cast<nfds_t>(nfds), 500);
     }
 
     return 0;
