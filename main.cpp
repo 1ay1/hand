@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <algorithm>
 #include <cstdlib>
 #include <optional>
 #include <sstream>
@@ -191,6 +192,36 @@ int main(int argc, char **argv) {
                         gvte::KeyEvent k;
                         k.key = gvte::TextInput{std::string{e.utf8}};
                         session.send_key(k);
+                    } else if constexpr (std::is_same_v<T, gvte::platform::MouseDown>) {
+                        if (e.button == gvte::platform::MouseButton::left) {
+                            const int col = e.x / std::max(1, session.cell_width());
+                            const int vrow = e.y / std::max(1, session.cell_height());
+                            // 1 click = character, 3 clicks = line select.
+                            const int mode = (e.click_count >= 3) ? 1 : 0;
+                            session.select_begin(vrow, col, mode);
+                        } else if (e.button == gvte::platform::MouseButton::middle) {
+                            // Middle-click paste (PRIMARY convention -> clipboard here).
+                            std::string clip = surf.get_clipboard();
+                            if (!clip.empty()) session.send_text(clip);
+                        }
+                    } else if constexpr (std::is_same_v<T, gvte::platform::MouseMove>) {
+                        if (e.button_down) {
+                            const int col = e.x / std::max(1, session.cell_width());
+                            const int vrow = e.y / std::max(1, session.cell_height());
+                            session.select_extend(vrow, col);
+                        }
+                    } else if constexpr (std::is_same_v<T, gvte::platform::MouseUp>) {
+                        // On release, copy the selection to the clipboard so it
+                        // can be pasted elsewhere (X11 PRIMARY-like behavior).
+                        if (e.button == gvte::platform::MouseButton::left &&
+                            session.has_selection()) {
+                            std::string sel = session.selected_text();
+                            if (!sel.empty()) surf.set_clipboard(sel);
+                        }
+                    } else if constexpr (std::is_same_v<T, gvte::platform::MouseWheel>) {
+                        if (!session.on_alt_screen()) {
+                            session.scroll(e.dy * 3); // 3 lines per wheel step
+                        }
                     }
                 },
                 ev);
