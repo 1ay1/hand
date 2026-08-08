@@ -144,6 +144,12 @@ private:
         }
     }
 
+    void handle(const pf::FocusChanged &e) {
+        // Report focus in/out to the app when it enabled DEC 1004 (vim/tmux use
+        // this to pause rendering / update their status line).
+        s_.report_focus(e.focused);
+    }
+
     // --- shared helpers ----------------------------------------------------
     struct CellPos { int col, vrow; };
     [[nodiscard]] CellPos cell_of(int x, int y) const noexcept {
