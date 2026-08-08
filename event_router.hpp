@@ -57,26 +57,36 @@ private:
 
     // --- keyboard ----------------------------------------------------------
     void handle(const pf::KeyPressed &e) {
-        // Shift+PageUp/Down scroll the scrollback on the primary screen; on the
-        // alt screen they go to the app (which owns its own paging).
-        if (const auto *sk = std::get_if<toe::SpecialKey>(&e.key.key);
-            sk && e.key.mods.shift &&
-            (*sk == toe::SpecialKey::PageUp || *sk == toe::SpecialKey::PageDown)) {
-            if (!s_.on_alt_screen()) {
-                const int page = s_.grid_size().rows - 1;
-                s_.scroll(*sk == toe::SpecialKey::PageUp ? page : -page);
-                return;
+        // Local shortcuts (paste/copy/scroll) act on PRESS only. Release and
+        // repeat events still flow to the child below (the encoder gates them on
+        // the Kitty protocol), but must never re-trigger a shortcut — otherwise
+        // Ctrl+Shift+V pastes on both press and release.
+        const bool press = e.key.kind == toe::KeyEvent::Kind::press;
+
+        if (press) {
+            // Shift+PageUp/Down scroll the scrollback on the primary screen; on
+            // the alt screen they go to the app (which owns its own paging).
+            if (const auto *sk = std::get_if<toe::SpecialKey>(&e.key.key);
+                sk && e.key.mods.shift &&
+                (*sk == toe::SpecialKey::PageUp || *sk == toe::SpecialKey::PageDown)) {
+                if (!s_.on_alt_screen()) {
+                    const int page = s_.grid_size().rows - 1;
+                    s_.scroll(*sk == toe::SpecialKey::PageUp ? page : -page);
+                    return;
+                }
+            }
+
+            // Clipboard shortcuts intercept before the key reaches the child.
+            if (const auto *txt = std::get_if<toe::TextInput>(&e.key.key);
+                txt && e.key.mods.ctrl && e.key.mods.shift) {
+                if (txt->utf8 == "v" || txt->utf8 == "V") return paste_clipboard();
+                if (txt->utf8 == "c" || txt->utf8 == "C") return copy_selection();
             }
         }
 
-        // Clipboard shortcuts intercept before the key reaches the child.
-        if (const auto *txt = std::get_if<toe::TextInput>(&e.key.key);
-            txt && e.key.mods.ctrl && e.key.mods.shift) {
-            if (txt->utf8 == "v" || txt->utf8 == "V") return paste_clipboard();
-            if (txt->utf8 == "c" || txt->utf8 == "C") return copy_selection();
-        }
-
         // Everything else is child input: encode + write via the TEA pipeline.
+        // (The encoder drops release/repeat unless the app enabled Kitty event
+        // reporting, so legacy apps still see press-only input.)
         send_to_child(toe::Key{e.key});
     }
 
