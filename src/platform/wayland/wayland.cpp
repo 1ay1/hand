@@ -301,14 +301,20 @@ void WaylandSurface::xdg_surface_configure(void *data, xdg_surface *surf, uint32
 void WaylandSurface::xdg_toplevel_configure(void *data, xdg_toplevel *, int32_t w, int32_t h,
                                             wl_array *) {
     auto *self = static_cast<WaylandSurface *>(data);
-    if (w > 0 && h > 0) {
-        self->size_ = PixelSize{w, h};
-        if (self->egl_window_) {
-            wl_egl_window_resize(self->egl_window_, w, h, 0, 0);
-        }
-        if (self->sink_) {
-            (*self->sink_)(Event{Resized{self->size_}});
-        }
+    if (w <= 0 || h <= 0) return;
+    const PixelSize ns{w, h};
+    // Dedup: the compositor sends a configure on many events (focus, state,
+    // every drag tick), often with an UNCHANGED size. Firing Resized — hence a
+    // reflow + TIOCSWINSZ/SIGWINCH — for each of those makes the shell reprint
+    // its prompt over and over (duplicated prompts on drag) and reflows the
+    // scrollback needlessly. Only react to a REAL size change.
+    if (ns.w == self->size_.w && ns.h == self->size_.h) return;
+    self->size_ = ns;
+    if (self->egl_window_) {
+        wl_egl_window_resize(self->egl_window_, w, h, 0, 0);
+    }
+    if (self->sink_) {
+        (*self->sink_)(Event{Resized{self->size_}});
     }
 }
 
