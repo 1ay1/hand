@@ -53,11 +53,12 @@ int run(const toe::Config &cfg_in, const toe::WindowConfig &win, Backend force) 
     cfg.source = *fd;
 
 #if defined(__APPLE__)
-    // Font is host policy on macOS. Match Terminal.app's defaults: SF Mono at
-    // ~11pt, which on a 2x Retina display is ~22 device pixels. resolve_font_file
-    // already prefers SF Mono, so we only nudge the size — and only when the
-    // user hasn't set their own (still at toe's cross-platform default of 18).
-    if (cfg.font_pixel_size == 18) cfg.font_pixel_size = 22;
+    // Font is host policy on macOS. Interpret the size as a LOGICAL point size;
+    // run_cocoa multiplies it by the display's backing scale factor so it looks
+    // the same physical size on Retina and non-Retina panels. 14 logical px is
+    // a comfortable, Terminal.app-like default; only set when the user hasn't
+    // overridden (still at toe's cross-platform default of 18).
+    if (cfg.font_pixel_size == 18) cfg.font_pixel_size = 14;
     // Font discovery is host policy: resolve a concrete macOS face and hand it
     // to toe via font_file, so the engine needs no macOS font-path branch.
     if (cfg.font_file.empty()) {

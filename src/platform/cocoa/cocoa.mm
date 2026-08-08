@@ -536,7 +536,19 @@ toe::Result<CocoaApp> CocoaApp::open(const toe::WindowConfig &win) {
 // The backend entry: enter the fully-monomorphic loop for CocoaApp. toe::run<>
 // is instantiated HERE, where CocoaSurface is complete — direct calls inline,
 // no NS* type leaks into the engine.
-int run_cocoa(const toe::Config &cfg, const toe::WindowConfig &win) {
+int run_cocoa(const toe::Config &cfg_in, const toe::WindowConfig &win) {
+    toe::Config cfg = cfg_in;
+
+    // toe renders in BACKING PIXELS, so a fixed pixel font looks tiny on a 2x
+    // Retina panel and huge on a 1x one. Scale the requested size (interpreted
+    // as logical/point px) by the display's backing scale factor so the on-
+    // screen size is consistent everywhere — exactly how Terminal.app behaves.
+    @autoreleasepool {
+        CGFloat scale = 1.0;
+        if (NSScreen *scr = [NSScreen mainScreen]) scale = scr.backingScaleFactor;
+        if (scale < 1.0) scale = 1.0;
+        cfg.font_pixel_size = (int)((CGFloat)cfg.font_pixel_size * scale + 0.5);
+    }
     return toe::run<CocoaApp>(cfg, win);
 }
 
