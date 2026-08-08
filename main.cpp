@@ -17,7 +17,8 @@
 #include <poll.h>
 #include <chrono>
 
-#include "gvte/platform/surface.hpp"
+#include "gvte/gfx/render_target.hpp"
+#include "gvte/platform/backend.hpp"
 #include "gvte/terminal.hpp"
 
 #include "event_router.hpp"
@@ -118,7 +119,7 @@ int main(int argc, char **argv) {
         std::fprintf(stderr, "hand: %s\n", surface.error().message.c_str());
         return 1;
     }
-    gvte::platform::Surface &surf = **surface;
+    gvte::platform::AnySurface &surf = *surface;
     gvte::PixelSize px = surf.pixel_size();
 
     auto term = gvte::Terminal::create(cfg, px);
@@ -195,7 +196,8 @@ int main(int argc, char **argv) {
             last_blink_on = blink_on;
             need_render = false;
             glViewport(0, 0, px.w, px.h);
-            session.render(px, cursor_on, blink_on);
+            auto rc = gvte::gfx::RenderContext::adopt_current();
+            session.render(rc, px, cursor_on, blink_on);
             surf.swap();
         }
 

@@ -20,6 +20,9 @@ if(NOT DEFINED GVTE_DIR AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../gvte/CMakeLis
 endif()
 if(DEFINED GVTE_DIR)
   message(STATUS "hand: using libgvte from ${GVTE_DIR}")
+  set(GVTE_BUILD_PLATFORM ON  CACHE BOOL "" FORCE)  # hand uses the Linux backends
+  set(GVTE_BUILD_DEMO     OFF CACHE BOOL "" FORCE)
+  set(GVTE_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
   add_subdirectory("${GVTE_DIR}" "${CMAKE_BINARY_DIR}/gvte")
 else()
   message(STATUS "hand: fetching libgvte (${GVTE_TAG}) from github.com/1ay1/gvte")
@@ -54,5 +57,5 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(EPOXY REQUIRED IMPORTED_TARGET epoxy)
 
 add_executable(hand main.cpp)
-target_link_libraries(hand PRIVATE gvte::gvte vibe PkgConfig::EPOXY)
+target_link_libraries(hand PRIVATE gvte::core gvte::platform vibe PkgConfig::EPOXY)
 target_compile_options(hand PRIVATE -Wall -Wextra -Wpedantic)

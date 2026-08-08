@@ -32,7 +32,7 @@ namespace pf = gvte::platform;
 // handed bytes to the child, so the host can coalesce the echo into one frame.
 class EventRouter {
 public:
-    EventRouter(gvte::Session &session, pf::Surface &surface, gvte::PixelSize &px, bool &running)
+    EventRouter(gvte::Session &session, pf::AnySurface &surface, gvte::PixelSize &px, bool &running)
         : s_(session), surf_(surface), px_(px), running_(running) {}
 
     // The visitor entry point: `std::visit(router, event)`.
@@ -208,7 +208,7 @@ private:
     }
 
     gvte::Session &s_;
-    pf::Surface &surf_;
+    pf::AnySurface &surf_;
     gvte::PixelSize &px_;
     bool &running_;
     bool wrote_input_ = false;
