@@ -17,6 +17,9 @@
 #include <string_view>
 #include <utility>
 
+#include <sys/wait.h>
+#include <unistd.h>
+
 #include "gvte/platform/surface.hpp"
 #include "gvte/terminal.hpp"
 
@@ -87,6 +90,14 @@ private:
     // --- pointer -----------------------------------------------------------
     void handle(const pf::MouseDown &e) {
         const auto [col, vrow] = cell_of(e.x, e.y);
+        // Ctrl+Click (or plain click when the app isn't tracking the mouse)
+        // opens an OSC 8 hyperlink under the pointer, if any.
+        if (e.button == pf::MouseButton::left && (e.mods.ctrl || !s_.wants_mouse())) {
+            if (std::string_view uri = s_.link_at(vrow, col); !uri.empty()) {
+                open_uri(uri);
+                return;
+            }
+        }
         if (app_owns_mouse(e.mods.shift)) {
             report(gvte::Session::MouseEvent::press, button_code(e.button), col, vrow, e.mods);
         } else if (e.button == pf::MouseButton::left) {
@@ -165,6 +176,25 @@ private:
     void copy_selection() {
         if (!s_.has_selection()) return;
         if (std::string sel = s_.selected_text(); !sel.empty()) surf_.set_clipboard(sel);
+    }
+
+    // Launch the desktop URL handler for an OSC 8 link. fork/exec (never
+    // system()) so the URI can't be shell-interpreted — it's passed as a single
+    // argv element. Double-fork so the opener isn't a zombie child of the term.
+    static void open_uri(std::string_view uri) {
+        std::string url{uri};
+        const pid_t pid = ::fork();
+        if (pid != 0) {
+            if (pid > 0) { int st = 0; ::waitpid(pid, &st, 0); } // reap the first fork
+            return;
+        }
+        if (::fork() == 0) { // grandchild: actually exec, detached
+            ::setsid();
+            const char *argv[] = {"xdg-open", url.c_str(), nullptr};
+            ::execvp("xdg-open", const_cast<char *const *>(argv));
+            ::_exit(127);
+        }
+        ::_exit(0); // first child exits immediately
     }
 
     gvte::Session &s_;
