@@ -125,12 +125,42 @@ int main(int argc, char **argv) {
         EventRouter router{session, surf, px, running};
         surf.poll_events([&](const toe::platform::Event &ev) { std::visit(router, ev); });
 
+        // 2b. Drain child output HERE, decoupled from the Wayland event cadence.
+        //     poll_events fires a ChildOutput only once per dispatch, so under a
+        //     bursty stream (many small kernel-scheduled writes) relying on it
+        //     alone paces throughput to one gulp per event-loop turn — each turn
+        //     paying a Wayland roundtrip + a sleep/wake. That's ~0 CPU but huge
+        //     wall time. Instead, once the PTY fd is readable we drain it in a
+        //     tight loop until it's genuinely empty (drain() itself yields at a
+        //     byte budget so input/render still get a turn under a real flood),
+        //     then coalesce: if we consumed a gulp but the PTY drained dry, wait
+        //     a couple ms for the producer to refill rather than falling through
+        //     to the full flush/present/sleep cycle. This makes flood throughput
+        //     PTY-bound, not event-loop-bound.
+        bool child_gone = false;
+        {
+            PollSet ready;
+            ready.add(session.pty_fd());
+            ready.wait(Timeout::millis(0)); // non-blocking probe
+            // Bound the coalescing so a steady trickle can't starve render/input:
+            // at most a handful of refill waits before we fall through to present
+            // a frame and re-poll window events.
+            int coalesce_budget = 8;
+            while (ready.ready(session.pty_fd())) {
+                if (!session.pump_output()) { child_gone = true; break; }
+                if (session.output_pending()) break; // hit the byte budget: yield
+                if (--coalesce_budget <= 0) break;   // yield to render/input
+                // Drained to empty: give the producer a brief window to refill
+                // so a bursty stream coalesces into one drain instead of many.
+                ready.wait(Timeout::millis(2));
+            }
+        }
+
         // 3. Zero-latency local echo: after sending input, flush and give the
         //    PTY a few ms to echo, draining what returns so the typed glyph
         //    lands in THIS frame instead of a vsync later. poll() returns the
         //    instant the echo is readable; the ceiling only bites for a busy
         //    child, and then we simply catch up on the next wake.
-        bool child_gone = false;
         if (router.take_wrote_input()) {
             surf.flush();
             PollSet echo;
