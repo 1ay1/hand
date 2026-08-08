@@ -1,95 +1,110 @@
 // SPDX-License-Identifier: LGPL-2.0-or-later
 //
-// hand::App — THE window. The one type main names, the one thing hand implements.
+// hand's windows — three distinct toe::App models, one per native backend.
 //
-// toe declares the whole host contract as `concept App` (present, input,
-// lifecycle, and the `open()` factory). hand has three native backends —
-// Wayland, X11, offscreen — that are genuinely distinct implementations of that
-// contract (a 45-field wl_* surface has nothing in common with an EGL pbuffer
-// but the SHAPE). Rather than force main to know which, hand::App is the single
-// window type: its `open()` picks a backend from the environment and holds the
-// live one behind a thin interface.
+// toe declares the whole host contract as `concept App` and drives it with the
+// MONOMORPHIC `toe::run<App>`. hand provides three models: WaylandApp, X11App,
+// OffscreenApp. Each is a thin HANDLE (pimpl) — one opaque pointer to the real
+// backend surface, whose ~45 wl_*/xcb_* fields stay sealed in that backend's TU.
+// The handle's methods are DIRECT, non-virtual calls into that TU: no vtable, no
+// tag, no per-op branch. `toe::run<WaylandApp>` inlines to Wayland calls; a
+// separate `toe::run<X11App>` inlines to X11 calls.
 //
-// The one indirection this costs (a virtual call through AppBackend) is paid
-// only at FRAME BOUNDARIES — swap/poll_events/event_fd/flush run ~60×/sec, never
-// per byte or per glyph. The throughput hot path (VT parse, screen model,
-// render) lives entirely inside toe and stays fully monomorphic. So hand::App
-// reads as one clean window type at zero cost where cost matters.
+// The Wayland-vs-X11 choice is a SINGLE runtime decision at startup (Linux ships
+// both backends in one binary), made once in `hand::run` — which then enters the
+// one fully-specialised loop for the chosen backend. After that `if`, every
+// frame op is a statically-known direct call. So dispatch cost is: one branch
+// per PROCESS, zero per frame.
 //
-// main writes exactly:  return toe::run<hand::App>(cfg, {"hand", {800, 500}});
+//     int main() { return hand::run(cfg, {"hand", {800, 500}}); }
 
 #ifndef HAND_APP_HPP
 #define HAND_APP_HPP
 
-#include <memory>
 #include <string>
 #include <string_view>
 
 #include "toe/app.hpp"
 #include "toe/core/types.hpp"
+#include "toe/terminal.hpp" // toe::Config
 
 namespace hand {
 
-// The per-frame operations a concrete backend (Wayland/X11/offscreen) provides.
-// An abstract base rather than a template because the backend is chosen at
-// runtime from the environment; every method here is called at most once per
-// frame, so the virtual dispatch never touches the throughput hot path.
-struct AppBackend {
-    virtual ~AppBackend() = default;
+// One backend handle. `Impl` is the concrete surface type (incomplete here,
+// complete in its TU); the App owns it and forwards the toe::App contract to it
+// with direct calls. Declared once, instantiated per backend below — so each
+// App is its own distinct, monomorphic type.
+//
+// Ops are declared (not defined) here and defined in the backend TU where `Impl`
+// is complete, so no native window-system type ever appears in this header.
+template <class Impl>
+class BackendApp {
+public:
+    // toe::App factory: open this backend. Returns a negative-carrying Result on
+    // failure (or when the backend is unavailable), so hand::run can fall back.
+    // Defined in the backend TU (where Impl is complete and knows how to open).
+    [[nodiscard]] static toe::Result<BackendApp> open(const toe::WindowConfig &win);
 
-    virtual void swap() = 0;
-    virtual void swap_damaged(toe::DamageRect d) = 0; // partial present; may fall back to swap()
-    [[nodiscard]] virtual toe::PixelSize pixel_size() const = 0;
-    virtual void poll_events(const toe::EventSink &sink) = 0;
-    [[nodiscard]] virtual int event_fd() const = 0;
-    [[nodiscard]] virtual int repeat_fd() const = 0; // -1 if the backend has no repeat timer
-    [[nodiscard]] virtual bool should_close() const = 0;
-    virtual void flush() = 0;
-    virtual void set_title(std::string_view t) = 0;
-    virtual void set_clipboard(std::string_view t) = 0;
-    [[nodiscard]] virtual std::string get_clipboard() = 0;
+    // --- toe::App contract: direct, non-virtual forwards to *impl_ ---------
+    // Inline here but instantiated only inside the backend TU (via toe::run<App>
+    // being called there), where Impl is complete — so no native type leaks and
+    // every call is a plain, inlinable direct call. No vtable, no branch.
+    void swap() { impl_->swap(); }
+    void swap_damaged(toe::DamageRect d) { impl_->swap_damaged(d); }
+    [[nodiscard]] toe::PixelSize pixel_size() const { return impl_->pixel_size(); }
+    void poll_events(const toe::EventSink &sink) { impl_->poll_events(sink); }
+    [[nodiscard]] int event_fd() const { return impl_->event_fd(); }
+    [[nodiscard]] int repeat_fd() const { return impl_->repeat_fd(); }
+    [[nodiscard]] bool should_close() const { return impl_->should_close(); }
+    void flush() { impl_->flush(); }
+    void set_title(std::string_view t) { impl_->set_title(t); }
+    void set_clipboard(std::string_view t) { impl_->set_clipboard(t); }
+    [[nodiscard]] std::string get_clipboard() { return impl_->get_clipboard(); }
+
+    BackendApp(BackendApp &&o) noexcept : impl_(o.impl_) { o.impl_ = nullptr; }
+    BackendApp &operator=(BackendApp &&o) noexcept {
+        if (this != &o) { delete impl_; impl_ = o.impl_; o.impl_ = nullptr; }
+        return *this;
+    }
+    ~BackendApp() { delete impl_; }
+    BackendApp(const BackendApp &) = delete;
+    BackendApp &operator=(const BackendApp &) = delete;
+
+    // Construct from an owned Impl* (used by open() in the backend TU).
+    explicit BackendApp(Impl *impl) noexcept : impl_(impl) {}
+
+private:
+    Impl *impl_ = nullptr; // owned; type complete only in the backend's TU
 };
+
+// The three concrete surface types, forward-declared (defined in their TUs, in
+// hand::platform). Each names a distinct App instantiation.
+namespace platform {
+class WaylandSurface;
+class X11Surface;
+class OffscreenSurface;
+} // namespace platform
+
+using WaylandApp = BackendApp<platform::WaylandSurface>;
+using X11App = BackendApp<platform::X11Surface>;
+using OffscreenApp = BackendApp<platform::OffscreenSurface>;
 
 // Which backend to force, or automatic (environment-driven) selection.
 enum class Backend { automatic, wayland, x11, offscreen };
 
-// THE window. Models toe::App. Opens the right backend and forwards the
-// per-frame contract to it. `open()` is the factory toe::run<hand::App> calls.
-class App {
-public:
-    // toe::App factory. Picks a backend (env-driven unless `force` says
-    // otherwise), opens it, and wraps it. A current GL context is live on
-    // return. Returns a negative-carrying Result on failure.
-    [[nodiscard]] static toe::Result<App> open(const toe::WindowConfig &win,
-                                               Backend force = Backend::automatic);
+// The ONE runtime decision. Picks a backend from the environment (unless forced)
+// and enters that backend's fully-monomorphic `toe::run<...>`. This is the line
+// main writes. Returns the child exit code (or a negative startup-failure code).
+[[nodiscard]] int run(const toe::Config &cfg, const toe::WindowConfig &win = {},
+                      Backend force = Backend::automatic);
 
-    // --- toe::App contract (forwarded to the live backend) -----------------
-    void swap() { backend_->swap(); }
-    void swap_damaged(toe::DamageRect d) { backend_->swap_damaged(d); }
-    [[nodiscard]] toe::PixelSize pixel_size() const { return backend_->pixel_size(); }
-    void poll_events(const toe::EventSink &sink) { backend_->poll_events(sink); }
-    [[nodiscard]] int event_fd() const { return backend_->event_fd(); }
-    [[nodiscard]] int repeat_fd() const { return backend_->repeat_fd(); }
-    [[nodiscard]] bool should_close() const { return backend_->should_close(); }
-    void flush() { backend_->flush(); }
-    void set_title(std::string_view t) { backend_->set_title(t); }
-    void set_clipboard(std::string_view t) { backend_->set_clipboard(t); }
-    [[nodiscard]] std::string get_clipboard() { return backend_->get_clipboard(); }
-
-    App(App &&) noexcept = default;
-    App &operator=(App &&) noexcept = default;
-
-private:
-    explicit App(std::unique_ptr<AppBackend> b) noexcept : backend_(std::move(b)) {}
-    std::unique_ptr<AppBackend> backend_;
-};
-
-// Each backend TU provides its opener; backend.cpp does the env selection.
-// Returns nullptr (not an error) when a backend is simply unavailable, so the
-// selector can fall through to the next; a non-null unique_ptr on success.
-std::unique_ptr<AppBackend> open_wayland(const toe::WindowConfig &win);
-std::unique_ptr<AppBackend> open_x11(const toe::WindowConfig &win);
-std::unique_ptr<AppBackend> open_offscreen(const toe::WindowConfig &win);
+// Per-backend entries, each defined in its own TU where it instantiates
+// `toe::run<ThatApp>` — the fully-monomorphic loop for that backend. hand::run
+// dispatches to one of these after the single runtime choice. Returns the child
+// exit code, or <0 if the window couldn't be opened (so run() can fall back).
+[[nodiscard]] int run_wayland(const toe::Config &cfg, const toe::WindowConfig &win);
+[[nodiscard]] int run_x11(const toe::Config &cfg, const toe::WindowConfig &win);
+[[nodiscard]] int run_offscreen(const toe::Config &cfg, const toe::WindowConfig &win);
 
 } // namespace hand
 

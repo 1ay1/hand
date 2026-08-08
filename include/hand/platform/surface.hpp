@@ -4,7 +4,7 @@
 //
 // The whole host contract now lives in the engine as `toe::App` (toe/app.hpp) —
 // the loop that drives it is `toe::run<App>`. hand's native backends model that
-// contract (via the hand::AppBackend interface + hand::App). This header just
+// contract (via distinct hand::WaylandApp/X11App/OffscreenApp handles). This
 // re-exports the toe value types and windowing-event names into hand::platform,
 // letting the backend translation units keep naming `Event`, `KeyPressed`,
 // `MouseButton`, `PixelSize`, … unqualified as before.

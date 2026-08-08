@@ -10,13 +10,14 @@
 #include "hand/platform/surface.hpp"
 
 #include <cstdio>
+#include <memory>
 
 #include <epoxy/egl.h>
 #include <epoxy/gl.h>
 
 namespace hand::platform {
 
-class OffscreenSurface final : public hand::AppBackend {
+class OffscreenSurface final {
 public:
     static Result<std::unique_ptr<OffscreenSurface>> open(PixelSize size) {
         auto s = std::unique_ptr<OffscreenSurface>(new OffscreenSurface());
@@ -88,20 +89,20 @@ public:
         }
     }
 
-    void swap() override {
+    void swap() {
         if (surf_ != EGL_NO_SURFACE) eglSwapBuffers(dpy_, surf_);
         else glFlush();
     }
-    void swap_damaged(toe::DamageRect) override { swap(); }
-    [[nodiscard]] PixelSize pixel_size() const override { return size_; }
-    void set_title(std::string_view) override {}
-    void set_clipboard(std::string_view) override {}
-    [[nodiscard]] std::string get_clipboard() override { return {}; }
-    void poll_events(const toe::EventSink &) override {}
-    [[nodiscard]] int event_fd() const override { return -1; }
-    [[nodiscard]] int repeat_fd() const override { return -1; }
-    [[nodiscard]] bool should_close() const override { return false; }
-    void flush() override {}
+    void swap_damaged(toe::DamageRect) { swap(); }
+    [[nodiscard]] PixelSize pixel_size() const { return size_; }
+    void set_title(std::string_view) {}
+    void set_clipboard(std::string_view) {}
+    [[nodiscard]] std::string get_clipboard() { return {}; }
+    void poll_events(const toe::EventSink &) {}
+    [[nodiscard]] int event_fd() const { return -1; }
+    [[nodiscard]] int repeat_fd() const { return -1; }
+    [[nodiscard]] bool should_close() const { return false; }
+    void flush() {}
 
 private:
     OffscreenSurface() = default;
@@ -113,17 +114,25 @@ private:
 
 } // namespace hand::platform
 
+#include "toe/run.hpp"
+
 namespace hand {
 
-// toe::App backend opener: open the offscreen surface, return it as an
-// AppBackend (or nullptr on failure — the selector falls through / reports).
-std::unique_ptr<AppBackend> open_offscreen(const toe::WindowConfig &win) {
+// OffscreenApp::open — construct the handle from an opened offscreen surface.
+// Instantiated here where OffscreenSurface is complete.
+template <>
+toe::Result<OffscreenApp> OffscreenApp::open(const toe::WindowConfig &win) {
     auto s = platform::OffscreenSurface::open(win.size);
-    if (!s) {
-        std::fprintf(stderr, "hand: %s\n", s.error().message.c_str());
-        return nullptr;
-    }
-    return std::unique_ptr<AppBackend>(s->release());
+    if (!s) return toe::fail(s.error().message);
+    return OffscreenApp{s->release()};
+}
+
+// The backend entry: enter the fully-monomorphic loop for OffscreenApp. Called
+// by hand::run after it makes the one runtime backend choice. toe::run<> is
+// instantiated HERE, where OffscreenSurface is complete — so its direct calls
+// inline and nothing leaks.
+int run_offscreen(const toe::Config &cfg, const toe::WindowConfig &win) {
+    return toe::run<OffscreenApp>(cfg, win);
 }
 
 } // namespace hand
