@@ -116,6 +116,10 @@ private:
             report(gvte::Session::MouseEvent::motion, e.button_down ? 0 : 3, col, vrow, {});
         } else if (e.button_down) {
             s_.select_extend(vrow, col);
+        } else {
+            // Idle pointer motion: track the OSC 8 link under it for hover
+            // highlighting. The Session bumps damage when the link changes.
+            s_.set_hover(vrow, col);
         }
     }
 
