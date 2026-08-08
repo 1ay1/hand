@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.0-or-later
 //
 // hand — a terminal, a pun on foot. A native (Wayland/X11) keyboard-driven
-// terminal on libgvte with no GTK, no VTE, no SDL: the window comes from
-// gvte::platform, the terminal from gvte::Terminal. Configuration is a .vibe
+// terminal on libtoe with no GTK, no VTE, no SDL: the window comes from
+// toe::platform, the terminal from toe::Terminal. Configuration is a .vibe
 // file (the VIBE config format).
 
 #include <cstdint>
@@ -17,9 +17,9 @@
 #include <poll.h>
 #include <chrono>
 
-#include "gvte/gfx/render_target.hpp"
-#include "gvte/platform/backend.hpp"
-#include "gvte/terminal.hpp"
+#include "toe/gfx/render_target.hpp"
+#include "toe/platform/backend.hpp"
+#include "toe/terminal.hpp"
 
 #include "event_router.hpp"
 
@@ -28,14 +28,14 @@
 namespace {
 
 // Parse "#rrggbb" into an Rgb.
-std::optional<gvte::Rgb> parse_color(const char *s) {
+std::optional<toe::Rgb> parse_color(const char *s) {
     if (!s) return std::nullopt;
     const std::string str{s};
     if (str.size() == 7 && str[0] == '#') {
         auto hex = [&](int i) {
             return std::stoi(str.substr(static_cast<size_t>(i), 2), nullptr, 16);
         };
-        return gvte::rgb(static_cast<uint8_t>(hex(1)), static_cast<uint8_t>(hex(3)),
+        return toe::rgb(static_cast<uint8_t>(hex(1)), static_cast<uint8_t>(hex(3)),
                          static_cast<uint8_t>(hex(5)));
     }
     return std::nullopt;
@@ -55,7 +55,7 @@ std::string find_config(int argc, char **argv) {
     return cfg_dir + "/hand/config.vibe";
 }
 
-// Read the .vibe config into a gvte::Config. Unknown or missing keys keep the
+// Read the .vibe config into a toe::Config. Unknown or missing keys keep the
 // defaults; a parse error is reported but non-fatal (we fall back to defaults).
 //
 // Expected shape:
@@ -68,8 +68,8 @@ std::string find_config(int argc, char **argv) {
 //         foreground "#dcdccc"
 //         background "#171720"
 //     }
-gvte::Config load_config(int argc, char **argv) {
-    gvte::Config cfg;
+toe::Config load_config(int argc, char **argv) {
+    toe::Config cfg;
     const std::string path = find_config(argc, argv);
     if (path.empty()) return cfg;
 
@@ -112,17 +112,17 @@ gvte::Config load_config(int argc, char **argv) {
 } // namespace
 
 int main(int argc, char **argv) {
-    gvte::Config cfg = load_config(argc, argv);
+    toe::Config cfg = load_config(argc, argv);
 
-    auto surface = gvte::platform::open_surface("hand", gvte::PixelSize{800, 500});
+    auto surface = toe::platform::open_surface("hand", toe::PixelSize{800, 500});
     if (!surface) {
         std::fprintf(stderr, "hand: %s\n", surface.error().message.c_str());
         return 1;
     }
-    gvte::platform::AnySurface &surf = *surface;
-    gvte::PixelSize px = surf.pixel_size();
+    toe::platform::AnySurface &surf = *surface;
+    toe::PixelSize px = surf.pixel_size();
 
-    auto term = gvte::Terminal::create(cfg, px);
+    auto term = toe::Terminal::create(cfg, px);
     if (!term) {
         std::fprintf(stderr, "hand: %s\n", term.error().message.c_str());
         return 1;
@@ -135,11 +135,11 @@ int main(int argc, char **argv) {
     bool last_cursor_on = true;
     bool last_blink_on = true;
     while (running && !surf.should_close()) {
-        gvte::Terminal::Poll p = term->poll();
+        toe::Terminal::Poll p = term->poll();
         if (p.exited) {
             return p.exited->code;
         }
-        gvte::Session &session = *p.running;
+        toe::Session &session = *p.running;
 
         // Reflect the terminal's OSC 0/2 title onto the window when it changes.
         if (std::string t = session.window_title(); t != last_title) {
@@ -156,7 +156,7 @@ int main(int argc, char **argv) {
         // reports whether any of them handed bytes to the child so we can
         // coalesce the echo into this frame (below).
         hand::EventRouter router{session, surf, px, running};
-        surf.poll_events([&](const gvte::platform::Event &ev) { std::visit(router, ev); });
+        surf.poll_events([&](const toe::platform::Event &ev) { std::visit(router, ev); });
         const bool wrote_input = router.take_wrote_input();
 
         // Zero-latency local echo: if we just handed the child input, push it
@@ -196,7 +196,7 @@ int main(int argc, char **argv) {
             last_blink_on = blink_on;
             need_render = false;
             glViewport(0, 0, px.w, px.h);
-            auto rc = gvte::gfx::RenderContext::adopt_current();
+            auto rc = toe::gfx::RenderContext::adopt_current();
             session.render(rc, px, cursor_on, blink_on);
             surf.swap();
         }

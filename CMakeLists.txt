@@ -13,23 +13,23 @@ include(FetchContent)
 # exists (local development), otherwise fetched from GitHub. Override a source
 # with -D<DEP>_DIR=/path or a ref with -D<DEP>_TAG=<git-ref>.
 
-# libgvte — the terminal library hand is a thin frontend over.
-set(GVTE_TAG "main" CACHE STRING "gvte git ref to fetch when no sibling exists")
-if(NOT DEFINED GVTE_DIR AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../gvte/CMakeLists.txt")
-  set(GVTE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../gvte")
+# libtoe — the terminal library hand is a thin frontend over.
+set(TOE_TAG "main" CACHE STRING "toe git ref to fetch when no sibling exists")
+if(NOT DEFINED TOE_DIR AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../toe/CMakeLists.txt")
+  set(TOE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../toe")
 endif()
-if(DEFINED GVTE_DIR)
-  message(STATUS "hand: using libgvte from ${GVTE_DIR}")
-  set(GVTE_BUILD_PLATFORM ON  CACHE BOOL "" FORCE)  # hand uses the Linux backends
-  set(GVTE_BUILD_DEMO     OFF CACHE BOOL "" FORCE)
-  set(GVTE_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
-  add_subdirectory("${GVTE_DIR}" "${CMAKE_BINARY_DIR}/gvte")
+if(DEFINED TOE_DIR)
+  message(STATUS "hand: using libtoe from ${TOE_DIR}")
+  set(TOE_BUILD_PLATFORM ON  CACHE BOOL "" FORCE)  # hand uses the Linux backends
+  set(TOE_BUILD_DEMO     OFF CACHE BOOL "" FORCE)
+  set(TOE_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
+  add_subdirectory("${TOE_DIR}" "${CMAKE_BINARY_DIR}/toe")
 else()
-  message(STATUS "hand: fetching libgvte (${GVTE_TAG}) from github.com/1ay1/gvte")
-  FetchContent_Declare(gvte
-    GIT_REPOSITORY https://github.com/1ay1/gvte.git
-    GIT_TAG        ${GVTE_TAG})
-  FetchContent_MakeAvailable(gvte)
+  message(STATUS "hand: fetching libtoe (${TOE_TAG}) from github.com/1ay1/toe")
+  FetchContent_Declare(toe
+    GIT_REPOSITORY https://github.com/1ay1/toe.git
+    GIT_TAG        ${TOE_TAG})
+  FetchContent_MakeAvailable(toe)
 endif()
 
 # vibe — the config format parser (header-only, stb-style; no CMake upstream, so
@@ -57,5 +57,5 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(EPOXY REQUIRED IMPORTED_TARGET epoxy)
 
 add_executable(hand main.cpp)
-target_link_libraries(hand PRIVATE gvte::core gvte::platform vibe PkgConfig::EPOXY)
+target_link_libraries(hand PRIVATE toe::core toe::platform vibe PkgConfig::EPOXY)
 target_compile_options(hand PRIVATE -Wall -Wextra -Wpedantic)

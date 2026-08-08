@@ -6,10 +6,10 @@
 `hand` is a native, keyboard-driven terminal emulator with **no GTK, no VTE, and
 no SDL** — just a bare Wayland or X11 surface (EGL) and a from-scratch GPU
 terminal engine underneath. It is a thin, well-mannered frontend over
-[`libgvte`](../gvte): `hand` opens the window, reads your config, and gets out of
-the way. `gvte` does the actual terminal-ing.
+[`libtoe`](../toe): `hand` opens the window, reads your config, and gets out of
+the way. `toe` does the actual terminal-ing.
 
-Think of it as the appendage on the end of the arm that is `gvte`. Foot has toes;
+Think of it as the appendage on the end of the arm that is `toe`. Foot has toes;
 hand has fingers; we didn't overthink the anatomy.
 
 ## Why does this exist?
@@ -31,7 +31,7 @@ cmake --build build -j     # the -j is not optional if you value your afternoon
 ./build/hand
 ```
 
-The build pulls in `libgvte` from the sibling `../gvte` directory if it's there,
+The build pulls in `libtoe` from the sibling `../toe` directory if it's there,
 and downloads it from GitHub if it isn't. Same deal for the config parser. It's
 polite like that — checks the neighborhood before ordering online.
 
@@ -94,12 +94,12 @@ three genuinely clever bits:
   are honored, and **inline-image animations** (kitty `a=f`) tick along at their
   intended framerate.
 
-The window comes from `gvte::platform`, the terminal from `gvte::Terminal`, the
+The window comes from `toe::platform`, the terminal from `toe::Terminal`, the
 config from `vibe.h`. `hand` is the glue, and it's proud of being just glue.
 
 ## Dependencies
 
-Whatever `libgvte` needs, which is: a C++23 compiler, CMake, EGL, Wayland
+Whatever `libtoe` needs, which is: a C++23 compiler, CMake, EGL, Wayland
 (`wayland-client`/`egl`, `xkbcommon`), X11 (`x11`, `xcb`, `xkbcommon-x11`),
 FreeType, HarfBuzz, Fontconfig, and `epoxy`.
 
@@ -115,7 +115,7 @@ lives under `../`:
 | Repo | Role |
 |------|------|
 | [`hand`](.) | **this** — the app: window, config, wiring (you are here) |
-| [`gvte`](../gvte) | the engine: PTY, VT parser, grid, GPU renderer — pure Elm-style core |
+| [`toe`](../toe) | the engine: PTY, VT parser, grid, GPU renderer — pure Elm-style core |
 | [`vibe`](../vibe) | the config format `hand` reads (`config.vibe`) |
 
 ## License

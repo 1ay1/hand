@@ -20,19 +20,19 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include "gvte/platform/surface.hpp"
-#include "gvte/terminal.hpp"
+#include "toe/platform/surface.hpp"
+#include "toe/terminal.hpp"
 
 namespace hand {
 
-namespace pf = gvte::platform;
+namespace pf = toe::platform;
 
 // Routes translated window events into Session actions. One instance is reused
 // across the whole session; `drained()` reports (and resets) whether this batch
 // handed bytes to the child, so the host can coalesce the echo into one frame.
 class EventRouter {
 public:
-    EventRouter(gvte::Session &session, pf::AnySurface &surface, gvte::PixelSize &px, bool &running)
+    EventRouter(toe::Session &session, pf::AnySurface &surface, toe::PixelSize &px, bool &running)
         : s_(session), surf_(surface), px_(px), running_(running) {}
 
     // The visitor entry point: `std::visit(router, event)`.
@@ -52,39 +52,39 @@ private:
         px_ = e.size;
         // TEA: a resize is a Msg; update() reflows the grid and returns a
         // ResizePty Cmd that run() applies.
-        s_.run(s_.update(gvte::Resized{px_}));
+        s_.run(s_.update(toe::Resized{px_}));
     }
 
     // --- keyboard ----------------------------------------------------------
     void handle(const pf::KeyPressed &e) {
         // Shift+PageUp/Down scroll the scrollback on the primary screen; on the
         // alt screen they go to the app (which owns its own paging).
-        if (const auto *sk = std::get_if<gvte::SpecialKey>(&e.key.key);
+        if (const auto *sk = std::get_if<toe::SpecialKey>(&e.key.key);
             sk && e.key.mods.shift &&
-            (*sk == gvte::SpecialKey::PageUp || *sk == gvte::SpecialKey::PageDown)) {
+            (*sk == toe::SpecialKey::PageUp || *sk == toe::SpecialKey::PageDown)) {
             if (!s_.on_alt_screen()) {
                 const int page = s_.grid_size().rows - 1;
-                s_.scroll(*sk == gvte::SpecialKey::PageUp ? page : -page);
+                s_.scroll(*sk == toe::SpecialKey::PageUp ? page : -page);
                 return;
             }
         }
 
         // Clipboard shortcuts intercept before the key reaches the child.
-        if (const auto *txt = std::get_if<gvte::TextInput>(&e.key.key);
+        if (const auto *txt = std::get_if<toe::TextInput>(&e.key.key);
             txt && e.key.mods.ctrl && e.key.mods.shift) {
             if (txt->utf8 == "v" || txt->utf8 == "V") return paste_clipboard();
             if (txt->utf8 == "c" || txt->utf8 == "C") return copy_selection();
         }
 
         // Everything else is child input: encode + write via the TEA pipeline.
-        send_to_child(gvte::Key{e.key});
+        send_to_child(toe::Key{e.key});
     }
 
     void handle(const pf::TextEntered &e) {
         // Ordinary typed/composed text — a Key (never bracketed-paste).
-        gvte::KeyEvent k;
-        k.key = gvte::TextInput{std::string{e.utf8}};
-        send_to_child(gvte::Key{std::move(k)});
+        toe::KeyEvent k;
+        k.key = toe::TextInput{std::string{e.utf8}};
+        send_to_child(toe::Key{std::move(k)});
     }
 
     // --- pointer -----------------------------------------------------------
@@ -99,7 +99,7 @@ private:
             }
         }
         if (app_owns_mouse(e.mods.shift)) {
-            report(gvte::Session::MouseEvent::press, button_code(e.button), col, vrow, e.mods);
+            report(toe::Session::MouseEvent::press, button_code(e.button), col, vrow, e.mods);
         } else if (e.button == pf::MouseButton::left) {
             if (e.click_count >= 3) s_.select_line(vrow, col);
             else if (e.click_count == 2) s_.select_word(vrow, col);
@@ -113,7 +113,7 @@ private:
         const auto [col, vrow] = cell_of(e.x, e.y);
         if (s_.wants_mouse() &&
             (s_.wants_mouse_motion() || (e.button_down && s_.wants_mouse_drag()))) {
-            report(gvte::Session::MouseEvent::motion, e.button_down ? 0 : 3, col, vrow, {});
+            report(toe::Session::MouseEvent::motion, e.button_down ? 0 : 3, col, vrow, {});
         } else if (e.button_down) {
             s_.select_extend(vrow, col);
         } else {
@@ -126,7 +126,7 @@ private:
     void handle(const pf::MouseUp &e) {
         const auto [col, vrow] = cell_of(e.x, e.y);
         if (app_owns_mouse(e.mods.shift)) {
-            report(gvte::Session::MouseEvent::release, button_code(e.button), col, vrow, e.mods);
+            report(toe::Session::MouseEvent::release, button_code(e.button), col, vrow, e.mods);
         } else if (e.button == pf::MouseButton::left && s_.has_selection()) {
             // Copy on release so a plain drag-select fills the clipboard.
             if (std::string sel = s_.selected_text(); !sel.empty()) surf_.set_clipboard(sel);
@@ -138,7 +138,7 @@ private:
         if (s_.wants_mouse()) {
             // Wheel maps to buttons 64 (up) / 65 (down) in X10/SGR mouse.
             for (int i = 0; i < std::abs(e.dy); ++i)
-                report(gvte::Session::MouseEvent::press, e.dy > 0 ? 64 : 65, col, vrow, {});
+                report(toe::Session::MouseEvent::press, e.dy > 0 ? 64 : 65, col, vrow, {});
         } else if (!s_.on_alt_screen()) {
             s_.scroll(e.dy * 3); // 3 lines per notch
         }
@@ -168,19 +168,19 @@ private:
         }
     }
 
-    void report(gvte::Session::MouseEvent kind, int btn, int col, int vrow,
-                gvte::Modifiers m) {
+    void report(toe::Session::MouseEvent kind, int btn, int col, int vrow,
+                toe::Modifiers m) {
         s_.report_mouse(kind, btn, col, vrow, m.shift, m.alt, m.ctrl);
     }
 
-    void send_to_child(gvte::Msg &&m) {
+    void send_to_child(toe::Msg &&m) {
         s_.run(s_.update(m));
         wrote_input_ = true;
     }
 
     void paste_clipboard() {
         if (std::string clip = surf_.get_clipboard(); !clip.empty())
-            send_to_child(gvte::Paste{std::move(clip)});
+            send_to_child(toe::Paste{std::move(clip)});
     }
 
     void copy_selection() {
@@ -207,9 +207,9 @@ private:
         ::_exit(0); // first child exits immediately
     }
 
-    gvte::Session &s_;
+    toe::Session &s_;
     pf::AnySurface &surf_;
-    gvte::PixelSize &px_;
+    toe::PixelSize &px_;
     bool &running_;
     bool wrote_input_ = false;
 };
