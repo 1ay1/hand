@@ -1,16 +1,13 @@
 # hand ✋
 
-> A terminal emulator. It's a pun on [`foot`](https://codeberg.org/dnkl/foot).
-> Get it? Foot… hand. We'll be here all week.
+> A terminal emulator. Successor to [`foot`](https://codeberg.org/dnkl/foot) in
+> the same way your hand is the successor to your foot.
 
 `hand` is a native, keyboard-driven terminal emulator with **no GTK, no VTE, and
 no SDL** — just a bare Wayland or X11 surface (EGL) and a from-scratch GPU
 terminal engine underneath. It is a thin, well-mannered frontend over
 [`libtoe`](../toe): `hand` opens the window, reads your config, and gets out of
 the way. `toe` does the actual terminal-ing.
-
-Think of it as the appendage on the end of the arm that is `toe`. Foot has toes;
-hand has fingers; we didn't overthink the anatomy.
 
 ## Why does this exist?
 
@@ -132,9 +129,8 @@ lives under `../`:
 
 ## License
 
-LGPL-2.0-or-later. Use it, ship it, fork it, give it a better pun.
+LGPL-2.0-or-later. Use it, ship it, fork it.
 
 ---
 
-*Runs vim. Runs tmux. Runs htop. Runs the risk of being the only terminal named
-after a body part you can high-five with.* ✋
+*Runs vim. Runs tmux. Runs htop. Applauds when you're done.* ✋
