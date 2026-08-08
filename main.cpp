@@ -129,7 +129,9 @@ int main(int argc, char **argv) {
         if (child_gone || drawn != key) {
             glViewport(0, 0, px.w, px.h);
             auto rc = toe::gfx::RenderContext::adopt_current();
-            session.render(rc, px, key.blink.cursor_on, key.blink.text_on);
+            // Honor DECSCUSR: a steady cursor ignores the blink phase.
+            const bool cursor_on = key.blink.cursor_on || !session.cursor_blinks();
+            session.render(rc, px, cursor_on, key.blink.text_on);
             surf.swap();
             drawn = key;
         }
