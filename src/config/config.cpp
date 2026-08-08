@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.0-or-later
 
-#include "config.hpp"
+#include "hand/config/config.hpp"
 
 #include <cstdio>
 #include <cstdlib>

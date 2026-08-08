@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: LGPL-2.0-or-later
 //
-// EventRouter — the frontend's input policy, expressed as an exhaustive visitor
-// over the platform's closed Event sum type.
+// EventRouter<S> — the frontend's input policy, expressed as an exhaustive
+// visitor over the platform's closed Event sum type, MONOMORPHIC over the
+// concrete surface type S.
 //
-// Instead of a 150-line `std::visit` lambda welded into the frame pump, each
-// event kind is a small, named `operator()` overload. `std::visit(router, ev)`
-// dispatches at compile time — no `if constexpr` ladder, no `std::function`,
-// no per-keystroke heap churn. The loop keeps the *mechanics* (poll, drain,
-// render, swap); the router owns the *meaning* (what a keypress or click does).
+// Each event kind is a small, named `operator()` overload. `std::visit(router,
+// ev)` dispatches at compile time — no `if constexpr` ladder, no std::function,
+// no per-keystroke heap churn. Because the surface is a template parameter (not
+// a type-erased AnySurface), every surface call — clipboard, title — inlines;
+// optional refinements resolve through the `platform::` free-function shims,
+// which `if constexpr` away on backends that don't provide them.
 
-#ifndef HAND_EVENT_ROUTER_HPP
-#define HAND_EVENT_ROUTER_HPP
+#ifndef HAND_APP_EVENT_ROUTER_HPP
+#define HAND_APP_EVENT_ROUTER_HPP
 
 #include <algorithm>
 #include <string>
@@ -20,19 +22,21 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include "toe/platform/surface.hpp"
+#include "hand/platform/surface.hpp"
 #include "toe/terminal.hpp"
 
 namespace hand {
 
-namespace pf = toe::platform;
+namespace pf = hand::platform;
 
 // Routes translated window events into Session actions. One instance is reused
-// across the whole session; `drained()` reports (and resets) whether this batch
-// handed bytes to the child, so the host can coalesce the echo into one frame.
+// across the whole session; `take_wrote_input()` reports (and resets) whether
+// this batch handed bytes to the child, so the host can coalesce the echo into
+// one frame. Templated on the concrete surface so nothing goes through a vtable.
+template <pf::Surface S>
 class EventRouter {
 public:
-    EventRouter(toe::Session &session, pf::AnySurface &surface, toe::PixelSize &px, bool &running)
+    EventRouter(toe::Session &session, S &surface, toe::PixelSize &px, bool &running)
         : s_(session), surf_(surface), px_(px), running_(running) {}
 
     // The visitor entry point: `std::visit(router, event)`.
@@ -145,7 +149,7 @@ private:
             report(toe::Session::MouseEvent::release, button_code(e.button), col, vrow, e.mods);
         } else if (e.button == pf::MouseButton::left && s_.has_selection()) {
             // Copy on release so a plain drag-select fills the clipboard.
-            if (std::string sel = s_.selected_text(); !sel.empty()) surf_.set_clipboard(sel);
+            if (std::string sel = s_.selected_text(); !sel.empty()) set_clipboard(sel);
         }
     }
 
@@ -184,8 +188,7 @@ private:
         }
     }
 
-    void report(toe::Session::MouseEvent kind, int btn, int col, int vrow,
-                toe::Modifiers m) {
+    void report(toe::Session::MouseEvent kind, int btn, int col, int vrow, toe::Modifiers m) {
         s_.report_mouse(kind, btn, col, vrow, m.shift, m.alt, m.ctrl);
     }
 
@@ -194,14 +197,19 @@ private:
         wrote_input_ = true;
     }
 
+    // Clipboard through the platform:: shims: these `if constexpr` to a no-op /
+    // empty string on a surface that doesn't model the clipboard refinement.
+    void set_clipboard(std::string_view t) { pf::clipboard_set(surf_, t); }
+    [[nodiscard]] std::string get_clipboard() { return pf::clipboard_get(surf_); }
+
     void paste_clipboard() {
-        if (std::string clip = surf_.get_clipboard(); !clip.empty())
+        if (std::string clip = get_clipboard(); !clip.empty())
             send_to_child(toe::Paste{std::move(clip)});
     }
 
     void copy_selection() {
         if (!s_.has_selection()) return;
-        if (std::string sel = s_.selected_text(); !sel.empty()) surf_.set_clipboard(sel);
+        if (std::string sel = s_.selected_text(); !sel.empty()) set_clipboard(sel);
     }
 
     // Launch the desktop URL handler for an OSC 8 link. fork/exec (never
@@ -224,7 +232,7 @@ private:
     }
 
     toe::Session &s_;
-    pf::AnySurface &surf_;
+    S &surf_;
     toe::PixelSize &px_;
     bool &running_;
     bool wrote_input_ = false;
@@ -232,4 +240,4 @@ private:
 
 } // namespace hand
 
-#endif // HAND_EVENT_ROUTER_HPP
+#endif // HAND_APP_EVENT_ROUTER_HPP
