@@ -85,15 +85,17 @@ private:
 namespace platform {
 class WaylandSurface;
 class X11Surface;
+class CocoaSurface;
 class OffscreenSurface;
 } // namespace platform
 
 using WaylandApp = BackendApp<platform::WaylandSurface>;
 using X11App = BackendApp<platform::X11Surface>;
+using CocoaApp = BackendApp<platform::CocoaSurface>;
 using OffscreenApp = BackendApp<platform::OffscreenSurface>;
 
 // Which backend to force, or automatic (environment-driven) selection.
-enum class Backend { automatic, wayland, x11, offscreen };
+enum class Backend { automatic, wayland, x11, cocoa, offscreen };
 
 // The ONE runtime decision. Picks a backend from the environment (unless forced)
 // and enters that backend's fully-monomorphic `toe::run<...>`. This is the line
@@ -107,6 +109,7 @@ enum class Backend { automatic, wayland, x11, offscreen };
 // exit code, or <0 if the window couldn't be opened (so run() can fall back).
 [[nodiscard]] int run_wayland(const toe::Config &cfg, const toe::WindowConfig &win);
 [[nodiscard]] int run_x11(const toe::Config &cfg, const toe::WindowConfig &win);
+[[nodiscard]] int run_cocoa(const toe::Config &cfg, const toe::WindowConfig &win);
 [[nodiscard]] int run_offscreen(const toe::Config &cfg, const toe::WindowConfig &win);
 
 } // namespace hand

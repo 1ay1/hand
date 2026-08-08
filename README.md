@@ -4,10 +4,11 @@
 > the same way your hand is the successor to your foot.
 
 `hand` is a native, keyboard-driven terminal emulator with **no GTK, no VTE, and
-no SDL** — just a bare Wayland or X11 surface (EGL) and a from-scratch GPU
-terminal engine underneath. It is a thin, well-mannered frontend over
-[`libtoe`](../toe): `hand` opens the window, reads your config, and gets out of
-the way. `toe` does the actual terminal-ing.
+no SDL** — just a bare Wayland or X11 surface (EGL) on Linux, a Cocoa +
+NSOpenGL window on **macOS**, and a from-scratch GPU terminal engine underneath.
+It is a thin, well-mannered frontend over [`libtoe`](../toe): `hand` opens the
+window, spawns the child shell, reads your config, and gets out of the way.
+`toe` does the actual terminal-ing.
 
 ## Why does this exist?
 
@@ -26,6 +27,16 @@ render `ls`. No mystery `VTE` version pinning. Just pixels, a PTY, and vibes
 cmake -S . -B build
 cmake --build build -j     # the -j is not optional if you value your afternoon
 ./build/hand
+```
+
+On **Linux** the build needs Wayland/X11/EGL/xkbcommon dev packages; on **macOS**
+it needs only Homebrew's `libepoxy` + `libpng` (the Cocoa/OpenGL frameworks ship
+with the OS) — CMake picks the Cocoa backend automatically via `if(APPLE)`. Point
+pkg-config at Homebrew if needed:
+
+```sh
+PKG_CONFIG_PATH="$(brew --prefix)/lib/pkgconfig:$(brew --prefix libpng)/lib/pkgconfig" \
+  cmake -S . -B build && cmake --build build -j && ./build/hand
 ```
 
 The build pulls in `libtoe` from the sibling `../toe` directory if it's there,

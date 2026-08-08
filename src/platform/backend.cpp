@@ -13,7 +13,12 @@
 // next, so a headless box still lands on offscreen.
 
 #include "hand/app.hpp"
+#include "hand/platform/posix_pty.hpp"
+#if defined(__APPLE__)
+#include "hand/platform/fonts.hpp"
+#endif
 
+#include <cstdio>
 #include <cstdlib>
 
 namespace hand {
@@ -24,15 +29,44 @@ namespace {
 [[nodiscard]] Backend choose(Backend force) {
     if (force != Backend::automatic) return force;
     if (const char *h = std::getenv("TOE_HEADLESS"); h && *h) return Backend::offscreen;
+#if defined(__APPLE__)
+    // macOS has exactly one native window system.
+    return Backend::cocoa;
+#else
     if (const char *wl = std::getenv("WAYLAND_DISPLAY"); wl && *wl) return Backend::wayland;
     if (const char *x = std::getenv("DISPLAY"); x && *x) return Backend::x11;
     return Backend::offscreen;
+#endif
 }
 
 } // namespace
 
-int run(const toe::Config &cfg, const toe::WindowConfig &win, Backend force) {
+int run(const toe::Config &cfg_in, const toe::WindowConfig &win, Backend force) {
+    // Process creation is the HOST's job: forkpty the child here and hand toe an
+    // adopt-able master fd. The engine never forks (see posix_pty.hpp).
+    toe::Config cfg = cfg_in;
+    auto fd = spawn_pty(SpawnCommand{});
+    if (!fd) {
+        std::fprintf(stderr, "hand: %s\n", fd.error().message.c_str());
+        return 1;
+    }
+    cfg.source = *fd;
+
+#if defined(__APPLE__)
+    // Font discovery is host policy: resolve a concrete macOS face and hand it
+    // to toe via font_file, so the engine needs no macOS font-path branch.
+    if (cfg.font_file.empty()) {
+        std::string f = resolve_font_file(cfg.font_family);
+        if (!f.empty()) cfg.font_file = std::move(f);
+    }
+#endif
+
     switch (choose(force)) {
+#if defined(__APPLE__)
+    case Backend::cocoa:
+    default:
+        return run_cocoa(cfg, win);
+#else
     case Backend::wayland: {
         const int rc = run_wayland(cfg, win);
         if (rc >= 0) return rc; // else fall back
@@ -46,6 +80,7 @@ int run(const toe::Config &cfg, const toe::WindowConfig &win, Backend force) {
     case Backend::offscreen:
     default:
         return run_offscreen(cfg, win);
+#endif
     }
 }
 
