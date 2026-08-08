@@ -60,6 +60,9 @@ public:
     void set_title(std::string_view t) { impl_->set_title(t); }
     void set_clipboard(std::string_view t) { impl_->set_clipboard(t); }
     [[nodiscard]] std::string get_clipboard() { return impl_->get_clipboard(); }
+    [[nodiscard]] toe::Readiness wait_readable(int pty_fd, toe::WaitDeadline d) {
+        return impl_->wait_readable(pty_fd, d);
+    }
 
     BackendApp(BackendApp &&o) noexcept : impl_(o.impl_) { o.impl_ = nullptr; }
     BackendApp &operator=(BackendApp &&o) noexcept {

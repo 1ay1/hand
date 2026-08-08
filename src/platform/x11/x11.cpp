@@ -8,6 +8,7 @@
 
 #include "hand/app.hpp"
 #include "hand/platform/surface.hpp"
+#include "hand/reactor.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -52,9 +53,13 @@ public:
     [[nodiscard]] std::string get_clipboard();
     void poll_events(const toe::EventSink &sink);
     [[nodiscard]] bool should_close() const { return closed_; }
+    [[nodiscard]] toe::Readiness wait_readable(int pty_fd, toe::WaitDeadline d) {
+        return wait_.wait(pty_fd, d);
+    }
 
 private:
     X11Surface() = default;
+    hand::TerminalWait wait_{}; // window fd set in init() once xcb_ is connected
     Result<void> init(std::string_view title, PixelSize initial);
     Result<void> init_egl();
     Result<void> create_egl_surface();
@@ -191,6 +196,8 @@ Result<void> X11Surface::init(std::string_view title, PixelSize initial) {
     if (auto r = init_xkb(); !r) {
         return r;
     }
+    // The reactor can now poll the XCB connection fd (X11 has no repeat timer).
+    wait_.set_fds(xcb_get_file_descriptor(xcb_), -1);
     return {};
 }
 

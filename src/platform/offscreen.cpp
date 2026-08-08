@@ -8,6 +8,7 @@
 
 #include "hand/app.hpp"
 #include "hand/platform/surface.hpp"
+#include "hand/reactor.hpp"
 
 #include <cstdio>
 #include <memory>
@@ -103,9 +104,13 @@ public:
     [[nodiscard]] int repeat_fd() const { return -1; }
     [[nodiscard]] bool should_close() const { return false; }
     void flush() {}
+    [[nodiscard]] toe::Readiness wait_readable(int pty_fd, toe::WaitDeadline d) {
+        return wait_.wait(pty_fd, d); // no window/repeat fd on the headless backend
+    }
 
 private:
     OffscreenSurface() = default;
+    hand::TerminalWait wait_{}; // headless: no window/repeat fds, only the PTY
     PixelSize size_{};
     EGLDisplay dpy_ = EGL_NO_DISPLAY;
     EGLContext ctx_ = EGL_NO_CONTEXT;

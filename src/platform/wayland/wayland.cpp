@@ -7,6 +7,7 @@
 
 #include "hand/app.hpp"
 #include "hand/platform/surface.hpp"
+#include "hand/reactor.hpp"
 
 #include <algorithm>
 #include <cerrno>
@@ -61,6 +62,9 @@ public:
     [[nodiscard]] std::string get_clipboard();
     void poll_events(const toe::EventSink &sink);
     [[nodiscard]] bool should_close() const { return closed_; }
+    [[nodiscard]] toe::Readiness wait_readable(int pty_fd, toe::WaitDeadline d) {
+        return wait_.wait(pty_fd, d);
+    }
 
     // --- native listener callbacks (public so the C listener tables at
     // namespace scope can take their addresses) ---
@@ -148,6 +152,7 @@ public:
 
 private:
     WaylandSurface() = default;
+    hand::TerminalWait wait_{}; // window + repeat fds set in init()
     Result<void> init(std::string_view title, PixelSize initial);
     Result<void> init_egl();
 
@@ -613,6 +618,8 @@ Result<void> WaylandSurface::init(std::string_view title, PixelSize initial) {
     if (auto r = init_egl(); !r) {
         return r;
     }
+    // The reactor can now poll the Wayland display fd + the key-repeat timerfd.
+    wait_.set_fds(wl_display_get_fd(display_), repeat_fd_);
     return {};
 }
 
