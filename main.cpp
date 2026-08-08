@@ -132,6 +132,7 @@ int main(int argc, char **argv) {
     std::uint64_t last_gen = 0;
     bool need_render = true; // draw the first frame
     bool last_cursor_on = true;
+    bool last_blink_on = true;
     while (running && !surf.should_close()) {
         gvte::Terminal::Poll p = term->poll();
         if (p.exited) {
@@ -182,13 +183,17 @@ int main(int argc, char **argv) {
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                             now.time_since_epoch()).count();
         const bool cursor_on = (ms / 530) % 2 == 0;
+        // Text blink (SGR 5) toggles on a slower ~750ms phase, per VT tradition.
+        const bool blink_on = (ms / 750) % 2 == 0;
         if (const std::uint64_t g = session.generation();
-            g != last_gen || cursor_on != last_cursor_on || need_render) {
+            g != last_gen || cursor_on != last_cursor_on || blink_on != last_blink_on ||
+            need_render) {
             last_gen = g;
             last_cursor_on = cursor_on;
+            last_blink_on = blink_on;
             need_render = false;
             glViewport(0, 0, px.w, px.h);
-            session.render(px, cursor_on);
+            session.render(px, cursor_on, blink_on);
             surf.swap();
         }
 
