@@ -56,6 +56,6 @@ target_include_directories(vibe PUBLIC "${vibe_SOURCE_DIR}")
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(EPOXY REQUIRED IMPORTED_TARGET epoxy)
 
-add_executable(hand main.cpp)
+add_executable(hand main.cpp config.cpp)
 target_link_libraries(hand PRIVATE toe::core toe::platform vibe PkgConfig::EPOXY)
 target_compile_options(hand PRIVATE -Wall -Wextra -Wpedantic)

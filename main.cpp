@@ -2,117 +2,69 @@
 //
 // hand — a terminal, a pun on foot. A native (Wayland/X11) keyboard-driven
 // terminal on libtoe with no GTK, no VTE, no SDL: the window comes from
-// toe::platform, the terminal from toe::Terminal. Configuration is a .vibe
-// file (the VIBE config format).
+// toe::platform, the terminal from toe::Terminal, the config from VIBE.
+//
+// This file is deliberately thin. The engine (toe) owns everything from PTY to
+// pixels; input policy lives in EventRouter; config parsing lives in config.*;
+// time/blink and the poll set are their own small value types. What remains
+// here is the *shape of a frame*, expressed as a sequence of named steps.
 
 #include <cstdint>
-#include <cstdio>
-#include <algorithm>
-#include <cstdlib>
 #include <optional>
-#include <sstream>
+#include <span>
 #include <string>
 
 #include <epoxy/gl.h>
-#include <poll.h>
-#include <chrono>
 
 #include "toe/gfx/render_target.hpp"
 #include "toe/platform/backend.hpp"
 #include "toe/terminal.hpp"
 
+#include "blink.hpp"
+#include "config.hpp"
 #include "event_router.hpp"
+#include "poll_set.hpp"
 
-#include "vibe.h"
-
+namespace hand {
 namespace {
 
-// Parse "#rrggbb" into an Rgb.
-std::optional<toe::Rgb> parse_color(const char *s) {
-    if (!s) return std::nullopt;
-    const std::string str{s};
-    if (str.size() == 7 && str[0] == '#') {
-        auto hex = [&](int i) {
-            return std::stoi(str.substr(static_cast<size_t>(i), 2), nullptr, 16);
-        };
-        return toe::rgb(static_cast<uint8_t>(hex(1)), static_cast<uint8_t>(hex(3)),
-                         static_cast<uint8_t>(hex(5)));
-    }
-    return std::nullopt;
-}
+// How long we wait for the child's echo before rendering a keystroke, and the
+// idle cursor-blink cadence. Named so the frame loop reads as intent.
+constexpr int kEchoWaitMs = 3;    // local shells echo in µs; this is a ceiling
+constexpr int kIdlePollMs = 250;  // keeps cursor blink crisp when nothing else wakes us
+constexpr int kMinAnimMs = 16;    // don't spin faster than ~60fps on animations
 
-// Locate the config file: -c/--config, then $XDG_CONFIG_HOME/hand/config.vibe,
-// then ~/.config/hand/config.vibe.
-std::string find_config(int argc, char **argv) {
-    for (int i = 1; i + 1 < argc; ++i) {
-        std::string a = argv[static_cast<size_t>(i)];
-        if (a == "-c" || a == "--config") return argv[static_cast<size_t>(i + 1)];
-    }
-    const char *base = std::getenv("XDG_CONFIG_HOME");
-    const std::string home = std::getenv("HOME") ? std::getenv("HOME") : "";
-    const std::string cfg_dir = base ? std::string{base} : (home + "/.config");
-    if (cfg_dir.empty()) return "";
-    return cfg_dir + "/hand/config.vibe";
-}
+// The render gate: a terminal frame is drawn only when something the user can
+// see has changed. That "something" is fully captured by the damage generation
+// plus the current blink state — so equality of this value across frames means
+// "nothing to redraw". Comparing whole RenderKeys replaces four ad-hoc
+// last_* variables with one total comparison.
+struct RenderKey {
+    std::uint64_t generation{0};
+    BlinkState blink{};
+    constexpr auto operator<=>(const RenderKey &) const = default;
+};
 
-// Read the .vibe config into a toe::Config. Unknown or missing keys keep the
-// defaults; a parse error is reported but non-fatal (we fall back to defaults).
-//
-// Expected shape:
-//
-//     font {
-//         family "Monospace"
-//         size   11              # points; scaled to px at 96 DPI
-//     }
-//     colors {
-//         foreground "#dcdccc"
-//         background "#171720"
-//     }
-toe::Config load_config(int argc, char **argv) {
-    toe::Config cfg;
-    const std::string path = find_config(argc, argv);
-    if (path.empty()) return cfg;
-
-    VibeParser *parser = vibe_parser_new();
-    if (!parser) return cfg;
-    VibeValue *root = vibe_parse_file(parser, path.c_str());
-    if (!root) {
-        VibeError err = vibe_get_last_error(parser);
-        if (err.code != VIBE_OK) {
-            std::fprintf(stderr, "hand: config %s: %s\n", path.c_str(),
-                         vibe_error_code_string(err.code));
-        }
-        vibe_parser_free(parser);
-        return cfg;
+// Compute the poll timeout for an idle wait: the blink cadence, tightened to an
+// inline-image animation's next-frame deadline when one is playing.
+[[nodiscard]] Timeout idle_timeout(const toe::Session &s, Millis now) noexcept {
+    if (const std::uint64_t deadline = s.next_animation_deadline(); deadline != 0) {
+        const std::int64_t wait =
+            static_cast<std::int64_t>(deadline) - static_cast<std::int64_t>(now.value);
+        const int clamped = static_cast<int>(std::clamp<std::int64_t>(wait, kMinAnimMs, kIdlePollMs));
+        return Timeout::millis(clamped);
     }
-
-    if (VibeObject *font = vibe_get_object(root, "font")) {
-        if (VibeValue *fam = vibe_object_get(font, "family")) {
-            cfg.font_family = vibe_value_string_or(fam, cfg.font_family.c_str());
-        }
-        if (VibeValue *sz = vibe_object_get(font, "size")) {
-            const int64_t pt = vibe_value_int_or(sz, 0);
-            if (pt > 0) cfg.font_pixel_size = static_cast<int>(pt * 4 / 3); // pt -> px @96dpi
-        }
-    }
-    if (VibeObject *colors = vibe_get_object(root, "colors")) {
-        if (VibeValue *fg = vibe_object_get(colors, "foreground")) {
-            if (auto c = parse_color(vibe_value_string_or(fg, nullptr))) cfg.default_fg = *c;
-        }
-        if (VibeValue *bg = vibe_object_get(colors, "background")) {
-            if (auto c = parse_color(vibe_value_string_or(bg, nullptr))) cfg.default_bg = *c;
-        }
-    }
-
-    vibe_value_free(root);
-    vibe_parser_free(parser);
-    return cfg;
+    return Timeout::millis(kIdlePollMs);
 }
 
 } // namespace
+} // namespace hand
 
 int main(int argc, char **argv) {
-    toe::Config cfg = load_config(argc, argv);
+    using namespace hand;
+    const std::span<char *> args{argv, static_cast<std::size_t>(argc)};
+
+    const toe::Config cfg = load_config(args);
 
     auto surface = toe::platform::open_surface("hand", toe::PixelSize{800, 500});
     if (!surface) {
@@ -130,111 +82,70 @@ int main(int argc, char **argv) {
 
     bool running = true;
     std::string last_title;
-    std::uint64_t last_gen = 0;
-    bool need_render = true; // draw the first frame
-    bool last_cursor_on = true;
-    bool last_blink_on = true;
+    std::optional<RenderKey> drawn; // the key of the last rendered frame, if any
+
     while (running && !surf.should_close()) {
-        toe::Terminal::Poll p = term->poll();
-        if (p.exited) {
-            return p.exited->code;
-        }
+        // The lifecycle's only transition: Running -> (Running | Exited). A dead
+        // terminal has no Session, so there is nothing to render or type into —
+        // we return its exit code and the loop ends.
+        const toe::Terminal::Poll p = term->poll();
+        if (p.exited) return p.exited->code;
         toe::Session &session = *p.running;
 
-        // Reflect the terminal's OSC 0/2 title onto the window when it changes.
+        // 1. Reflect terminal -> window state (OSC 0/2 title, OSC 52 clipboard).
         if (std::string t = session.window_title(); t != last_title) {
             surf.set_title(t);
             last_title = std::move(t);
         }
-
-        // Honor OSC 52 clipboard-set requests from the running app.
         if (auto clip = session.take_clipboard_request()) {
             surf.set_clipboard(*clip);
         }
 
-        // Route this batch of window events through the exhaustive visitor. It
-        // reports whether any of them handed bytes to the child so we can
-        // coalesce the echo into this frame (below).
-        hand::EventRouter router{session, surf, px, running};
+        // 2. Route window events -> Session actions via the exhaustive visitor.
+        //    It tells us whether any event handed bytes to the child.
+        EventRouter router{session, surf, px, running};
         surf.poll_events([&](const toe::platform::Event &ev) { std::visit(router, ev); });
-        const bool wrote_input = router.take_wrote_input();
 
-        // Zero-latency local echo: if we just handed the child input, push it
-        // out now and give the PTY a brief moment to echo, draining whatever
-        // comes back so the typed glyph renders in THIS frame instead of after
-        // the next vsync. Shells echo within microseconds, so the deadline is
-        // essentially never hit; when the child is genuinely busy we bail fast
-        // and pick the output up on the next wake — never stalling the UI.
-        if (wrote_input) {
-            surf.flush(); // ensure any pending display writes don't head-of-line block
-            struct pollfd pf{session.pty_fd(), POLLIN, 0};
-            // poll() returns the instant the echo is readable; the 3ms is only a
-            // ceiling for a busy child (then we render without it and catch up
-            // on the next wake). A local shell echoes in tens of microseconds,
-            // so in practice this returns almost immediately.
-            if (::poll(&pf, 1, 3) > 0 && (pf.revents & POLLIN)) {
-                if (!session.pump_output()) need_render = true; // child gone
-            }
+        // 3. Zero-latency local echo: after sending input, flush and give the
+        //    PTY a few ms to echo, draining what returns so the typed glyph
+        //    lands in THIS frame instead of a vsync later. poll() returns the
+        //    instant the echo is readable; the ceiling only bites for a busy
+        //    child, and then we simply catch up on the next wake.
+        bool child_gone = false;
+        if (router.take_wrote_input()) {
+            surf.flush();
+            PollSet echo;
+            echo.add(session.pty_fd());
+            echo.wait(Timeout::millis(kEchoWaitMs));
+            if (echo.ready(session.pty_fd()) && !session.pump_output()) child_gone = true;
         }
 
-        // Render only when the terminal's damage counter advanced — no wasted
-        // GPU frames while idle. The cursor blinks on a ~530ms wall-clock phase;
-        // a phase flip also triggers a redraw.
-        const auto now = std::chrono::steady_clock::now();
-        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                            now.time_since_epoch()).count();
-        const bool cursor_on = (ms / 530) % 2 == 0;
-        // Text blink (SGR 5) toggles on a slower ~750ms phase, per VT tradition.
-        const bool blink_on = (ms / 750) % 2 == 0;
-        // Advance inline-image animations (kitty a=f frames); bumps damage.
-        session.tick_animations(static_cast<std::uint64_t>(ms));
-        if (const std::uint64_t g = session.generation();
-            g != last_gen || cursor_on != last_cursor_on || blink_on != last_blink_on ||
-            need_render) {
-            last_gen = g;
-            last_cursor_on = cursor_on;
-            last_blink_on = blink_on;
-            need_render = false;
+        // 4. Render only when the frame's RenderKey changed. The key folds the
+        //    damage counter and both blink phases into one comparable value, so
+        //    idle frames (nothing damaged, no blink flip) draw nothing.
+        const Millis now = Millis::now();
+        session.tick_animations(now.value); // may advance damage
+        const RenderKey key{session.generation(), BlinkState::at(now)};
+        if (child_gone || drawn != key) {
             glViewport(0, 0, px.w, px.h);
             auto rc = toe::gfx::RenderContext::adopt_current();
-            session.render(rc, px, cursor_on, blink_on);
+            session.render(rc, px, key.blink.cursor_on, key.blink.text_on);
             surf.swap();
+            drawn = key;
         }
 
-        // Block until the child has output, a window event arrives, or the
-        // blink timer fires — instead of busy-spinning at 100% CPU. This is the
-        // classic terminal main loop: sleep until there's real work.
-        //
-        // EXCEPT during a flood: if the last drain hit its budget, the child
-        // still has output queued, so we skip the sleep and loop straight back
-        // to drain the next chunk — having just rendered an intermediate frame
-        // and processed input. That's what keeps the UI live under `yes`/`cat`.
+        // 5. Sleep until real work arrives — child output, a window event, or
+        //    the blink/animation timer — instead of busy-spinning. EXCEPT under
+        //    a flood: if output is still queued we loop straight back to drain
+        //    it, having just rendered an intermediate frame.
         surf.flush();
-        if (session.output_pending()) {
-            continue;
-        }
-        struct pollfd fds[3];
-        fds[0].fd = session.pty_fd();
-        fds[0].events = POLLIN;
-        fds[0].revents = 0;
-        fds[1].fd = surf.event_fd();
-        fds[1].events = POLLIN;
-        fds[1].revents = 0;
-        fds[2].fd = surf.repeat_fd(); // key-repeat timer (Wayland)
-        fds[2].events = POLLIN;
-        fds[2].revents = 0;
-        int nfds = 1;
-        if (fds[1].fd >= 0) fds[nfds++] = fds[1];
-        if (fds[2].fd >= 0) fds[nfds++] = fds[2];
-        // Poll timeout: 250ms keeps cursor-blink crisp when idle. While an
-        // inline-image animation is running, cap the wait at its next-frame
-        // deadline so frames play at their intended rate (min 16ms).
-        int timeout = 250;
-        if (const std::uint64_t dl = session.next_animation_deadline(); dl != 0) {
-            const std::int64_t wait = static_cast<std::int64_t>(dl) - static_cast<std::int64_t>(ms);
-            timeout = static_cast<int>(std::clamp<std::int64_t>(wait, 16, 250));
-        }
-        (void)::poll(fds, static_cast<nfds_t>(nfds), timeout);
+        if (session.output_pending()) continue;
+
+        PollSet wake;
+        wake.add(session.pty_fd())
+            .add(surf.event_fd())
+            .add(surf.repeat_fd()); // -1 on backends without a repeat timer; skipped
+        wake.wait(idle_timeout(session, now));
     }
 
     return 0;

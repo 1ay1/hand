@@ -75,8 +75,18 @@ here.
 
 ## What's actually in the box
 
-`main.cpp` is barely 200 lines, and most of it is comments explaining the two or
-three genuinely clever bits:
+`hand` is small and layered — each concern is its own tiny, typed unit rather
+than one big procedural loop:
+
+| File | Role |
+|------|------|
+| `main.cpp` | just the *shape of a frame*: five named steps |
+| `event_router.hpp` | input policy as an **exhaustive `std::visit`** over the closed event sum — one named `handle()` per event kind, no `if` ladder |
+| `config.{hpp,cpp}` | VIBE → `toe::Config`, with a `HexColor` newtype (invalid strings can't masquerade as colours) and RAII over the C parser handle |
+| `blink.hpp` | `Millis`, `SquareWave<Tag, Period>`, `BlinkState` — the cursor/text blink waves as strong types, not `(ms/530)%2` scattered inline |
+| `poll_set.hpp` | a `Timeout` value + a `PollSet` builder over `poll(2)` — you `add()` named fds and ask `ready(fd)`, never juggle `pollfd[3]` + `nfds` |
+
+Most of `main.cpp` is comments explaining the two or three genuinely clever bits:
 
 - **Zero-latency local echo.** When you type, `hand` hands the byte to the child,
   then `poll()`s the PTY for a *whole 3 milliseconds* hoping the shell echoes it
@@ -88,8 +98,10 @@ three genuinely clever bits:
   will not know `hand` is running. (During a `yes`/`cat /dev/urandom` flood it
   skips the nap and keeps draining, so the UI stays alive while the screen
   melts.)
-- **It only draws when something changed.** Damage-counter driven. Idle terminal =
-  zero wasted GPU frames, except the ~530 ms heartbeat to blink the cursor.
+- **It only draws when something changed.** A `RenderKey{generation, blink}`
+  folds the damage counter and both blink phases into one comparable value; if
+  this frame's key equals the last drawn one, nothing is rendered. Idle terminal
+  = zero wasted GPU frames, except the ~530 ms heartbeat to blink the cursor.
 - **The window title follows the app** (OSC 0/2), **OSC 52 clipboard** requests
   are honored, and **inline-image animations** (kitty `a=f`) tick along at their
   intended framerate.
