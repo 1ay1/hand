@@ -5,9 +5,8 @@
 // context, and translates wl_keyboard events (decoded through xkbcommon) into
 // the platform-neutral Event sum type.
 
-#include "hand/platform/surface.hpp"
 #include "hand/app.hpp"
-#include "toe/run.hpp"
+#include "hand/platform/surface.hpp"
 
 #include <algorithm>
 #include <cerrno>
@@ -41,29 +40,27 @@
 
 namespace hand::platform {
 
-namespace {
-
-class WaylandSurface final {
+class WaylandSurface final : public hand::AppBackend {
 public:
     static Result<std::unique_ptr<WaylandSurface>> open(std::string_view title, PixelSize initial);
 
-    ~WaylandSurface();
+    ~WaylandSurface() override;
 
-    void swap();
-    void swap_damaged(DamageRect d); // present, damaging only the changed region
-    [[nodiscard]] PixelSize pixel_size() const { return size_; }
-    [[nodiscard]] int event_fd() const { return wl_display_get_fd(display_); }
-    [[nodiscard]] int repeat_fd() const { return repeat_fd_; }
-    void flush() { wl_display_flush(display_); }
-    void set_title(std::string_view title) {
+    void swap() override;
+    void swap_damaged(DamageRect d) override; // present, damaging only the changed region
+    [[nodiscard]] PixelSize pixel_size() const override { return size_; }
+    [[nodiscard]] int event_fd() const override { return wl_display_get_fd(display_); }
+    [[nodiscard]] int repeat_fd() const override { return repeat_fd_; }
+    void flush() override { wl_display_flush(display_); }
+    void set_title(std::string_view title) override {
         if (toplevel_) {
             xdg_toplevel_set_title(toplevel_, std::string{title}.c_str());
         }
     }
-    void set_clipboard(std::string_view utf8);
-    [[nodiscard]] std::string get_clipboard();
-    void poll_events(const std::function<void(const Event &)> &sink);
-    [[nodiscard]] bool should_close() const { return closed_; }
+    void set_clipboard(std::string_view utf8) override;
+    [[nodiscard]] std::string get_clipboard() override;
+    void poll_events(const toe::EventSink &sink) override;
+    [[nodiscard]] bool should_close() const override { return closed_; }
 
     // --- native listener callbacks (public so the C listener tables at
     // namespace scope can take their addresses) ---
@@ -999,18 +996,19 @@ void WaylandSurface::ti_done(void *data, zwp_text_input_v3 *ti, uint32_t serial)
 }
 #endif // TOE_HAVE_TEXT_INPUT_V3
 
-} // namespace
+} // namespace hand::platform
 
-// The monomorphic entry for this backend: open the Wayland surface, then run
-// App<WaylandSurface> (instantiated here, where WaylandSurface is complete).
-int run_wayland(const toe::Config &cfg, std::string_view title, PixelSize initial) {
-    auto ws = WaylandSurface::open(title, initial);
+namespace hand {
+
+// toe::App backend opener: open the Wayland surface, return it as an AppBackend
+// (or nullptr on failure — the selector falls through to X11/offscreen).
+std::unique_ptr<AppBackend> open_wayland(const toe::WindowConfig &win) {
+    auto ws = platform::WaylandSurface::open(win.title, win.size);
     if (!ws) {
         std::fprintf(stderr, "hand: %s\n", ws.error().message.c_str());
-        return -1;
+        return nullptr;
     }
-    TerminalApp app{**ws, cfg}; // **ws: deref unique_ptr -> WaylandSurface&
-    return toe::run(app);
+    return std::unique_ptr<AppBackend>(ws->release());
 }
 
-} // namespace hand::platform
+} // namespace hand

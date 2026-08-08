@@ -1,19 +1,18 @@
 // SPDX-License-Identifier: LGPL-2.0-or-later
 //
-// hand::platform surface shim.
+// hand::platform vocabulary shim.
 //
-// The Surface contract now lives in the engine, as `toe::Surface` (see
-// toe/core/surface.hpp) — the loop that consumes it is `toe::run`, so the
-// concept belongs with the engine that drives it, not the frontend. hand's
-// native backends (Wayland/X11/offscreen) still MODEL that concept, so this
-// header simply re-exports the toe names into `hand::platform`, letting the
-// backend translation units keep naming `Event`, `KeyPressed`, `MouseButton`,
-// … unqualified (or `platform::Surface`) exactly as before.
+// The whole host contract now lives in the engine as `toe::App` (toe/app.hpp) —
+// the loop that drives it is `toe::run<App>`. hand's native backends model that
+// contract (via the hand::AppBackend interface + hand::App). This header just
+// re-exports the toe value types and windowing-event names into hand::platform,
+// letting the backend translation units keep naming `Event`, `KeyPressed`,
+// `MouseButton`, `PixelSize`, … unqualified as before.
 
 #ifndef HAND_PLATFORM_SURFACE_HPP
 #define HAND_PLATFORM_SURFACE_HPP
 
-#include "toe/core/surface.hpp"
+#include "toe/app.hpp"
 
 namespace hand::platform {
 
@@ -26,6 +25,7 @@ using toe::PixelSize;
 using toe::Result;
 using toe::SpecialKey;
 using toe::TextInput;
+using toe::WindowConfig;
 using toe::fail;
 
 // The platform-neutral event sum type and its members. These live in toe::win
@@ -44,21 +44,6 @@ using toe::win::MouseWheel;
 using toe::win::Preedit;
 using toe::win::Resized;
 using toe::win::TextEntered;
-
-// The concept + its refinements and uniform accessors.
-using toe::Surface;
-using toe::ClipboardSurface;
-using toe::DamageableSurface;
-using toe::FlushableSurface;
-using toe::RepeatingSurface;
-using toe::TitledSurface;
-
-using toe::clipboard_get;
-using toe::clipboard_set;
-using toe::flush;
-using toe::present;
-using toe::repeat_fd;
-using toe::title;
 
 } // namespace hand::platform
 

@@ -6,9 +6,8 @@
 // event translation and EGL setup mirror the Wayland backend so both satisfy
 // the exact same interface.
 
-#include "hand/platform/surface.hpp"
 #include "hand/app.hpp"
-#include "toe/run.hpp"
+#include "hand/platform/surface.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -31,28 +30,28 @@
 
 namespace hand::platform {
 
-namespace {
-
-class X11Surface final {
+class X11Surface final : public hand::AppBackend {
 public:
     static Result<std::unique_ptr<X11Surface>> open(std::string_view title, PixelSize initial);
 
-    ~X11Surface();
+    ~X11Surface() override;
 
-    void swap();
-    [[nodiscard]] PixelSize pixel_size() const { return size_; }
-    [[nodiscard]] int event_fd() const { return xcb_get_file_descriptor(xcb_); }
-    void flush() { xcb_flush(xcb_); }
-    void set_title(std::string_view title) {
+    void swap() override;
+    void swap_damaged(toe::DamageRect) override { swap(); }
+    [[nodiscard]] PixelSize pixel_size() const override { return size_; }
+    [[nodiscard]] int event_fd() const override { return xcb_get_file_descriptor(xcb_); }
+    [[nodiscard]] int repeat_fd() const override { return -1; }
+    void flush() override { xcb_flush(xcb_); }
+    void set_title(std::string_view title) override {
         if (display_ && window_) {
             XStoreName(display_, static_cast<Window>(window_), std::string{title}.c_str());
             XFlush(display_);
         }
     }
-    void set_clipboard(std::string_view utf8);
-    [[nodiscard]] std::string get_clipboard();
-    void poll_events(const std::function<void(const Event &)> &sink);
-    [[nodiscard]] bool should_close() const { return closed_; }
+    void set_clipboard(std::string_view utf8) override;
+    [[nodiscard]] std::string get_clipboard() override;
+    void poll_events(const toe::EventSink &sink) override;
+    [[nodiscard]] bool should_close() const override { return closed_; }
 
 private:
     X11Surface() = default;
@@ -558,17 +557,19 @@ X11Surface::~X11Surface() {
     if (display_) XCloseDisplay(display_);
 }
 
-} // namespace
+} // namespace hand::platform
 
-// Monomorphic entry: open the X11 surface, run App<X11Surface> here.
-int run_x11(const toe::Config &cfg, std::string_view title, PixelSize initial) {
-    auto s = X11Surface::open(title, initial);
+namespace hand {
+
+// toe::App backend opener: open the X11 surface, return it as an AppBackend
+// (or nullptr on failure — the selector falls through to the next backend).
+std::unique_ptr<AppBackend> open_x11(const toe::WindowConfig &win) {
+    auto s = platform::X11Surface::open(win.title, win.size);
     if (!s) {
         std::fprintf(stderr, "hand: %s\n", s.error().message.c_str());
-        return -1;
+        return nullptr;
     }
-    TerminalApp app{**s, cfg};
-    return toe::run(app);
+    return std::unique_ptr<AppBackend>(s->release());
 }
 
-} // namespace hand::platform
+} // namespace hand

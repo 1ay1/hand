@@ -1,28 +1,34 @@
 // SPDX-License-Identifier: LGPL-2.0-or-later
 //
-// Backend selection: the ONE place that knows all three backends exist. It
-// picks a backend from the environment (or an explicit request) and calls that
-// backend's monomorphic entry — run_wayland / run_x11 / run_offscreen — each
-// defined in its own TU where App<ConcreteSurface> is instantiated. Past this
-// function everything is compile-time dispatched; no surface type leaks here.
+// hand::App::open — the ONE place that knows all three backends exist. It picks
+// a backend from the environment (or an explicit request), opens it, and wraps
+// the live one in a hand::App. Every concrete backend type (Wayland/X11/
+// offscreen) stays in its own TU behind the AppBackend interface; nothing but a
+// unique_ptr<AppBackend> crosses this boundary, so no wl_*/xcb_*/EGL type leaks.
+//
+// main writes `toe::run<hand::App>(cfg, win)`; toe calls App::open; App::open
+// selects. hand owns "which window"; toe owns "run the terminal".
 
-#include "hand/platform/backend.hpp"
+#include "hand/app.hpp"
 
 #include <cstdlib>
 
-namespace hand::platform {
+namespace hand {
 
-// Defined in the per-backend translation units.
-int run_wayland(const toe::Config &cfg, std::string_view title, PixelSize initial);
-int run_x11(const toe::Config &cfg, std::string_view title, PixelSize initial);
-int run_offscreen(const toe::Config &cfg, PixelSize initial);
-
-int run(const toe::Config &cfg, std::string_view title, PixelSize initial, Backend backend) {
-    switch (backend) {
-    case Backend::wayland:  return run_wayland(cfg, title, initial);
-    case Backend::x11:      return run_x11(cfg, title, initial);
-    case Backend::offscreen:return run_offscreen(cfg, initial);
-    case Backend::automatic:break;
+toe::Result<App> App::open(const toe::WindowConfig &win, Backend force) {
+    // Honor an explicit backend request first.
+    switch (force) {
+    case Backend::wayland:
+        if (auto b = open_wayland(win)) return App{std::move(b)};
+        return toe::fail("wayland backend unavailable");
+    case Backend::x11:
+        if (auto b = open_x11(win)) return App{std::move(b)};
+        return toe::fail("x11 backend unavailable");
+    case Backend::offscreen:
+        if (auto b = open_offscreen(win)) return App{std::move(b)};
+        return toe::fail("offscreen backend unavailable");
+    case Backend::automatic:
+        break;
     }
 
     // Automatic: honor TOE_HEADLESS, then Wayland, then X11, then offscreen.
@@ -31,22 +37,23 @@ int run(const toe::Config &cfg, std::string_view title, PixelSize initial, Backe
     const char *headless = std::getenv("TOE_HEADLESS");
 
     if (headless && headless[0] != '\0') {
-        return run_offscreen(cfg, initial);
+        if (auto b = open_offscreen(win)) return App{std::move(b)};
+        return toe::fail("offscreen backend unavailable");
     }
 
     if (wl && wl[0] != '\0') {
-        const int rc = run_wayland(cfg, title, initial);
-        // A negative rc here means Wayland startup failed; fall back to X only
-        // if X is available, otherwise surface the failure.
-        if (rc >= 0 || !(x && x[0] != '\0')) return rc;
+        if (auto b = open_wayland(win)) return App{std::move(b)};
+        // Wayland present but failed to open: fall back to X only if available.
     }
 
     if (x && x[0] != '\0') {
-        return run_x11(cfg, title, initial);
+        if (auto b = open_x11(win)) return App{std::move(b)};
     }
 
-    // No display at all: an offscreen context so headless paths still work.
-    return run_offscreen(cfg, initial);
+    // No display (or every display backend failed): an offscreen context so
+    // headless paths still work.
+    if (auto b = open_offscreen(win)) return App{std::move(b)};
+    return toe::fail("no usable window backend (wayland/x11/offscreen all failed)");
 }
 
-} // namespace hand::platform
+} // namespace hand

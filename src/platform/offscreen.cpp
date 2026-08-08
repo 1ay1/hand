@@ -6,9 +6,8 @@
 // (and any batch/CI job) exercise the real GL renderer without a Wayland or X11
 // server. Event, clipboard and title methods are inert stubs.
 
-#include "hand/platform/surface.hpp"
 #include "hand/app.hpp"
-#include "toe/run.hpp"
+#include "hand/platform/surface.hpp"
 
 #include <cstdio>
 
@@ -17,9 +16,7 @@
 
 namespace hand::platform {
 
-namespace {
-
-class OffscreenSurface final {
+class OffscreenSurface final : public hand::AppBackend {
 public:
     static Result<std::unique_ptr<OffscreenSurface>> open(PixelSize size) {
         auto s = std::unique_ptr<OffscreenSurface>(new OffscreenSurface());
@@ -91,17 +88,20 @@ public:
         }
     }
 
-    void swap() {
+    void swap() override {
         if (surf_ != EGL_NO_SURFACE) eglSwapBuffers(dpy_, surf_);
         else glFlush();
     }
-    [[nodiscard]] PixelSize pixel_size() const { return size_; }
-    void set_title(std::string_view) {}
-    void set_clipboard(std::string_view) {}
-    [[nodiscard]] std::string get_clipboard() { return {}; }
-    void poll_events(const std::function<void(const Event &)> &) {}
-    [[nodiscard]] int event_fd() const { return -1; }
-    [[nodiscard]] bool should_close() const { return false; }
+    void swap_damaged(toe::DamageRect) override { swap(); }
+    [[nodiscard]] PixelSize pixel_size() const override { return size_; }
+    void set_title(std::string_view) override {}
+    void set_clipboard(std::string_view) override {}
+    [[nodiscard]] std::string get_clipboard() override { return {}; }
+    void poll_events(const toe::EventSink &) override {}
+    [[nodiscard]] int event_fd() const override { return -1; }
+    [[nodiscard]] int repeat_fd() const override { return -1; }
+    [[nodiscard]] bool should_close() const override { return false; }
+    void flush() override {}
 
 private:
     OffscreenSurface() = default;
@@ -111,18 +111,24 @@ private:
     EGLSurface surf_ = EGL_NO_SURFACE;
 };
 
-} // namespace
+} // namespace hand::platform
 
-int run_offscreen(const toe::Config &cfg, PixelSize initial) {
-    auto s = OffscreenSurface::open(initial);
+namespace hand {
+
+// toe::App backend opener: open the offscreen surface, return it as an
+// AppBackend (or nullptr on failure — the selector falls through / reports).
+std::unique_ptr<AppBackend> open_offscreen(const toe::WindowConfig &win) {
+    auto s = platform::OffscreenSurface::open(win.size);
     if (!s) {
         std::fprintf(stderr, "hand: %s\n", s.error().message.c_str());
-        return -1;
+        return nullptr;
     }
-    TerminalApp app{**s, cfg};
-    return toe::run(app);
+    return std::unique_ptr<AppBackend>(s->release());
 }
 
+} // namespace hand
+
+namespace hand::platform {
 // Test/tooling support: create an offscreen EGL context and make it current on
 // the calling thread. Returns true on success. The context is intentionally
 // leaked for the process lifetime (callers are short-lived test binaries that
