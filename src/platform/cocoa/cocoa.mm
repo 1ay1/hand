@@ -547,7 +547,9 @@ int run_cocoa(const toe::Config &cfg_in, const toe::WindowConfig &win) {
         CGFloat scale = 1.0;
         if (NSScreen *scr = [NSScreen mainScreen]) scale = scr.backingScaleFactor;
         if (scale < 1.0) scale = 1.0;
-        cfg.font_pixel_size = (int)((CGFloat)cfg.font_pixel_size * scale + 0.5);
+        // Round DOWN: a deterministic, slightly-conservative size beats a
+        // half-pixel that rounds up to the next point.
+        cfg.font_pixel_size = (int)((CGFloat)cfg.font_pixel_size * scale);
     }
     return toe::run<CocoaApp>(cfg, win);
 }
