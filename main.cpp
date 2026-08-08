@@ -83,6 +83,7 @@ int main(int argc, char **argv) {
     bool running = true;
     std::string last_title;
     std::optional<RenderKey> drawn; // the key of the last rendered frame, if any
+    std::uint64_t last_present_ms = 0; // for the flood frame-rate cap
 
     while (running && !surf.should_close()) {
         // The lifecycle's only transition: Running -> (Running | Exited). A dead
@@ -144,14 +145,23 @@ int main(int argc, char **argv) {
         const Millis now = Millis::now();
         session.tick_animations(now.value); // may advance damage
         const RenderKey key{session.generation(), BlinkState::at(now)};
-        if (child_gone || drawn != key) {
+        // During a flood (more output still queued) cap presents to ~144 Hz so
+        // we never render faster than a display can show — wasted GPU frames
+        // steal throughput. Interactive changes (nothing queued) always present
+        // immediately, so keystroke latency is never throttled.
+        const bool flood = session.output_pending();
+        const bool rate_ok = !flood || (now.value - last_present_ms) >= 7; // ~144 Hz
+        if ((child_gone || drawn != key) && rate_ok) {
             glViewport(0, 0, px.w, px.h);
             auto rc = toe::gfx::RenderContext::adopt_current();
             // Honor DECSCUSR: a steady cursor ignores the blink phase.
             const bool cursor_on = key.blink.cursor_on || !session.cursor_blinks();
-            session.render(rc, px, cursor_on, key.blink.text_on);
-            surf.swap();
+            const toe::DamageRect dmg = session.render(rc, px, cursor_on, key.blink.text_on);
+            // Present, telling the compositor exactly which region changed so it
+            // recomposites only that band (VTE-style partial damage).
+            surf.swap_damaged(dmg.empty() ? toe::DamageRect::full(px) : dmg);
             drawn = key;
+            last_present_ms = now.value;
         }
 
         // 5. Sleep until real work arrives — child output, a window event, or
