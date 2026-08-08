@@ -6,7 +6,8 @@
 // the platform-neutral Event sum type.
 
 #include "hand/platform/surface.hpp"
-#include "hand/app/entry.hpp"
+#include "hand/app.hpp"
+#include "toe/run.hpp"
 
 #include <algorithm>
 #include <cerrno>
@@ -1008,7 +1009,8 @@ int run_wayland(const toe::Config &cfg, std::string_view title, PixelSize initia
         std::fprintf(stderr, "hand: %s\n", ws.error().message.c_str());
         return -1;
     }
-    return run_on(**ws, cfg); // **ws: deref unique_ptr -> WaylandSurface&
+    TerminalApp app{**ws, cfg}; // **ws: deref unique_ptr -> WaylandSurface&
+    return toe::run(app);
 }
 
 } // namespace hand::platform

@@ -7,7 +7,8 @@
 // server. Event, clipboard and title methods are inert stubs.
 
 #include "hand/platform/surface.hpp"
-#include "hand/app/entry.hpp"
+#include "hand/app.hpp"
+#include "toe/run.hpp"
 
 #include <cstdio>
 
@@ -118,7 +119,8 @@ int run_offscreen(const toe::Config &cfg, PixelSize initial) {
         std::fprintf(stderr, "hand: %s\n", s.error().message.c_str());
         return -1;
     }
-    return run_on(**s, cfg);
+    TerminalApp app{**s, cfg};
+    return toe::run(app);
 }
 
 // Test/tooling support: create an offscreen EGL context and make it current on

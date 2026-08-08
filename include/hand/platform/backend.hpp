@@ -5,10 +5,11 @@
 // A terminal needs exactly ONE window for its whole life, chosen from the
 // environment at startup. Rather than type-erase that choice forever (an
 // AnySurface vtable in the hot loop), we resolve it ONCE here and then run a
-// fully MONOMORPHIC App<ConcreteSurface>: `run()` opens the selected backend,
-// creates the Terminal, and hands off to `App<S>::run()` instantiated inside
-// that backend's own translation unit — where the concrete surface type is
-// complete and every call inlines. No wl_*/xcb_*/EGL type ever leaks here.
+// fully MONOMORPHIC `toe::run<ConcreteSurface>`: `run()` opens the selected
+// backend and tail-calls `toe::run(surface, cfg)` — the engine's frame loop —
+// instantiated inside that backend's own translation unit, where the concrete
+// surface type is complete and every call inlines. No wl_*/xcb_*/EGL type ever
+// leaks here; the engine never learns which window system it drew into.
 
 #ifndef HAND_PLATFORM_BACKEND_HPP
 #define HAND_PLATFORM_BACKEND_HPP
@@ -27,10 +28,10 @@ using toe::PixelSize;
 // argument, never solely an environment-variable guess.
 enum class Backend { automatic, wayland, x11, offscreen };
 
-// Open the selected backend's window, create the terminal at its pixel size,
-// and run the monomorphic App<ConcreteSurface> loop to completion. Returns the
-// child's exit code, or a negative value on startup failure (window/terminal
-// couldn't be created — message already printed to stderr).
+// Open the selected backend's window, then hand off to `toe::run` (the engine's
+// frame loop) to completion. Returns the child's exit code, or a negative value
+// on startup failure (window/terminal couldn't be created — message already
+// printed to stderr).
 //
 // This is the sole entry from main: everything past it is compile-time
 // dispatched on the concrete surface type.

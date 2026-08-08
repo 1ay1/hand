@@ -7,7 +7,8 @@
 // the exact same interface.
 
 #include "hand/platform/surface.hpp"
-#include "hand/app/entry.hpp"
+#include "hand/app.hpp"
+#include "toe/run.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -566,7 +567,8 @@ int run_x11(const toe::Config &cfg, std::string_view title, PixelSize initial) {
         std::fprintf(stderr, "hand: %s\n", s.error().message.c_str());
         return -1;
     }
-    return run_on(**s, cfg);
+    TerminalApp app{**s, cfg};
+    return toe::run(app);
 }
 
 } // namespace hand::platform

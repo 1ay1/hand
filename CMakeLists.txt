@@ -65,8 +65,9 @@ target_include_directories(vibe PUBLIC "${vibe_SOURCE_DIR}")
 #
 # THIS is where every window-system dependency lives: Wayland, X11, EGL,
 # xkbcommon, xcb. toe (the engine) has none of these. Each backend models the
-# `hand::platform::Surface` concept; the app loop is instantiated once per
-# backend (App<ConcreteSurface>), so the hot path is monomorphic — no vtable.
+# `toe::Surface` concept and tail-calls `toe::run` — the engine's frame loop,
+# instantiated once per backend on its concrete surface, so the hot path is
+# monomorphic — no vtable.
 # ===========================================================================
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(EPOXY   REQUIRED IMPORTED_TARGET epoxy)
