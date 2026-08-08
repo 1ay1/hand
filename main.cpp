@@ -93,9 +93,27 @@ int main(int argc, char **argv) {
         toe::Session &session = *p.running;
 
         // 1. Reflect terminal -> window state (OSC 0/2 title, OSC 52 clipboard).
-        if (std::string t = session.window_title(); t != last_title) {
-            surf.set_title(t);
-            last_title = std::move(t);
+        //    Fall back to the child's working directory (OSC 7) as the title
+        //    when the app hasn't set an explicit one, so the titlebar shows
+        //    where you are — like most terminals do.
+        {
+            std::string t = session.window_title();
+            if (t.empty() || t == "toe") {
+                if (std::string wd = session.working_dir(); !wd.empty()) {
+                    // Strip a file://host/ prefix down to the bare path.
+                    constexpr std::string_view kFile = "file://";
+                    if (wd.starts_with(kFile)) {
+                        const auto slash = wd.find('/', kFile.size());
+                        wd = (slash == std::string::npos) ? std::string{}
+                                                          : wd.substr(slash);
+                    }
+                    if (!wd.empty()) t = "hand — " + wd;
+                }
+            }
+            if (t != last_title) {
+                surf.set_title(t);
+                last_title = std::move(t);
+            }
         }
         if (auto clip = session.take_clipboard_request()) {
             surf.set_clipboard(*clip);
