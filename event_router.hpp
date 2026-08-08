@@ -87,6 +87,12 @@ private:
         send_to_child(toe::Key{std::move(k)});
     }
 
+    void handle(const pf::Preedit &e) {
+        // IME composition in progress: show it inline at the cursor. An empty
+        // string clears it on commit/cancel.
+        s_.set_preedit(e.utf8, e.cursor);
+    }
+
     // --- pointer -----------------------------------------------------------
     void handle(const pf::MouseDown &e) {
         const auto [col, vrow] = cell_of(e.x, e.y);
