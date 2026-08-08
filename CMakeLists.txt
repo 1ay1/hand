@@ -133,7 +133,7 @@ target_include_directories(hand-platform
 # The backends need the engine (Terminal/Config, the Surface concept's toe
 # types) publicly; the windowing libs are a private implementation detail.
 target_link_libraries(hand-platform
-  PUBLIC  toe::core vibe
+  PUBLIC  toe::toe vibe
   PRIVATE PkgConfig::EGL PkgConfig::WAYLAND PkgConfig::XKB PkgConfig::X11 PkgConfig::EPOXY)
 
 target_compile_features(hand-platform PUBLIC cxx_std_23)
@@ -146,7 +146,7 @@ add_executable(hand
   src/main.cpp
   src/config/config.cpp)
 target_include_directories(hand PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(hand PRIVATE hand::platform toe::core vibe PkgConfig::EPOXY)
+target_link_libraries(hand PRIVATE hand::platform toe::toe vibe PkgConfig::EPOXY)
 target_compile_options(hand PRIVATE -Wall -Wextra -Wpedantic)
 
 # ===========================================================================
@@ -159,12 +159,12 @@ if(HAND_BUILD_TESTS)
   enable_testing()
   add_executable(render_test tests/render_test.cpp)
   target_include_directories(render_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
-  target_link_libraries(render_test PRIVATE hand::platform toe::core PkgConfig::EPOXY)
+  target_link_libraries(render_test PRIVATE hand::platform toe::toe PkgConfig::EPOXY)
   add_test(NAME render COMMAND render_test)
 
   add_executable(cache_test tests/cache_test.cpp)
   target_include_directories(cache_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
-  target_link_libraries(cache_test PRIVATE hand::platform toe::core PkgConfig::EPOXY)
+  target_link_libraries(cache_test PRIVATE hand::platform toe::toe PkgConfig::EPOXY)
   add_test(NAME cache COMMAND cache_test)
 
   set_tests_properties(render cache PROPERTIES ENVIRONMENT "TOE_HEADLESS=1")
