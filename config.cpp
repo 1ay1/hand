@@ -58,6 +58,15 @@ toe::Config load_config(const toe::Config &defaults, std::string_view path) {
         if (VibeValue *fam = vibe_object_get(font, "family")) {
             cfg.font_family = vibe_value_string_or(fam, cfg.font_family.c_str());
         }
+        if (VibeValue *file = vibe_object_get(font, "file")) {
+            cfg.font_file = vibe_value_string_or(file, "");
+        }
+        if (VibeValue *fb = vibe_object_get(font, "fallback")) {
+            cfg.font_fallback = vibe_value_string_or(fb, "");
+        }
+        if (VibeValue *lig = vibe_object_get(font, "ligatures")) {
+            cfg.ligatures = vibe_value_bool_or(lig, cfg.ligatures);
+        }
         if (VibeValue *sz = vibe_object_get(font, "size")) {
             if (const std::int64_t pt = vibe_value_int_or(sz, 0); pt > 0) {
                 cfg.font_pixel_size = static_cast<int>(pt * 4 / 3); // pt -> px @ 96 DPI
