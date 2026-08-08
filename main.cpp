@@ -145,12 +145,13 @@ int main(int argc, char **argv) {
         const Millis now = Millis::now();
         session.tick_animations(now.value); // may advance damage
         const RenderKey key{session.generation(), BlinkState::at(now)};
-        // During a flood (more output still queued) cap presents to ~144 Hz so
-        // we never render faster than a display can show — wasted GPU frames
-        // steal throughput. Interactive changes (nothing queued) always present
-        // immediately, so keystroke latency is never throttled.
+        // During a flood (more output still queued) cap presents to ~30 Hz —
+        // you can't perceive more than that as text scrolls past, and each
+        // present is a full-screen scroll repaint, so a lower cap directly cuts
+        // flood cost. Interactive changes (nothing queued) present immediately,
+        // so keystroke latency is never throttled.
         const bool flood = session.output_pending();
-        const bool rate_ok = !flood || (now.value - last_present_ms) >= 7; // ~144 Hz
+        const bool rate_ok = !flood || (now.value - last_present_ms) >= 33; // ~30 Hz
         if ((child_gone || drawn != key) && rate_ok) {
             glViewport(0, 0, px.w, px.h);
             auto rc = toe::gfx::RenderContext::adopt_current();
