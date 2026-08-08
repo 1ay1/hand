@@ -185,6 +185,8 @@ int main(int argc, char **argv) {
         const bool cursor_on = (ms / 530) % 2 == 0;
         // Text blink (SGR 5) toggles on a slower ~750ms phase, per VT tradition.
         const bool blink_on = (ms / 750) % 2 == 0;
+        // Advance inline-image animations (kitty a=f frames); bumps damage.
+        session.tick_animations(static_cast<std::uint64_t>(ms));
         if (const std::uint64_t g = session.generation();
             g != last_gen || cursor_on != last_cursor_on || blink_on != last_blink_on ||
             need_render) {
@@ -222,8 +224,15 @@ int main(int argc, char **argv) {
         int nfds = 1;
         if (fds[1].fd >= 0) fds[nfds++] = fds[1];
         if (fds[2].fd >= 0) fds[nfds++] = fds[2];
-        // 500ms cap keeps cursor-blink and resize responsive even when idle.
-        (void)::poll(fds, static_cast<nfds_t>(nfds), 250); // 250ms: crisp cursor blink
+        // Poll timeout: 250ms keeps cursor-blink crisp when idle. While an
+        // inline-image animation is running, cap the wait at its next-frame
+        // deadline so frames play at their intended rate (min 16ms).
+        int timeout = 250;
+        if (const std::uint64_t dl = session.next_animation_deadline(); dl != 0) {
+            const std::int64_t wait = static_cast<std::int64_t>(dl) - static_cast<std::int64_t>(ms);
+            timeout = static_cast<int>(std::clamp<std::int64_t>(wait, 16, 250));
+        }
+        (void)::poll(fds, static_cast<nfds_t>(nfds), timeout);
     }
 
     return 0;
