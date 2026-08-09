@@ -5,6 +5,8 @@
 # (hand, iTerm2, Terminal.app, kitty, alacritty, …) and compare the numbers.
 #
 #     ./build/hand -e python3 tools/bench.py     # measure hand
+#     ./build/hand -e python3 tools/bench.py --reps 4   # 4x longer per workload
+#     ./build/hand -e python3 tools/bench.py --rounds 3 # 3 rounds, keep the best
 #     python3 tools/bench.py                      # measure whatever term you're in
 #
 # ── why this is a REAL measurement, not a lie ────────────────────────────────
@@ -145,16 +147,37 @@ def run():
                          "Run it inside the terminal you want to measure.\n")
         return 1
 
+    # Scale the workload for a LONGER, steadier run:
+    #   --reps N / BENCH_REPS=N  multiplies every workload's rep count (default 1)
+    #   --rounds R / BENCH_ROUNDS=R  runs the whole suite R times, keeping the
+    #                                best (fastest) throughput per workload
+    mult = float(os.environ.get("BENCH_REPS", "1") or "1")
+    rounds = int(os.environ.get("BENCH_ROUNDS", "1") or "1")
+    argv = sys.argv[1:]
+    i = 0
+    while i < len(argv):
+        if argv[i] in ("--reps", "-r") and i + 1 < len(argv):
+            mult = float(argv[i + 1]); i += 2; continue
+        if argv[i] in ("--rounds", "-R") and i + 1 < len(argv):
+            rounds = int(argv[i + 1]); i += 2; continue
+        i += 1
+    mult = max(0.1, mult)
+    rounds = max(1, rounds)
+
     name = term_name()
-    results = []
+    # best[label] = (mb, dt, rate, ok) keeping the fastest round.
+    best = {}
     with RawTTY():
-        # clean slate
+        for _round in range(rounds):
+            os.write(OUT, (CSI + "0m" + CSI + "2J" + CSI + "H").encode())
+            for label, make in WORKLOADS:
+                data, reps = make()
+                reps = max(1, int(reps * mult))
+                mb, dt, rate, ok = measure(label, data, reps)
+                if label not in best or rate > best[label][2]:
+                    best[label] = (mb, dt, rate, ok)
         os.write(OUT, (CSI + "0m" + CSI + "2J" + CSI + "H").encode())
-        for label, make in WORKLOADS:
-            data, reps = make()
-            mb, dt, rate, ok = measure(label, data, reps)
-            results.append((label, mb, dt, rate, ok))
-        os.write(OUT, (CSI + "0m" + CSI + "2J" + CSI + "H").encode())
+    results = [(label, *best[label]) for label, _ in WORKLOADS]
 
     # results table (raw mode is off now, normal printing)
     print(f"\n  ── terminal benchmark ──  ({name})")
