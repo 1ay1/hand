@@ -103,6 +103,7 @@ public:
     [[nodiscard]] bool overlay_active() const { return false; }
     bool overlay_event(const toe::win::Event &) { return false; }
     void overlay_render(toe::Terminal &, toe::PixelSize) {}
+    void bind_terminal(toe::Terminal &, toe::PixelSize) {}
     void poll_events(const toe::EventSink &) {}
     [[nodiscard]] int event_fd() const { return -1; }
     [[nodiscard]] int repeat_fd() const { return -1; }

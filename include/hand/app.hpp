@@ -65,6 +65,7 @@ public:
     [[nodiscard]] bool overlay_active() const { return impl_->overlay_active(); }
     bool overlay_event(const toe::win::Event &ev) { return impl_->overlay_event(ev); }
     void overlay_render(toe::Terminal &t, toe::PixelSize px) { impl_->overlay_render(t, px); }
+    void bind_terminal(toe::Terminal &t, toe::PixelSize px) { impl_->bind_terminal(t, px); }
     [[nodiscard]] toe::Readiness wait_readable(int pty_fd, toe::WaitDeadline d) {
         return impl_->wait_readable(pty_fd, d);
     }

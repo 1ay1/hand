@@ -56,6 +56,7 @@ public:
     [[nodiscard]] bool overlay_active() const { return false; }
     bool overlay_event(const toe::win::Event &) { return false; }
     void overlay_render(toe::Terminal &, toe::PixelSize) {}
+    void bind_terminal(toe::Terminal &, toe::PixelSize) {}
     void poll_events(const toe::EventSink &sink);
     [[nodiscard]] bool should_close() const { return closed_; }
     [[nodiscard]] toe::Readiness wait_readable(int pty_fd, toe::WaitDeadline d) {
