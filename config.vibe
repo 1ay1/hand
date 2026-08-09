@@ -40,6 +40,9 @@ cursor {
     shape    block   # block | bar | underline
     blink    true
     blink_ms 530     # blink half-period (ms)
+    animate       true   # smoothly glide the caret to its new cell
+    animate_ms    55     # glide time constant (smaller = snappier)
+    animate_trail true   # fading comet trail on long jumps
 }
 
 scroll {

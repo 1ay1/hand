@@ -94,6 +94,7 @@ public:
             std::string file = resolve_font_file(s.font_family);
             if (!file.empty()) session->set_font(file, px);
             session->set_default_colors(parse_hex(s.fg), parse_hex(s.bg));
+            session->set_cursor_animation(s.animate_cursor);
         }
         (void)save; // persistence handled inside panel_.render()
 

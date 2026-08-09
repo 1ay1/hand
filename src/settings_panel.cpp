@@ -57,6 +57,7 @@ Settings Settings::from(const HandConfig &c) {
     s.bg = hex(c.colors.background);
     s.scrollback = c.scroll.scrollback_lines;
     s.blink_cursor = c.cursor.blink;
+    s.animate_cursor = c.cursor.animate;
     return s;
 }
 
@@ -69,6 +70,7 @@ void Settings::into(HandConfig &c) const {
     c.colors.background = unhex(bg);
     c.scroll.scrollback_lines = scrollback;
     c.cursor.blink = blink_cursor;
+    c.cursor.animate = animate_cursor;
 }
 
 glyph::Input SettingsPanel::translate(const toe::win::Event &ev, bool &consumed) {
@@ -152,6 +154,7 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed, bool &save) {
     changed |= ui.toggle("Ligatures", &s_.ligatures);
     changed |= ui.select("Cursor", &s_.cursor_style, {"block", "bar", "underline"});
     changed |= ui.toggle("Blink cursor", &s_.blink_cursor);
+    changed |= ui.toggle("Animate cursor", &s_.animate_cursor);
     // Font family: a real dropdown listing the installed monospace fonts.
     if (ui.dropdown("Font", &font_index_, fonts_, &dd_open_, &dd_sel_, &dd_top_, /*max_visible=*/6)) {
         if (font_index_ >= 0 && font_index_ < static_cast<int>(fonts_.size()))

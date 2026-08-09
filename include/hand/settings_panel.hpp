@@ -35,6 +35,7 @@ struct Settings {
     std::string bg = "#171720";
     int scrollback = 10000;  // lines
     bool blink_cursor = true;
+    bool animate_cursor = true; // smooth caret glide
 
     // Seed the editable view from the loaded config.
     static Settings from(const HandConfig &c);

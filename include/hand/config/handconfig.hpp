@@ -63,6 +63,8 @@ struct CursorConfig {
     bool blink = true;
     int blink_ms = 530;          // blink half-period
     bool animate = true;         // smoothly glide the caret to its new cell
+    int animate_ms = 55;         // glide time constant (smaller = snappier)
+    bool animate_trail = true;   // fading comet trail on long jumps
 };
 
 struct ScrollConfig {
@@ -103,6 +105,10 @@ struct HandConfig {
         c.font_pixel_size = font.size; // logical; host scales by DPI before create
         c.default_fg = colors.foreground;
         c.default_bg = colors.background;
+        c.selection_bg = colors.selection_bg;
+        c.cursor_anim.enabled = cursor.animate;
+        c.cursor_anim.time_ms = cursor.animate_ms;
+        c.cursor_anim.trail = cursor.animate_trail;
         return c;
     }
 };

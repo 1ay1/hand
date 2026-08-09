@@ -139,6 +139,9 @@ HandConfig load_hand_config(std::string_view path) {
     cfg.cursor.shape = shape_from(vibe_get_string_or(r, "cursor.shape", nullptr), cfg.cursor.shape);
     B("cursor.blink", cfg.cursor.blink);
     I("cursor.blink_ms", cfg.cursor.blink_ms);
+    B("cursor.animate", cfg.cursor.animate);
+    I("cursor.animate_ms", cfg.cursor.animate_ms);
+    B("cursor.animate_trail", cfg.cursor.animate_trail);
 
     // scroll
     I("scroll.scrollback", cfg.scroll.scrollback_lines);
@@ -200,6 +203,9 @@ bool save_hand_config(const HandConfig &cfg, std::string_view path) {
     vibe_object_set_string(cur, "shape", shape_str(cfg.cursor.shape));
     vibe_object_set_bool(cur, "blink", cfg.cursor.blink);
     vibe_object_set_int(cur, "blink_ms", cfg.cursor.blink_ms);
+    vibe_object_set_bool(cur, "animate", cfg.cursor.animate);
+    vibe_object_set_int(cur, "animate_ms", cfg.cursor.animate_ms);
+    vibe_object_set_bool(cur, "animate_trail", cfg.cursor.animate_trail);
 
     VibeObject *scr = obj("scroll");
     vibe_object_set_int(scr, "scrollback", cfg.scroll.scrollback_lines);
