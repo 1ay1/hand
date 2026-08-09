@@ -39,6 +39,8 @@ public:
     ~X11Surface();
 
     void swap();
+    void begin_frame(toe::PixelSize, std::uint8_t, std::uint8_t, std::uint8_t) {}
+    void end_frame() {}
     void swap_damaged(toe::DamageRect) { swap(); }
     [[nodiscard]] PixelSize pixel_size() const { return size_; }
     [[nodiscard]] int event_fd() const { return xcb_get_file_descriptor(xcb_); }

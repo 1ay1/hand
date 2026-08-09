@@ -51,6 +51,10 @@ public:
     // being called there), where Impl is complete — so no native type leaks and
     // every call is a plain, inlinable direct call. No vtable, no branch.
     void swap() { impl_->swap(); }
+    void begin_frame(toe::PixelSize px, std::uint8_t r, std::uint8_t g, std::uint8_t b) {
+        impl_->begin_frame(px, r, g, b);
+    }
+    void end_frame() { impl_->end_frame(); }
     void swap_damaged(toe::DamageRect d) { impl_->swap_damaged(d); }
     [[nodiscard]] toe::PixelSize pixel_size() const { return impl_->pixel_size(); }
     void poll_events(const toe::EventSink &sink) { impl_->poll_events(sink); }

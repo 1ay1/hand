@@ -75,12 +75,11 @@ target_include_directories(vibe PUBLIC "${vibe_SOURCE_DIR}")
 # monomorphic — no vtable.
 # ===========================================================================
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(EPOXY   REQUIRED IMPORTED_TARGET epoxy)
 
 if(APPLE)
   # ---------------------------------------------------------------------------
-  # macOS: the Cocoa + NSOpenGL backend is the sole native window system. No
-  # Wayland/X11/EGL/xkbcommon; process creation (forkpty) lives in posix_pty.
+  # macOS: Cocoa + Metal (via sokol_gfx). No OpenGL, no epoxy. forkpty lives in
+  # posix_pty.
   # ---------------------------------------------------------------------------
   add_library(hand-platform STATIC
     src/platform/backend.cpp
@@ -93,27 +92,27 @@ if(APPLE)
   target_include_directories(hand-platform
     PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
-  # ARC on for the Objective-C++ TU; the frameworks are the native window/GL/
-  # clipboard stack. OpenGL is deprecated on macOS but present through 4.1 core.
+  # ARC on for the Objective-C++ TU. The Cocoa backend drives a CAMetalLayer +
+  # sokol_gfx (Metal); the sokol header comes from toe's include/sokol.
   set_source_files_properties(src/platform/cocoa/cocoa.mm PROPERTIES
     COMPILE_OPTIONS "-fobjc-arc")
   find_library(COCOA_FRAMEWORK Cocoa REQUIRED)
-  find_library(OPENGL_FRAMEWORK OpenGL REQUIRED)
+  find_library(METAL_FRAMEWORK Metal REQUIRED)
+  find_library(QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
   find_library(CORETEXT_FRAMEWORK CoreText REQUIRED)
 
   target_link_libraries(hand-platform
     PUBLIC  toe::toe vibe
-    PRIVATE PkgConfig::EPOXY ${COCOA_FRAMEWORK} ${OPENGL_FRAMEWORK} ${CORETEXT_FRAMEWORK})
+    PRIVATE ${COCOA_FRAMEWORK} ${METAL_FRAMEWORK} ${QUARTZCORE_FRAMEWORK} ${CORETEXT_FRAMEWORK})
 
   target_compile_features(hand-platform PUBLIC cxx_std_23)
-  # GL is deprecated on macOS 10.14+: silence the pervasive deprecation noise.
-  target_compile_definitions(hand-platform PRIVATE GL_SILENCE_DEPRECATION=1)
   target_compile_options(hand-platform PRIVATE -Wall -Wextra)
 else()
   # ---------------------------------------------------------------------------
   # Linux: Wayland + X11 + offscreen(EGL). THIS is where every window-system
   # dependency lives.
   # ---------------------------------------------------------------------------
+  pkg_check_modules(EPOXY   REQUIRED IMPORTED_TARGET epoxy)
   pkg_check_modules(EGL     REQUIRED IMPORTED_TARGET egl)
   pkg_check_modules(WAYLAND REQUIRED IMPORTED_TARGET wayland-client wayland-egl wayland-cursor)
   pkg_check_modules(XKB     REQUIRED IMPORTED_TARGET xkbcommon)
@@ -188,7 +187,11 @@ add_executable(hand
   src/main.cpp
   src/config/config.cpp)
 target_include_directories(hand PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(hand PRIVATE hand::platform toe::toe vibe PkgConfig::EPOXY)
+target_link_libraries(hand PRIVATE hand::platform toe::toe vibe)
+if(NOT APPLE)
+  # epoxy is only needed by the Linux GL/EGL backends.
+  target_link_libraries(hand PRIVATE PkgConfig::EPOXY)
+endif()
 target_compile_options(hand PRIVATE -Wall -Wextra -Wpedantic)
 
 # ===========================================================================

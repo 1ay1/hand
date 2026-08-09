@@ -94,6 +94,8 @@ public:
         if (surf_ != EGL_NO_SURFACE) eglSwapBuffers(dpy_, surf_);
         else glFlush();
     }
+    void begin_frame(toe::PixelSize, std::uint8_t, std::uint8_t, std::uint8_t) {}
+    void end_frame() {}
     void swap_damaged(toe::DamageRect) { swap(); }
     [[nodiscard]] PixelSize pixel_size() const { return size_; }
     void set_title(std::string_view) {}

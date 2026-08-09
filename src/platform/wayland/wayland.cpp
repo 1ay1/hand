@@ -49,6 +49,11 @@ public:
     ~WaylandSurface();
 
     void swap();
+    // sokol swapchain frame hooks. TODO(sokol-linux): wire sokol GLCORE here;
+    // for now these are stubs so the Metal-first migration keeps the Linux
+    // backends satisfying the concept.
+    void begin_frame(toe::PixelSize, std::uint8_t, std::uint8_t, std::uint8_t) {}
+    void end_frame() {}
     void swap_damaged(DamageRect d); // present, damaging only the changed region
     [[nodiscard]] PixelSize pixel_size() const { return size_; }
     [[nodiscard]] int event_fd() const { return wl_display_get_fd(display_); }

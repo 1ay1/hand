@@ -44,11 +44,13 @@
 #include <mach/mach_time.h>
 
 #import <Cocoa/Cocoa.h>
-#import <OpenGL/OpenGL.h>
-// NOTE: we deliberately do NOT include <OpenGL/gl3.h> here. toe's headers pull
-// in epoxy/gl.h (its GL loader), and including gl3.h alongside it trips a
-// "gl.h and gl3.h both included" warning. We issue no GL calls in this TU
-// anyway — all rendering is toe's; we only manage the NSOpenGLContext.
+#import <Metal/Metal.h>
+#import <QuartzCore/CAMetalLayer.h>
+
+// sokol_gfx is implemented in toe (SOKOL_IMPL there). Here we include the header
+// (no impl) to drive the swapchain pass with the Metal device + drawable.
+#define SOKOL_METAL
+#include "sokol/sokol_gfx.h"
 
 // ───────────────────────── Objective-C view/window ─────────────────────────
 //
@@ -163,18 +165,22 @@ std::optional<toe::SpecialKey> special_of_keycode(unsigned short kc) {
 
 // ───────────────────────────── the NSView ──────────────────────────────────
 
-@interface HandGLView : NSOpenGLView {
+@interface HandGLView : NSView {
 @public
     CocoaInbox *inbox_; // borrowed; owned by the C++ surface
     // Borrowed live-resize hook: given the new backing-pixel (w,h), it resizes
-    // the terminal and draws ONE frame synchronously. Invoked from reshape
-    // during a live drag, when AppKit's modal resize loop has the main thread
-    // and our run loop is blocked — this is what makes resize LIVE.
+    // the terminal and draws ONE frame synchronously. Invoked from the layout
+    // callbacks during a live drag, when AppKit's modal resize loop has the
+    // main thread and our run loop is blocked — this is what makes resize LIVE.
     std::function<void(int, int)> *live_render_;
 }
 @end
 
 @implementation HandGLView
+
+// A layer-backed view hosting a CAMetalLayer (created by the surface in open).
+- (BOOL)wantsUpdateLayer { return YES; }
+- (CALayer *)makeBackingLayer { return [CAMetalLayer layer]; }
 
 - (BOOL)isOpaque { return YES; }
 - (BOOL)acceptsFirstResponder { return YES; }
@@ -222,17 +228,20 @@ std::optional<toe::SpecialKey> special_of_keycode(unsigned short kc) {
         toe::PixelSize{std::max(1, (int)px.size.width), std::max(1, (int)px.size.height)}});
 }
 
-- (void)reshape {
-    [super reshape];
-    [[self openGLContext] update];
+- (void)setFrameSize:(NSSize)newSize {
+    [super setFrameSize:newSize];
+    // Keep the CAMetalLayer's drawable size in backing pixels.
+    if (CAMetalLayer *ml = (CAMetalLayer *)self.layer) {
+        const NSSize px = [self convertSizeToBacking:newSize];
+        ml.drawableSize = CGSizeMake(std::max<CGFloat>(1, px.width), std::max<CGFloat>(1, px.height));
+    }
     [self pushResize];
-    // LIVE RESIZE: during a drag, AppKit runs its own modal event loop and our
+    // LIVE RESIZE: during a drag AppKit runs its own modal loop and our
     // toe::run loop is blocked, so the queued PendingResize won't be handled
-    // until release. Drive a frame RIGHT HERE instead — resize the terminal and
-    // redraw synchronously — so the content reflows smoothly as you drag.
+    // until release. Drive a frame RIGHT HERE instead so content reflows live.
     if (self.inLiveResize && live_render_ && *live_render_ && inbox_) {
-        const NSRect px = [self convertRectToBacking:self.bounds];
-        (*live_render_)(std::max(1, (int)px.size.width), std::max(1, (int)px.size.height));
+        const NSRect r = [self convertRectToBacking:self.bounds];
+        (*live_render_)(std::max(1, (int)r.size.width), std::max(1, (int)r.size.height));
     }
 }
 
@@ -485,6 +494,10 @@ public:
 
     void swap();
     void swap_damaged(toe::DamageRect) { swap(); }
+    // The host-owned GPU frame: begin a sokol swapchain pass (clear to r,g,b),
+    // toe draws into it, then end_frame ends+commits, and swap() presents.
+    void begin_frame(toe::PixelSize px, std::uint8_t r, std::uint8_t g, std::uint8_t b);
+    void end_frame();
     [[nodiscard]] PixelSize pixel_size() const { return size_; }
     [[nodiscard]] int event_fd() const { return -1; } // no pollable window fd
     [[nodiscard]] int repeat_fd() const { return -1; }
@@ -529,6 +542,10 @@ private:
     hand::SettingsPanel settings_{};
     glyph::Buffer overlay_buf_{};
     std::function<void(int, int)> live_render_{}; // live-resize frame hook
+    // Metal / sokol swapchain state.
+    id<MTLDevice> device_ = nil;
+    CAMetalLayer *metal_layer_ = nil;
+    id<CAMetalDrawable> cur_drawable_ = nil; // valid between begin_frame/end_frame
 };
 
 // --- open -------------------------------------------------------------------
@@ -630,23 +647,20 @@ Result<std::unique_ptr<CocoaSurface>> CocoaSurface::open(std::string_view title,
         if (@available(macOS 10.12, *)) [s->window_ setTabbingMode:NSWindowTabbingModeDisallowed];
         s->window_.titlebarAppearsTransparent = NO;
 
-        // 3.2 core profile — matches toe's #version 330 GLSL, within macOS's 4.1
-        // ceiling. Double-buffered; no depth/stencil needed for 2D.
-        NSOpenGLPixelFormatAttribute attrs[] = {
-            NSOpenGLPFAOpenGLProfile, NSOpenGLProfileVersion3_2Core,
-            NSOpenGLPFAColorSize, 24,
-            NSOpenGLPFAAlphaSize, 8,
-            NSOpenGLPFADoubleBuffer,
-            NSOpenGLPFAAccelerated,
-            0,
-        };
-        NSOpenGLPixelFormat *pf = [[NSOpenGLPixelFormat alloc] initWithAttributes:attrs];
-        if (!pf) return fail("cocoa: no suitable NSOpenGLPixelFormat (need GL 3.2 core)");
+        // Native Metal, no OpenGL. Create the device + a layer-backed view whose
+        // CAMetalLayer we hand to sokol as the swapchain.
+        s->device_ = MTLCreateSystemDefaultDevice();
+        if (!s->device_) return fail("cocoa: no Metal device");
 
-        s->view_ = [[HandGLView alloc] initWithFrame:content pixelFormat:pf];
-        if (!s->view_) return fail("cocoa: NSOpenGLView creation failed");
+        s->view_ = [[HandGLView alloc] initWithFrame:content];
+        if (!s->view_) return fail("cocoa: view creation failed");
         s->view_->inbox_ = &s->inbox_;
-        [s->view_ setWantsBestResolutionOpenGLSurface:YES]; // HiDPI: real pixels
+        [s->view_ setWantsLayer:YES]; // triggers makeBackingLayer -> CAMetalLayer
+        s->metal_layer_ = (CAMetalLayer *)s->view_.layer;
+        s->metal_layer_.device = s->device_;
+        s->metal_layer_.pixelFormat = MTLPixelFormatBGRA8Unorm;
+        s->metal_layer_.framebufferOnly = YES;
+        s->metal_layer_.opaque = YES;
 
         s->delegate_ = [[HandWindowDelegate alloc] init];
         s->delegate_->inbox_ = &s->inbox_;
@@ -662,32 +676,25 @@ Result<std::unique_ptr<CocoaSurface>> CocoaSurface::open(std::string_view title,
         [s->window_ center];
         [s->window_ makeKeyAndOrderFront:nil];
 
-        // finishLaunching wires up the run loop/app lifecycle so our manual
-        // nextEventMatchingMask pump behaves like a normally-launched app.
         [app finishLaunching];
         [app activateIgnoringOtherApps:YES];
 
-        // Make the GL context current for toe's Renderer::create (called right
-        // after open()). vsync (swap-interval) is left OFF so flushBuffer never
-        // BLOCKS the single render/drain loop on the display refresh — under a
-        // flood that stall dominated the profile (~17% of samples in
-        // NSWaitUntilHostTime). Instead swap() software-throttles presents to
-        // ~1/refresh below, giving vsync-off throughput with a capped, smooth
-        // on-screen update rate and no tearing artefacts that matter for text.
-        [[s->view_ openGLContext] makeCurrentContext];
-        GLint zero = 0;
-        [[s->view_ openGLContext] setValues:&zero
-                              forParameter:NSOpenGLContextParameterSwapInterval];
-
+        // Backing-pixel size for the initial drawable.
         NSRect px = [s->view_ convertRectToBacking:s->view_.bounds];
         if (px.size.width < 1 || px.size.height < 1) {
-            // Backing bounds can read 0 before the first layout; fall back to the
-            // requested size scaled by the screen factor.
             const CGFloat sc = s->window_.screen ? s->window_.screen.backingScaleFactor : 1.0;
             px.size.width = std::max<CGFloat>(1, initial.w * sc);
             px.size.height = std::max<CGFloat>(1, initial.h * sc);
         }
         s->size_ = PixelSize{std::max(1, (int)px.size.width), std::max(1, (int)px.size.height)};
+        s->metal_layer_.drawableSize = CGSizeMake(s->size_.w, s->size_.h);
+
+        // sokol_gfx setup: hand it the Metal device. toe's renderer (created
+        // right after open()) then makes its pipeline/buffers against it.
+        sg_desc sd = {};
+        sd.environment.metal.device = (__bridge const void *)s->device_;
+        sg_setup(&sd);
+        if (!sg_isvalid()) return fail("cocoa: sokol_gfx setup failed");
 
         return s;
     }
@@ -702,14 +709,39 @@ CocoaSurface::~CocoaSurface() {
     }
 }
 
+void CocoaSurface::begin_frame(toe::PixelSize px, std::uint8_t r, std::uint8_t g, std::uint8_t b) {
+    @autoreleasepool {
+        cur_drawable_ = [metal_layer_ nextDrawable];
+        if (!cur_drawable_) return;
+        sg_swapchain sc = {};
+        sc.width = px.w;
+        sc.height = px.h;
+        sc.color_format = SG_PIXELFORMAT_BGRA8;
+        sc.depth_format = SG_PIXELFORMAT_NONE;
+        sc.sample_count = 1;
+        sc.metal.current_drawable = (__bridge const void *)cur_drawable_;
+        sg_pass pass = {};
+        pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
+        pass.action.colors[0].clear_value = {r / 255.0f, g / 255.0f, b / 255.0f, 1.0f};
+        pass.swapchain = sc;
+        sg_begin_pass(&pass);
+    }
+}
+
+void CocoaSurface::end_frame() {
+    if (!cur_drawable_) return;
+    sg_end_pass();
+    sg_commit();
+}
+
 void CocoaSurface::swap() {
-    // vsync (swap-interval) is OFF, so flushBuffer returns immediately instead of
-    // stalling this single render/drain loop on the display clock — under a flood
-    // that stall dominated the profile (~17% of samples in NSWaitUntilHostTime).
-    // toe's run_loop already software-caps the PRESENT RATE (kFloodPresentMs)
-    // while streaming and always presents the final idle frame, so we simply
-    // never block here and let the engine own cadence.
-    [[view_ openGLContext] flushBuffer];
+    // Present the drawable acquired in begin_frame. sokol already committed the
+    // command buffer in end_frame; presenting shows the rendered frame. No vsync
+    // block — CAMetalLayer presents on the next compositor tick.
+    if (cur_drawable_) {
+        [cur_drawable_ present];
+        cur_drawable_ = nil;
+    }
 }
 
 // --- events -----------------------------------------------------------------
@@ -908,11 +940,15 @@ void CocoaSurface::bind_terminal(toe::Terminal &term, toe::PixelSize) {
         if (!session) return;
         const toe::PixelSize px{w, h};
         size_ = px;
+        metal_layer_.drawableSize = CGSizeMake(w, h);
         session->resize(px);
+        const toe::Rgb bg = session->default_bg();
+        begin_frame(px, bg.r, bg.g, bg.b);
         auto rc = toe::gfx::RenderContext::adopt_current();
         session->render(rc, px);
         if (settings_.active()) overlay_render(*t, px);
-        [[view_ openGLContext] flushBuffer];
+        end_frame();
+        swap();
     });
 }
 
