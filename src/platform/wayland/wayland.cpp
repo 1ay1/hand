@@ -438,10 +438,10 @@ void WaylandSurface::emit_key(uint32_t key, KeyEvent::Kind kind) {
 
     // Ctrl+Shift+,  toggles the in-terminal settings panel (the Linux analogue
     // of macOS ⌘,). Intercept on press before any terminal routing; while the
-    // panel is open its own key handling (via overlay_event) takes over.
-    if (kind == KeyEvent::Kind::press && mods.ctrl && mods.shift &&
-        (sym == XKB_KEY_comma || sym == XKB_KEY_less)) {
-        settings_.toggle();
+    // panel is open its own key handling (via overlay_event) takes over. Also
+    // swallow the matching release so it never leaks to the terminal.
+    if (mods.ctrl && mods.shift && (sym == XKB_KEY_comma || sym == XKB_KEY_less)) {
+        if (kind == KeyEvent::Kind::press) settings_.toggle();
         return;
     }
 

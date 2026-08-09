@@ -77,9 +77,13 @@ glyph::Input SettingsPanel::translate(const toe::win::Event &ev, bool &consumed)
     consumed = false;
 
     if (const auto *kp = std::get_if<win::KeyPressed>(&ev)) {
-        // Only act on the initial press (not repeat/release) for navigation, but
-        // allow repeats for text editing / sliders (feels natural to hold).
+        // Only act on the initial press or an auto-repeat, NEVER on release.
+        // Backends emit KeyPressed for both press AND release (the Kitty
+        // protocol needs the release form; the terminal encoder gates it). The
+        // panel has no such gate, so without this check every keystroke would
+        // fire twice — once on press, once on release.
         const KeyEvent &k = kp->key;
+        if (k.kind == KeyEvent::Kind::release) return in; // consumed=false
         consumed = true;
         if (const auto *sk = std::get_if<SpecialKey>(&k.key)) {
             switch (*sk) {

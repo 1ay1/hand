@@ -343,10 +343,10 @@ void X11Surface::handle_key(xcb_keycode_t code, KeyEvent::Kind kind,
                                               XKB_STATE_MODS_EFFECTIVE) > 0;
 
     // Ctrl+Shift+,  toggles the in-terminal settings panel (Linux analogue of
-    // macOS ⌘,). Intercept on press before terminal routing.
-    if (kind == KeyEvent::Kind::press && mods.ctrl && mods.shift &&
-        (sym == XKB_KEY_comma || sym == XKB_KEY_less)) {
-        settings_.toggle();
+    // macOS ⌘,). Intercept on press before terminal routing; swallow the
+    // matching release too so it never leaks to the terminal.
+    if (mods.ctrl && mods.shift && (sym == XKB_KEY_comma || sym == XKB_KEY_less)) {
+        if (kind == KeyEvent::Kind::press) settings_.toggle();
         return;
     }
 
