@@ -39,6 +39,7 @@
 
 #include "hand/platform/posix_pty.hpp"
 #include "toe/pty/pty.hpp"
+#include "toe/term/redact.hpp"
 #include "toe/term/update.hpp"
 
 namespace {
@@ -193,6 +194,9 @@ class Driver {
 public:
     Driver(toe::Pty pty, Model model) : pty_(std::move(pty)), model_(std::move(model)) {}
 
+    void set_redactor(bool on) { redactor_.set_enabled(on); }
+    [[nodiscard]] std::string redact(std::string_view s) const { return redactor_.apply(s); }
+
     // Drain whatever the child has written, folding it into the model. Returns
     // false when the child has hung up. Non-blocking.
     bool drain() {
@@ -307,6 +311,7 @@ private:
 
     toe::Pty pty_;
     Model model_;
+    toe::term::Redactor redactor_{};
     bool hung_up_ = false;
 };
 
@@ -330,8 +335,8 @@ std::string blocks_json(const Driver &d, long last) {
         if (!first) j += ",";
         first = false;
         j += "{\"id\":" + std::to_string(b.id);
-        j += ",\"command\":\"" + json_escape(cmd) + "\"";
-        j += ",\"output\":\"" + json_escape(out) + "\"";
+        j += ",\"command\":\"" + json_escape(d.redact(cmd)) + "\"";
+        j += ",\"output\":\"" + json_escape(d.redact(out)) + "\"";
         j += ",\"cwd\":\"" + json_escape(b.cwd) + "\"";
         j += b.exit_code.has_value() ? ",\"exitCode\":" + std::to_string(*b.exit_code)
                                      : std::string(",\"exitCode\":null");
@@ -348,11 +353,13 @@ std::string blocks_json(const Driver &d, long last) {
 int main(int argc, char **argv) {
     // Args: [--cols N] [--rows N] [-- CMD ARGS...]. Default 80x24 running $SHELL.
     int cols = 80, rows = 24;
+    bool redact = false;
     hand::SpawnCommand cmd;
     for (int i = 1; i < argc; ++i) {
         std::string_view a = argv[i];
         if (a == "--cols" && i + 1 < argc) cols = std::atoi(argv[++i]);
         else if (a == "--rows" && i + 1 < argc) rows = std::atoi(argv[++i]);
+        else if (a == "--redact") redact = true;
         else if (a == "--") { for (int j = i + 1; j < argc; ++j) cmd.argv.emplace_back(argv[j]); break; }
     }
 
@@ -365,6 +372,7 @@ int main(int argc, char **argv) {
     toe::Config cfg;
     Model model{cfg, toe::Extent{cols, rows}};
     Driver drv{std::move(*pty), std::move(model)};
+    drv.set_redactor(redact);
 
     reply_ok("\"ready\":true,\"cols\":" + std::to_string(cols) + ",\"rows\":" + std::to_string(rows));
 
@@ -379,7 +387,7 @@ int main(int argc, char **argv) {
         drv.drain();
 
         if (op == "snapshot") {
-            reply_ok("\"text\":\"" + json_escape(drv.snapshot()) + "\"");
+            reply_ok("\"text\":\"" + json_escape(drv.redact(drv.snapshot())) + "\"");
         } else if (op == "blocks") {
             long last = json_int(j, "last").value_or(0);
             reply_ok(blocks_json(drv, last));

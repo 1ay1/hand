@@ -6,6 +6,32 @@
 
 ---
 
+## Implementation status
+
+Shipped so far (see git history on toe `sokol-renderer` / hand `sokol-metal`):
+
+- ✅ **Phase 1.1 — OSC 133 command blocks.** `toe/term/command_log.hpp`:
+  absolute-coord block ring folded from A/B/C/D marks + OSC 7 cwd; public
+  `Session::commands()/last_command()/current_command()`.
+- ✅ **Phase 1.2 — DEC 2034 Semantic Block Query.** `toe/term/sbquery.*`:
+  token handshake + JSON-blocks-over-DCS, in-band for programs inside the term.
+- ✅ **Phase 1.3 — frame-settled signal.** `Screen::sync_active()` /
+  `Session::frame_settled()` off DEC 2026 synchronized output.
+- ✅ **Phase 1.4 — token-frugal reads.** `Session::snapshot_text()` +
+  `changed_rows()` (damage delta).
+- ✅ **Phase 2 — hand-agent.** Headless, GPU-free JSON-over-stdio driver:
+  snapshot / blocks / send (text + vim-keys) / wait (idle+pattern) / resize.
+  See `docs/AGENT_DRIVER.md`.
+- ✅ **Phase 3 (partial) — secret redaction.** `toe/term/redact.*` +
+  `hand-agent --redact`: masks API keys / JWTs / KEY=val / high-entropy tokens
+  in snapshot + block output, with no false positives on prose/paths.
+
+Next: MCP server shim in front of hand-agent; per-block context (git branch);
+command policy hooks; the hand GUI block UI (Phase 4).
+
+
+---
+
 ## 0. The one-paragraph thesis
 
 A raw terminal is **write-only and lossy** for an AI agent: you can push bytes at
