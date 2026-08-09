@@ -19,6 +19,7 @@
 #define HAND_PLATFORM_SETTINGS_HOST_HPP
 
 #include <string>
+#include <cstdlib>
 
 #include "hand/glyph/buffer.hpp"
 #include "hand/platform/fonts.hpp"
@@ -60,11 +61,13 @@ public:
         bool changed = false, save = false;
         panel_.render(buf_, changed, save);
 
-        // Live-apply edits so you SEE them change. On Linux pixels are pixels
-        // (no backing-scale factor as on Retina), so font size maps 1:1.
+        // Live-apply edits so you SEE them change. The panel's font size is a
+        // LOGICAL POINT size; convert to pixels the same way backend.cpp does at
+        // startup (pt * 96/72 * HiDPI scale) so the slider matches the launch
+        // size exactly.
         if (changed) {
             const hand::Settings &s = panel_.state();
-            session->set_font_pixel_size(s.font_size, px);
+            session->set_font_pixel_size(scale_font_px(s.font_size), px);
             std::string file = resolve_font_file(s.font_family);
             if (!file.empty()) session->set_font(file, px);
             session->set_default_colors(parse_hex(s.fg), parse_hex(s.bg));
@@ -76,6 +79,17 @@ public:
     }
 
 private:
+    // Logical point size -> pixels @96dpi, times the HiDPI scale (GDK_SCALE).
+    // Mirrors backend.cpp so the settings slider matches the launch size.
+    static int scale_font_px(int pts) {
+        double dpi_scale = 1.0;
+        if (const char *g = std::getenv("GDK_SCALE"); g && *g) {
+            double v = std::atof(g);
+            if (v >= 1.0 && v <= 8.0) dpi_scale = v;
+        }
+        return static_cast<int>(static_cast<double>(pts) * (96.0 / 72.0) * dpi_scale + 0.5);
+    }
+
     static toe::Rgb parse_hex(const std::string &h) {
         if (h.size() != 7 || h[0] != '#') return toe::rgb(200, 200, 200);
         auto d = [](char c) -> int {

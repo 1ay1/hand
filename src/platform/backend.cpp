@@ -14,9 +14,7 @@
 
 #include "hand/app.hpp"
 #include "hand/platform/posix_pty.hpp"
-#if defined(__APPLE__)
 #include "hand/platform/fonts.hpp"
-#endif
 
 #include <cstdio>
 #include <cstdlib>
@@ -67,6 +65,28 @@ int run(const toe::Config &cfg_in, const toe::WindowConfig &win, Backend force,
     if (cfg.font_pixel_size == 18) cfg.font_pixel_size = 16;
     // Font discovery is host policy: resolve a concrete macOS face and hand it
     // to toe via font_file, so the engine needs no macOS font-path branch.
+    if (cfg.font_file.empty()) {
+        std::string f = resolve_font_file(cfg.font_family);
+        if (!f.empty()) cfg.font_file = std::move(f);
+    }
+#else
+    // Font is host policy on Linux too. The config size is a LOGICAL POINT
+    // size, but toe wants PIXELS — convert at 96 DPI (pt * 96/72 = pt * 4/3),
+    // the conversion the config documents but the engine never performs. Then
+    // honour a HiDPI scale so text isn't tiny on scaled displays: GDK_SCALE is
+    // the near-universal signal set by Wayland/GTK sessions; default 1.
+    {
+        double dpi_scale = 1.0;
+        if (const char *g = std::getenv("GDK_SCALE"); g && *g) {
+            double v = std::atof(g);
+            if (v >= 1.0 && v <= 8.0) dpi_scale = v;
+        }
+        // points -> pixels @96dpi, then HiDPI scale. Round to nearest.
+        const double px = static_cast<double>(cfg.font_pixel_size) * (96.0 / 72.0) * dpi_scale;
+        cfg.font_pixel_size = static_cast<int>(px + 0.5);
+    }
+    // Resolve a concrete font file here (host policy), so the engine needs no
+    // font-discovery branch. Skips if the user gave an explicit file.
     if (cfg.font_file.empty()) {
         std::string f = resolve_font_file(cfg.font_family);
         if (!f.empty()) cfg.font_file = std::move(f);
