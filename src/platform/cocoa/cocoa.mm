@@ -36,6 +36,7 @@
 
 #include <poll.h>
 #include <time.h>
+#include <mach/mach_time.h>
 
 #import <Cocoa/Cocoa.h>
 #import <OpenGL/OpenGL.h>
@@ -467,7 +468,7 @@ public:
 
 private:
     CocoaSurface() = default;
-    void pump_cocoa(); // drain the NSApp queue into inbox_ (non-blocking)
+    void pump_cocoa(bool force = false); // drain the NSApp queue into inbox_ (throttled)
 
     NSWindow *window_ = nil;
     HandGLView *view_ = nil;
@@ -475,6 +476,7 @@ private:
     HandAppDelegate *app_delegate_ = nil;
     CocoaInbox inbox_{};
     PixelSize size_{};
+    std::uint64_t last_pump_ = 0; // mach ticks of the last event-queue scan
 };
 
 // --- open -------------------------------------------------------------------
@@ -660,7 +662,27 @@ void CocoaSurface::swap() {
 
 // --- events -----------------------------------------------------------------
 
-void CocoaSurface::pump_cocoa() {
+void CocoaSurface::pump_cocoa(bool force) {
+    // nextEventMatchingMask services the CFRunLoop + mach ports each call. Under
+    // a flood, run_loop calls the readiness path thousands of times/sec, and
+    // profiling showed ~13% of main-thread samples burned in this scan with no
+    // events pending. Human input doesn't need sub-ms polling, so unless a
+    // caller FORCES it (a moment where we're about to act on input), skip the
+    // scan if we did one < kPumpIntervalNs ago. Latency impact is imperceptible
+    // (≤ ~3ms); the flood churn disappears.
+    if (!force) {
+        static mach_timebase_info_data_t tb = [] {
+            mach_timebase_info_data_t t{}; mach_timebase_info(&t); return t;
+        }();
+        constexpr std::uint64_t kPumpIntervalNs = 3'000'000; // 3ms
+        const std::uint64_t now = mach_absolute_time();
+        const std::uint64_t elapsed_ns = (now - last_pump_) * tb.numer / tb.denom;
+        if (elapsed_ns < kPumpIntervalNs) return;
+        last_pump_ = now;
+    } else {
+        last_pump_ = mach_absolute_time();
+    }
+
     @autoreleasepool {
         NSApplication *app = NSApp;
         for (;;) {
@@ -675,7 +697,7 @@ void CocoaSurface::pump_cocoa() {
 }
 
 void CocoaSurface::poll_events(const toe::EventSink &sink) {
-    pump_cocoa();
+    pump_cocoa(/*force=*/true);
 
     if (inbox_.close_requested) {
         sink(toe::win::CloseRequested{});
@@ -727,8 +749,9 @@ void CocoaSurface::poll_events(const toe::EventSink &sink) {
 // --- readiness wait ---------------------------------------------------------
 
 toe::Readiness CocoaSurface::wait_readable(int pty_fd, toe::WaitDeadline d) {
-    // Any Cocoa event already queued => window-ready, don't block.
-    pump_cocoa();
+    // Any Cocoa event already queued => window-ready, don't block. Throttled:
+    // under a flood this runs thousands of times/sec and a stale ~3ms is fine.
+    pump_cocoa(/*force=*/false);
     if (inbox_.saw_event || inbox_.close_requested || !inbox_.events.empty()) {
         inbox_.saw_event = false;
         return toe::Readiness{.pty = false, .window = true};
@@ -751,8 +774,9 @@ toe::Readiness CocoaSurface::wait_readable(int pty_fd, toe::WaitDeadline d) {
     toe::Readiness r{};
     if (n > 0 && (pfd.revents & (POLLIN | POLLHUP | POLLERR))) r.pty = true;
 
-    // Re-drain Cocoa: an event may have arrived during the poll window.
-    pump_cocoa();
+    // Re-drain Cocoa: an event may have arrived during the poll window. FORCE it
+    // — we just blocked, so a keystroke that woke us must be seen immediately.
+    pump_cocoa(/*force=*/true);
     if (inbox_.saw_event || inbox_.close_requested || !inbox_.events.empty()) {
         inbox_.saw_event = false;
         r.window = true;
