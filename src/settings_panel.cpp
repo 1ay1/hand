@@ -4,10 +4,55 @@
 // the form layout.
 
 #include "hand/settings_panel.hpp"
+#include "hand/config/config.hpp"
 
+#include <cstdio>
 #include <variant>
 
 namespace hand {
+
+namespace {
+std::string hex(toe::Rgb c) {
+    char b[8];
+    std::snprintf(b, sizeof b, "#%02x%02x%02x", c.r, c.g, c.b);
+    return b;
+}
+toe::Rgb unhex(const std::string &h) {
+    if (h.size() != 7 || h[0] != '#') return toe::rgb(200, 200, 200);
+    auto d = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return 0;
+    };
+    auto v = [&](int i) { return std::uint8_t(d(h[i]) * 16 + d(h[i + 1])); };
+    return toe::rgb(v(1), v(3), v(5));
+}
+} // namespace
+
+Settings Settings::from(const HandConfig &c) {
+    Settings s;
+    s.font_size = c.font.size;
+    s.ligatures = c.font.ligatures;
+    s.cursor_style = static_cast<int>(c.cursor.shape);
+    s.font_family = c.font.family;
+    s.fg = hex(c.colors.foreground);
+    s.bg = hex(c.colors.background);
+    s.scrollback = c.scroll.scrollback_lines;
+    s.blink_cursor = c.cursor.blink;
+    return s;
+}
+
+void Settings::into(HandConfig &c) const {
+    c.font.size = font_size;
+    c.font.ligatures = ligatures;
+    c.cursor.shape = static_cast<CursorShape>(cursor_style);
+    c.font.family = font_family;
+    c.colors.foreground = unhex(fg);
+    c.colors.background = unhex(bg);
+    c.scroll.scrollback_lines = scrollback;
+    c.cursor.blink = blink_cursor;
+}
 
 glyph::Input SettingsPanel::translate(const toe::win::Event &ev, bool &consumed) {
     using namespace toe;
@@ -93,8 +138,25 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed, bool &save) {
 
     ui.end_panel();
 
+    if (want_save_) {
+        s_.into(cfg_);
+        if (!save_path_.empty()) (void)save_hand_config(cfg_, save_path_);
+    }
     save = want_save_;
     pending_ = glyph::Input{}; // consume
 }
+
+// --- process-wide settings source ------------------------------------------
+namespace {
+HandConfig g_settings_cfg{};
+std::string g_settings_path;
+} // namespace
+
+void set_settings_source(const HandConfig &cfg, std::string path) {
+    g_settings_cfg = cfg;
+    g_settings_path = std::move(path);
+}
+const HandConfig &settings_source_config() noexcept { return g_settings_cfg; }
+const std::string &settings_source_path() noexcept { return g_settings_path; }
 
 } // namespace hand

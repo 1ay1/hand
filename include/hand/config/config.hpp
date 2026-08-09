@@ -20,6 +20,8 @@
 
 #include "toe/terminal.hpp"
 
+#include "hand/config/handconfig.hpp"
+
 #include "vibe.h"
 
 namespace hand {
@@ -52,16 +54,28 @@ private:
 // + /hand/config.vibe. Returns nullopt when no home and no flag is given.
 [[nodiscard]] std::optional<std::string> find_config(std::span<char *> args);
 
-// Load `path` into a toe::Config, layering parsed values over the defaults.
+// Load `path` into a HandConfig, layering parsed values over the defaults.
 // Missing keys and parse failures keep the default (a diagnostic is written to
 // stderr only for a hard parse error). Never throws.
+[[nodiscard]] HandConfig load_hand_config(std::string_view path);
+
+// Serialize a HandConfig to `path` in canonical VIBE. Creates parent dirs.
+// Returns true on success. Never throws.
+[[nodiscard]] bool save_hand_config(const HandConfig &cfg, std::string_view path);
+
+// Convenience: find + load a HandConfig from argv (defaults if none found).
+[[nodiscard]] inline HandConfig load_hand_config(std::span<char *> args) {
+    if (auto path = find_config(args)) return load_hand_config(*path);
+    return HandConfig{};
+}
+
+// Legacy shim: load a toe::Config directly (used where only the engine subset
+// is needed). Layers the file over `defaults`.
 [[nodiscard]] toe::Config load_config(const toe::Config &defaults, std::string_view path);
 
-// Convenience: find + load in one call, starting from a fresh default Config.
 [[nodiscard]] inline toe::Config load_config(std::span<char *> args) {
-    toe::Config cfg;
-    if (auto path = find_config(args)) return load_config(cfg, *path);
-    return cfg;
+    if (auto path = find_config(args)) return load_hand_config(*path).to_toe();
+    return toe::Config{};
 }
 
 } // namespace hand

@@ -18,6 +18,7 @@
 
 #include "hand/app.hpp"
 #include "hand/config/config.hpp"
+#include "hand/settings_panel.hpp"
 
 // Parse the child command from argv:
 //   hand                 -> spawn $SHELL (default)
@@ -46,7 +47,16 @@ static std::vector<std::string> child_argv_from(int argc, char **argv) {
 
 int main(int argc, char **argv) {
     const std::span<char *> args{argv, static_cast<std::size_t>(argc)};
-    const toe::Config cfg = hand::load_config(args);
+    const hand::HandConfig hc = hand::load_hand_config(args);
+    const std::string cfg_path = hand::find_config(args).value_or(std::string{});
+    // Hand the loaded config + its path to the settings panel, so it seeds its
+    // form and knows where to persist edits.
+    hand::set_settings_source(hc, cfg_path);
+
+    const toe::Config cfg = hc.to_toe();
     const std::vector<std::string> child = child_argv_from(argc, argv);
-    return hand::run(cfg, {.title = "hand", .size = {800, 500}}, hand::Backend::automatic, child);
+    return hand::run(cfg,
+                     {.title = hc.window.title,
+                      .size = {hc.window.width, hc.window.height}},
+                     hand::Backend::automatic, child);
 }

@@ -1,14 +1,59 @@
-# hand — sample configuration (VIBE format)
+# hand — configuration
 #
-# Copy to ~/.config/hand/config.vibe (or pass -c PATH).
-# VIBE syntax: `key value`, objects in { }, # comments, no = or :.
+# Copy to ~/.config/hand/config.vibe (or pass -c PATH). Every option below shows
+# its default; delete a line to keep the default. Edit live with ⌘, in the app —
+# the settings panel reads and writes this file.
+#
+# VIBE syntax: `key value`, objects in { }, # comments, no `=` and no `:`.
+
+window {
+    width       800      # initial width  (logical points)
+    height      500      # initial height (logical points)
+    title       hand     # window title (apps may override via OSC 0/2)
+    padding     0        # inner padding around the grid, in pixels
+    opacity     1.0      # 0.0 (clear) .. 1.0 (opaque) — macOS
+    decorations true     # native title bar
+}
 
 font {
-    family "monospace"   # font family (fontconfig name)
-    size   11            # point size, scaled to pixels at 96 DPI
+    family    "monospace"  # family substring; "" = system monospace
+    # file    "/path/to/Font.ttf"   # explicit face; skips discovery
+    # fallback "/path/to/NotoSansCJK.ttf"  # CJK/emoji/symbol fallback
+    size      13           # logical point size (DPI-scaled to pixels)
+    ligatures false        # GSUB calt/liga shaping
 }
 
 colors {
-    foreground "#dcdccc"
+    foreground "#dcdcdc"
     background "#171720"
+    cursor     "#dcdcdc"
+    selection  "#3c466e"
+    # Optional 16-color ANSI palette (0-7 normal, 8-15 bright). Omit to use the
+    # built-in palette.
+    # palette [
+    #   "#171720" "#e05561" "#8cc265" "#d18f52" "#4aa5f0" "#c162de" "#42b3c2" "#d7dae0"
+    #   "#454b5a" "#ff616e" "#a5e075" "#f9c859" "#4dc4ff" "#de73ff" "#4cd1e0" "#e6e6e6"
+    # ]
+}
+
+cursor {
+    shape    block   # block | bar | underline
+    blink    true
+    blink_ms 530     # blink half-period (ms)
+}
+
+scroll {
+    scrollback   10000  # history lines retained (0 = none)
+    wheel_lines  3      # rows per mouse-wheel notch
+    on_output    false  # jump to bottom when new output arrives
+    on_keystroke true   # jump to bottom when you type
+}
+
+behavior {
+    # shell        /bin/fish      # "" = $SHELL, then /bin/sh
+    term         xterm-256color
+    audible_bell false
+    visual_bell  true
+    copy_on_select false          # auto-copy a drag selection
+    confirm_close false           # ask before closing a running child
 }
