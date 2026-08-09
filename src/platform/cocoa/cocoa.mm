@@ -25,6 +25,7 @@
 #include "toe/run.hpp" // toe::run<App>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <memory>
 #include <optional>
@@ -611,10 +612,15 @@ Result<std::unique_ptr<CocoaSurface>> CocoaSurface::open(std::string_view title,
         [app activateIgnoringOtherApps:YES];
 
         // Make the GL context current for toe's Renderer::create (called right
-        // after open()) and turn on vsync.
+        // after open()). vsync (swap-interval) is left OFF so flushBuffer never
+        // BLOCKS the single render/drain loop on the display refresh — under a
+        // flood that stall dominated the profile (~17% of samples in
+        // NSWaitUntilHostTime). Instead swap() software-throttles presents to
+        // ~1/refresh below, giving vsync-off throughput with a capped, smooth
+        // on-screen update rate and no tearing artefacts that matter for text.
         [[s->view_ openGLContext] makeCurrentContext];
-        GLint one = 1;
-        [[s->view_ openGLContext] setValues:&one
+        GLint zero = 0;
+        [[s->view_ openGLContext] setValues:&zero
                               forParameter:NSOpenGLContextParameterSwapInterval];
 
         NSRect px = [s->view_ convertRectToBacking:s->view_.bounds];
@@ -643,6 +649,12 @@ CocoaSurface::~CocoaSurface() {
 // --- present ----------------------------------------------------------------
 
 void CocoaSurface::swap() {
+    // vsync (swap-interval) is OFF, so flushBuffer returns immediately instead of
+    // stalling this single render/drain loop on the display clock — under a flood
+    // that stall dominated the profile (~17% of samples in NSWaitUntilHostTime).
+    // toe's run_loop already software-caps the PRESENT RATE (kFloodPresentMs)
+    // while streaming and always presents the final idle frame, so we simply
+    // never block here and let the engine own cadence.
     [[view_ openGLContext] flushBuffer];
 }
 
