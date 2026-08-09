@@ -246,7 +246,7 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
     case 5: { // Window
         changed |= ui.slider_int("Padding", &s_.padding, 0, 64, 1);
         int op = static_cast<int>(s_.opacity * 100.0f + 0.5f);
-        if (ui.slider_int("Opacity %", &op, 20, 100, 5)) {
+        if (ui.slider_int("Opacity %", &op, 20, 100, 1)) {
             s_.opacity = static_cast<float>(op) / 100.0f;
             changed = true;
         }
