@@ -24,6 +24,7 @@
 #include "hand/glyph/buffer.hpp"
 #include "hand/platform/fonts.hpp"
 #include "hand/settings_panel.hpp"
+#include "hand/help_panel.hpp"
 #include "toe/app.hpp"      // toe::win::Event
 #include "toe/terminal.hpp"
 
@@ -35,14 +36,28 @@ public:
     // set_settings_source before the window opens).
     void bind() { panel_.bind(settings_source_config(), settings_source_path()); }
 
-    [[nodiscard]] bool active() const noexcept { return panel_.active(); }
+    // Any overlay pane open? (settings OR help). The run loop uses this to
+    // capture input and repaint.
+    [[nodiscard]] bool active() const noexcept { return panel_.active() || help_.active(); }
 
-    // Flip the panel open/closed (call from the backend's toggle keybind).
-    void toggle() { panel_.toggle(); }
+    // Toggle the SETTINGS pane. Opening it closes help (one pane at a time).
+    void toggle() {
+        if (help_.active()) help_.close();
+        panel_.toggle();
+    }
 
-    // Feed one window event; true if the panel consumed it (must not reach the
+    // Toggle the HELP pane. Opening it closes settings.
+    void toggle_help() {
+        if (panel_.active()) panel_.toggle();
+        help_.toggle();
+    }
+
+    // Feed one window event; true if a pane consumed it (must not reach the
     // terminal). Only meaningful while active().
-    [[nodiscard]] bool handle(const toe::win::Event &ev) { return panel_.handle(ev); }
+    [[nodiscard]] bool handle(const toe::win::Event &ev) {
+        if (help_.active()) return help_.handle(ev);
+        return panel_.handle(ev);
+    }
 
     // Render the panel over the terminal this frame. Sizes the overlay buffer to
     // the grid, live-applies edits (font size/family, colours) to the running
@@ -57,6 +72,14 @@ public:
         const int cols = std::max(1, px.w / cell.cols);
         const int rows = std::max(1, px.h / cell.rows);
         if (buf_.width() != cols || buf_.height() != rows) buf_.resize(cols, rows);
+
+        // Help pane is read-only: paint the cheatsheet and composite, done.
+        if (help_.active()) {
+            help_.render(buf_);
+            auto rc = toe::gfx::RenderContext::adopt_current();
+            session->render_overlay(rc, buf_.data(), buf_.width(), buf_.height(), px);
+            return;
+        }
 
         bool changed = false, save = false;
         panel_.render(buf_, changed, save);
@@ -103,6 +126,7 @@ private:
     }
 
     hand::SettingsPanel panel_{};
+    hand::HelpPanel help_{};
     glyph::Buffer buf_{};
 };
 

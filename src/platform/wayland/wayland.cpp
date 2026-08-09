@@ -444,6 +444,12 @@ void WaylandSurface::emit_key(uint32_t key, KeyEvent::Kind kind) {
         if (kind == KeyEvent::Kind::press) settings_.toggle();
         return;
     }
+    // Ctrl+Shift+?  opens the keybinding help pane. `?` is Shift+/, so match the
+    // question keysym (or slash while shift is held).
+    if (mods.ctrl && mods.shift && (sym == XKB_KEY_question || sym == XKB_KEY_slash)) {
+        if (kind == KeyEvent::Kind::press) settings_.toggle_help();
+        return;
+    }
 
     // Dead keys / Compose sequences: feed the keysym to the compose state on a
     // real press. While composing, emit an inline Preedit; on completion, emit

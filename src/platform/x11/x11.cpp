@@ -362,6 +362,11 @@ void X11Surface::handle_key(xcb_keycode_t code, KeyEvent::Kind kind,
         if (kind == KeyEvent::Kind::press) settings_.toggle();
         return;
     }
+    // Ctrl+Shift+?  opens the keybinding help pane (`?` is Shift+/).
+    if (mods.ctrl && mods.shift && (sym == XKB_KEY_question || sym == XKB_KEY_slash)) {
+        if (kind == KeyEvent::Kind::press) settings_.toggle_help();
+        return;
+    }
 
     auto special = [&](SpecialKey sk) {
         KeyEvent ev;

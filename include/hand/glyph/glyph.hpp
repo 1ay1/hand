@@ -109,13 +109,17 @@ public:
         consumed_ = false;
     }
 
-    // Finish: draw the footer hint line and resolve focus wrap.
-    void end_panel() {
+    // Finish: draw the footer hint line and resolve focus wrap. `footer`
+    // overrides the default interactive hint (for read-only panes).
+    void end_panel(std::string_view footer = {}) {
         // Footer key hints.
         const int fy = panel_.bottom() - 2;
         buf_.hrule(content_.x, fy - 1, content_.w, Style{theme_.border, theme_.panel_bg});
-        const char *hint = "↑↓ move   ←→/space edit   ⌘S save   esc close";
-        buf_.text(content_.x, fy, hint, Style{theme_.dim, theme_.panel_bg});
+        const char *default_hint = "\u2191\u2193 move   \u2190\u2192/space edit   \u2318S save   esc close";
+        if (footer.empty())
+            buf_.text(content_.x, fy, default_hint, Style{theme_.dim, theme_.panel_bg});
+        else
+            buf_.text(content_.x, fy, footer, Style{theme_.dim, theme_.panel_bg});
 
         // Focus wrap after we know the row count.
         if (row_count_ > 0) {
@@ -141,6 +145,27 @@ public:
                   Style{theme_.accent, theme_.panel_bg, Attr::Bold});
         cursor_y_ += 1;
         buf_.hrule(content_.x, cursor_y_, content_.w, Style{theme_.border, theme_.panel_bg});
+        cursor_y_ += 1;
+    }
+
+    // --- key/value info row (non-focusable) --------------------------------
+    // A two-column line: `key` in the accent colour on the left, `desc` in the
+    // normal fg on the right. Used by read-only panes (the help pane) to list
+    // keybindings without any interactive widget.
+    void kv_row(std::string_view key, std::string_view desc) {
+        const int y = cursor_y_;
+        buf_.text(content_.x + 1, y, key,
+                  Style{theme_.accent, theme_.panel_bg, Attr::Bold});
+        // Align descriptions to a fixed column so they line up.
+        const int desc_x = content_.x + 18;
+        buf_.text(desc_x, y, desc, Style{theme_.fg, theme_.panel_bg});
+        cursor_y_ += 1;
+    }
+
+    // A plain full-width text line (non-focusable), dimmed — for notes/footers
+    // inside a pane.
+    void note(std::string_view text) {
+        buf_.text(content_.x + 1, cursor_y_, text, Style{theme_.dim, theme_.panel_bg});
         cursor_y_ += 1;
     }
 
