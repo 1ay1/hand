@@ -497,7 +497,8 @@ public:
     void swap_damaged(toe::DamageRect) { swap(); }
     // The host-owned GPU frame: begin a sokol swapchain pass (clear to r,g,b),
     // toe draws into it, then end_frame ends+commits, and swap() presents.
-    void begin_frame(toe::PixelSize px, std::uint8_t r, std::uint8_t g, std::uint8_t b);
+    void begin_frame(toe::PixelSize px, std::uint8_t r, std::uint8_t g, std::uint8_t b,
+                     float a = 1.0f);
     void end_frame();
     [[nodiscard]] PixelSize pixel_size() const { return size_; }
     [[nodiscard]] int event_fd() const { return -1; } // no pollable window fd
@@ -720,7 +721,8 @@ CocoaSurface::~CocoaSurface() {
     }
 }
 
-void CocoaSurface::begin_frame(toe::PixelSize px, std::uint8_t r, std::uint8_t g, std::uint8_t b) {
+void CocoaSurface::begin_frame(toe::PixelSize px, std::uint8_t r, std::uint8_t g, std::uint8_t b,
+                               float a) {
     @autoreleasepool {
         cur_drawable_ = [metal_layer_ nextDrawable];
         if (!cur_drawable_) return;
@@ -733,7 +735,7 @@ void CocoaSurface::begin_frame(toe::PixelSize px, std::uint8_t r, std::uint8_t g
         sc.metal.current_drawable = (__bridge const void *)cur_drawable_;
         sg_pass pass = {};
         pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
-        pass.action.colors[0].clear_value = {r / 255.0f, g / 255.0f, b / 255.0f, 1.0f};
+        pass.action.colors[0].clear_value = {r / 255.0f, g / 255.0f, b / 255.0f, a};
         pass.swapchain = sc;
         sg_begin_pass(&pass);
     }

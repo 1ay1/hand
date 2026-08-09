@@ -169,6 +169,8 @@ private:
                               s.copy_on_select});
         session.set_cursor_shape(s.cursor_style);
         session.set_ligatures(s.ligatures, px);
+        session.set_padding(s.padding, px);
+        session.set_opacity(s.opacity);
     }
 
     // Logical point size -> pixels @96dpi, times the HiDPI scale (GDK_SCALE).

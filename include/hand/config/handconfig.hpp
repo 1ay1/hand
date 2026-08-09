@@ -113,6 +113,8 @@ struct HandConfig {
         c.scroll_on_output = scroll.scroll_on_output;
         c.scroll_on_keystroke = scroll.scroll_on_keystroke;
         c.copy_on_select = behavior.copy_on_select;
+        c.padding = window.padding;
+        c.opacity = window.opacity;
         c.cursor_anim.enabled = cursor.animate;
         c.cursor_anim.time_ms = cursor.animate_ms;
         c.cursor_anim.trail = cursor.animate_trail;

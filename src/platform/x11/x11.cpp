@@ -47,7 +47,8 @@ public:
     void swap();
     // sokol GLCORE swapchain frame hooks (see sokol_gl.hpp). sokol is set up
     // lazily on the first frame; the EGL context is current by then.
-    void begin_frame(toe::PixelSize px, std::uint8_t r, std::uint8_t g, std::uint8_t b);
+    void begin_frame(toe::PixelSize px, std::uint8_t r, std::uint8_t g, std::uint8_t b,
+                     float a = 1.0f);
     void end_frame();
     void swap_damaged(toe::DamageRect) { swap(); }
     [[nodiscard]] PixelSize pixel_size() const { return size_; }
@@ -608,8 +609,9 @@ void X11Surface::poll_events(const std::function<void(const Event &)> &sink) {
 
 void X11Surface::swap() { eglSwapBuffers(egl_display_, egl_surface_); }
 
-void X11Surface::begin_frame(toe::PixelSize px, std::uint8_t r, std::uint8_t g, std::uint8_t b) {
-    sokolgl::begin_frame(px, r, g, b);
+void X11Surface::begin_frame(toe::PixelSize px, std::uint8_t r, std::uint8_t g, std::uint8_t b,
+                             float a) {
+    sokolgl::begin_frame(px, r, g, b, a);
 }
 
 void X11Surface::end_frame() { sokolgl::end_frame(); }

@@ -57,7 +57,8 @@ public:
     // swapchain, begins the pass (clearing to the given colour); end_frame
     // ends the pass and commits. sokol is set up lazily on the first frame
     // (the EGL context is guaranteed current by then).
-    void begin_frame(toe::PixelSize px, std::uint8_t r, std::uint8_t g, std::uint8_t b);
+    void begin_frame(toe::PixelSize px, std::uint8_t r, std::uint8_t g, std::uint8_t b,
+                     float a = 1.0f);
     void end_frame();
     void swap_damaged(DamageRect d); // present, damaging only the changed region
     [[nodiscard]] PixelSize pixel_size() const { return size_; }
@@ -794,8 +795,8 @@ WaylandSurface::~WaylandSurface() {
 }
 
 void WaylandSurface::begin_frame(toe::PixelSize px, std::uint8_t r, std::uint8_t g,
-                                std::uint8_t b) {
-    sokolgl::begin_frame(px, r, g, b);
+                                std::uint8_t b, float a) {
+    sokolgl::begin_frame(px, r, g, b, a);
 }
 
 void WaylandSurface::end_frame() { sokolgl::end_frame(); }

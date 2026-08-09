@@ -11,7 +11,7 @@ window {
     height      500      # initial height (logical points)
     title       hand     # window title (apps may override via OSC 0/2)
     padding     0        # inner padding around the grid, in pixels
-    opacity     1.0      # 0.0 (clear) .. 1.0 (opaque) — macOS
+    opacity     1.0      # 0.0 (clear) .. 1.0 (opaque) — background transparency
     decorations true     # native title bar
 }
 

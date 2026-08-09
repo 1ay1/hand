@@ -105,8 +105,9 @@ public:
         if (surf_ != EGL_NO_SURFACE) eglSwapBuffers(dpy_, surf_);
         else glFlush();
     }
-    void begin_frame(toe::PixelSize px, std::uint8_t r, std::uint8_t g, std::uint8_t b) {
-        sokolgl::begin_frame(px, r, g, b);
+    void begin_frame(toe::PixelSize px, std::uint8_t r, std::uint8_t g, std::uint8_t b,
+                     float a = 1.0f) {
+        sokolgl::begin_frame(px, r, g, b, a);
     }
     void end_frame() { sokolgl::end_frame(); }
     void swap_damaged(toe::DamageRect) { swap(); }

@@ -70,20 +70,21 @@ inline sg_swapchain swapchain_for(toe::PixelSize px, std::uint32_t fbo) {
 
 inline sg_swapchain default_swapchain(toe::PixelSize px) { return swapchain_for(px, 0); }
 
-// Begin a pass into an explicit FBO, clearing to (r,g,b). Leaves it OPEN.
+// Begin a pass into an explicit FBO, clearing to (r,g,b,a). Leaves it OPEN.
 inline void begin_frame_fbo(std::uint32_t fbo, toe::PixelSize px, std::uint8_t r,
-                            std::uint8_t g, std::uint8_t b) {
+                            std::uint8_t g, std::uint8_t b, float a = 1.0f) {
     sg_pass pass{};
     pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
-    pass.action.colors[0].clear_value = {r / 255.0f, g / 255.0f, b / 255.0f, 1.0f};
+    pass.action.colors[0].clear_value = {r / 255.0f, g / 255.0f, b / 255.0f, a};
     pass.swapchain = swapchain_for(px, fbo);
     sg_begin_pass(&pass);
 }
 
-// Begin the swapchain pass, clearing to (r,g,b). Leaves the pass OPEN so the
-// terminal renderer can draw into it; the host calls end_frame() after.
-inline void begin_frame(toe::PixelSize px, std::uint8_t r, std::uint8_t g, std::uint8_t b) {
-    begin_frame_fbo(0, px, r, g, b);
+// Begin the swapchain pass, clearing to (r,g,b) at alpha `a` (window opacity).
+// Leaves the pass OPEN so the terminal renderer can draw into it.
+inline void begin_frame(toe::PixelSize px, std::uint8_t r, std::uint8_t g, std::uint8_t b,
+                        float a = 1.0f) {
+    begin_frame_fbo(0, px, r, g, b, a);
 }
 
 inline void end_frame() {
