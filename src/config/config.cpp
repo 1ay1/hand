@@ -114,12 +114,19 @@ HandConfig load_hand_config(std::string_view path) {
     S("window.title", cfg.window.title);
     I("window.padding", cfg.window.padding);
     cfg.window.opacity = static_cast<float>(vibe_get_float_or(r, "window.opacity", cfg.window.opacity));
+    cfg.window.overlay_panel_opacity = static_cast<float>(
+        vibe_get_float_or(r, "window.overlay_panel_opacity", cfg.window.overlay_panel_opacity));
+    cfg.window.overlay_scrim_opacity = static_cast<float>(
+        vibe_get_float_or(r, "window.overlay_scrim_opacity", cfg.window.overlay_scrim_opacity));
     B("window.decorations", cfg.window.decorations);
 
     // font (accept both font.size and legacy top-level size)
     S("font.family", cfg.font.family);
     S("font.file", cfg.font.file);
     S("font.fallback", cfg.font.fallback);
+    S("font.file_bold", cfg.font.file_bold);
+    S("font.file_italic", cfg.font.file_italic);
+    S("font.file_bold_italic", cfg.font.file_bold_italic);
     I("font.size", cfg.font.size);
     B("font.ligatures", cfg.font.ligatures);
 
@@ -187,12 +194,18 @@ bool save_hand_config(const HandConfig &cfg, std::string_view path) {
     vibe_object_set_string(win, "title", cfg.window.title.c_str());
     vibe_object_set_int(win, "padding", cfg.window.padding);
     vibe_object_set_float(win, "opacity", cfg.window.opacity);
+    vibe_object_set_float(win, "overlay_panel_opacity", cfg.window.overlay_panel_opacity);
+    vibe_object_set_float(win, "overlay_scrim_opacity", cfg.window.overlay_scrim_opacity);
     vibe_object_set_bool(win, "decorations", cfg.window.decorations);
 
     VibeObject *font = obj("font");
     vibe_object_set_string(font, "family", cfg.font.family.c_str());
     if (!cfg.font.file.empty()) vibe_object_set_string(font, "file", cfg.font.file.c_str());
     if (!cfg.font.fallback.empty()) vibe_object_set_string(font, "fallback", cfg.font.fallback.c_str());
+    if (!cfg.font.file_bold.empty()) vibe_object_set_string(font, "file_bold", cfg.font.file_bold.c_str());
+    if (!cfg.font.file_italic.empty()) vibe_object_set_string(font, "file_italic", cfg.font.file_italic.c_str());
+    if (!cfg.font.file_bold_italic.empty())
+        vibe_object_set_string(font, "file_bold_italic", cfg.font.file_bold_italic.c_str());
     vibe_object_set_int(font, "size", cfg.font.size);
     vibe_object_set_bool(font, "ligatures", cfg.font.ligatures);
 

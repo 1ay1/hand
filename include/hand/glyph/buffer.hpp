@@ -13,6 +13,7 @@
 #ifndef HAND_GLYPH_BUFFER_HPP
 #define HAND_GLYPH_BUFFER_HPP
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -67,12 +68,29 @@ public:
     void resize(int w, int h) {
         w_ = w < 0 ? 0 : w;
         h_ = h < 0 ? 0 : h;
-        cells_.assign(static_cast<std::size_t>(w_) * static_cast<std::size_t>(h_), Cell{});
+        const std::size_t n = static_cast<std::size_t>(w_) * static_cast<std::size_t>(h_);
+        cells_.assign(n, Cell{});
+        alpha_.assign(n, 255);
     }
     [[nodiscard]] int width() const noexcept { return w_; }
     [[nodiscard]] int height() const noexcept { return h_; }
     [[nodiscard]] const Cell *data() const noexcept { return cells_.data(); }
+    // Per-cell background alpha plane (0=see-through, 255=opaque). Parallel to
+    // data(); lets an overlay be a two-tier glass surface (a light scrim over
+    // the terminal + a near-opaque panel) instead of one flat translucency.
+    [[nodiscard]] const std::uint8_t *alpha_data() const noexcept { return alpha_.data(); }
     [[nodiscard]] Rect bounds() const noexcept { return {0, 0, w_, h_}; }
+
+    // Set the whole alpha plane (e.g. a faint scrim over the terminal).
+    void clear_alpha(std::uint8_t a) { std::fill(alpha_.begin(), alpha_.end(), a); }
+    // Set the alpha of a rectangle (e.g. the opaque panel body).
+    void set_alpha(Rect r, std::uint8_t a) {
+        for (int y = r.y; y < r.bottom(); ++y)
+            for (int x = r.x; x < r.right(); ++x)
+                if (x >= 0 && y >= 0 && x < w_ && y < h_)
+                    alpha_[static_cast<std::size_t>(y) * static_cast<std::size_t>(w_) +
+                           static_cast<std::size_t>(x)] = a;
+    }
 
     void clear(const Style &s) {
         Cell c;
@@ -218,6 +236,7 @@ private:
 
     int w_ = 0, h_ = 0;
     std::vector<Cell> cells_;
+    std::vector<std::uint8_t> alpha_; // per-cell bg alpha (parallel to cells_)
 };
 
 } // namespace glyph

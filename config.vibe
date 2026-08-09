@@ -18,14 +18,19 @@ window {
     height      500      # initial height (logical points)
     title       hand     # window title (apps may override via OSC 0/2)
     padding     0        # inner padding around the grid, in pixels
-    opacity     1.0      # 0.0 (clear) .. 1.0 (opaque) — background transparency
+    opacity     1.0      # 0.0 (clear) .. 1.0 (opaque) — window background
     decorations true     # native title bar
+    overlay_panel_opacity 0.95  # settings/help pane card opacity (0..1)
+    overlay_scrim_opacity 0.25  # dim over the terminal behind the pane (0..1)
 }
 
 font {
     family    "monospace"  # family substring; "" = system monospace
     # file    "/path/to/Font.ttf"   # explicit face; skips discovery
     # fallback "/path/to/NotoSansCJK.ttf"  # CJK/emoji/symbol fallback
+    # file_bold        "/path/to/Font-Bold.ttf"        # real bold face
+    # file_italic      "/path/to/Font-Italic.ttf"      # real italic face
+    # file_bold_italic "/path/to/Font-BoldItalic.ttf"  # real bold-italic face
     size      13           # logical point size (DPI-scaled to pixels)
     ligatures false        # GSUB calt/liga shaping
 }

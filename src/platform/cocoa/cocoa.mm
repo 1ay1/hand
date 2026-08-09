@@ -1045,10 +1045,11 @@ void CocoaSurface::overlay_render(toe::Terminal &term, toe::PixelSize px) {
     (void)save;
 
     // Composite the panel over the terminal via the engine's overlay pass, as a
-    // frosted-glass layer (0.90 bg alpha; glyphs stay opaque).
+    // frosted-glass layer. The per-cell alpha plane makes the scrim faint and
+    // the panel near-opaque (glyphs stay opaque).
     auto rc = toe::gfx::RenderContext::adopt_current();
     session->render_overlay(rc, overlay_buf_.data(), overlay_buf_.width(),
-                            overlay_buf_.height(), px, 0, 0, 0.90f);
+                            overlay_buf_.height(), px, 0, 0, 1.0f, overlay_buf_.alpha_data());
 }
 
 } // namespace hand::platform

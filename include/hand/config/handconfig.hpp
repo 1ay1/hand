@@ -39,14 +39,25 @@ struct WindowConfig {
     int height = 500;            // initial height in logical points
     std::string title = "hand";  // window title (apps override via OSC 0/2)
     int padding = 0;             // inner padding in pixels around the grid
-    float opacity = 1.0f;        // 0.0 (clear) .. 1.0 (opaque); macOS only
+    float opacity = 1.0f;        // 0.0 (clear) .. 1.0 (opaque) window background
     bool decorations = true;     // native title bar
+    // Settings/help OVERLAY translucency (0..1). The pane composites over the
+    // terminal: the scrim (area around the panel) is faint so the terminal
+    // stays visible; the panel body is near-opaque so its text is crisp.
+    float overlay_panel_opacity = 0.95f; // the pane card
+    float overlay_scrim_opacity = 0.25f; // the dim around it
 };
 
 struct FontConfig {
     std::string family = "monospace"; // family substring; "" -> system mono
     std::string file{};               // explicit .ttf/.otf/.ttc path (skips discovery)
     std::string fallback{};           // fallback face for CJK/emoji/symbols
+    // Optional REAL styled faces. When set, bold/italic/bold-italic text renders
+    // from these actual files (far better than synthesised embolden/shear).
+    // Empty -> synthesise that style from the regular face.
+    std::string file_bold{};
+    std::string file_italic{};
+    std::string file_bold_italic{};
     int size = 13;                    // logical point size (host DPI-scales it)
     bool ligatures = false;           // GSUB calt/liga shaping
 };
@@ -125,6 +136,9 @@ struct HandConfig {
         c.font_family = font.family;
         c.font_file = font.file;
         c.font_fallback = font.fallback;
+        c.font_file_bold = font.file_bold;
+        c.font_file_italic = font.file_italic;
+        c.font_file_bold_italic = font.file_bold_italic;
         c.ligatures = font.ligatures;
         c.font_pixel_size = font.size; // logical; host scales by DPI before create
         c.default_fg = colors.foreground;

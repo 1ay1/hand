@@ -86,6 +86,12 @@ struct Theme {
 
 class Ctx {
 public:
+    // Overlay alpha tiers (0..255). The scrim (area outside the panel) is mostly
+    // see-through so opening the pane barely dims the terminal; the panel body
+    // is near-opaque so its text stays crisp. Used via the Buffer alpha plane.
+    static constexpr std::uint8_t kScrimAlpha = 64;   // ~25% — faint dim
+    static constexpr std::uint8_t kPanelAlpha = 242;  // ~95% — frosted, readable
+
     // `focus_state` is the caller's PERSISTENT focus index (which row is
     // selected). The Ctx is recreated every frame, so focus can't live in it —
     // the caller owns an int and passes its address; the Ctx reads and updates
@@ -99,11 +105,15 @@ public:
     // Open a centered panel of `cols`x`rows` with a titled rounded frame,
     // floated over the terminal with a soft drop shadow and a coloured title
     // band. Content is laid out row by row inside.
-    void begin_panel(std::string_view title, int cols = 56, int rows = 0) {
-        // Dim the whole backdrop first: a scrim that de-emphasises the terminal
-        // WITHOUT hiding it (the overlay pass makes this translucent). Blank
-        // glyphs so nothing from the pane text bleeds into the scrim.
-        buf_.clear(Style{theme_.dim, Theme::mix(theme_.bg, rgb(0, 0, 0), 0.35f), Attr::None});
+    void begin_panel(std::string_view title, int cols = 56, int rows = 0,
+                     std::uint8_t scrim_alpha = kScrimAlpha,
+                     std::uint8_t panel_alpha = kPanelAlpha) {
+        // Backdrop: a FAINT scrim that only slightly de-emphasises the terminal
+        // (it stays clearly visible behind the pane). The two-tier alpha plane
+        // below makes this region mostly see-through while the panel itself is
+        // near-opaque — so opening settings doesn't "darken the whole screen".
+        buf_.clear(Style{theme_.dim, theme_.bg, Attr::None});
+        buf_.clear_alpha(scrim_alpha);
         panel_w_ = std::min(cols, buf_.width() - 2);
         panel_h_ = rows > 0 ? std::min(rows, buf_.height() - 2) : buf_.height() - 4;
         panel_.x = (buf_.width() - panel_w_) / 2;
@@ -111,11 +121,13 @@ public:
         panel_.w = panel_w_;
         panel_.h = panel_h_;
 
+        // The panel (and its shadow) are near-opaque so text stays crisp.
+        buf_.set_alpha(Rect{panel_.x, panel_.y, panel_.w + 2, panel_.h + 1}, panel_alpha);
+
         // Drop shadow: a soft dark rect offset down-right, so the card visibly
         // floats above the terminal. Drawn BEFORE the panel body.
         const Style shadow{theme_.shadow(), theme_.shadow()};
-        for (int dy = 1; dy <= 1; ++dy)
-            buf_.fill(Rect{panel_.x + 2, panel_.y + panel_.h, panel_.w, 1}, shadow);
+        buf_.fill(Rect{panel_.x + 2, panel_.y + panel_.h, panel_.w, 1}, shadow);
         buf_.fill(Rect{panel_.x + panel_.w, panel_.y + 1, 2, panel_.h}, shadow);
 
         // Panel body + rounded frame.

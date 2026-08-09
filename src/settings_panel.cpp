@@ -7,6 +7,7 @@
 #include "hand/config/config.hpp"
 #include "hand/theme/themes.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <variant>
 
@@ -55,6 +56,9 @@ Settings Settings::from(const HandConfig &c) {
     s.font_family = c.font.family;
     s.font_file = c.font.file;
     s.font_fallback = c.font.fallback;
+    s.font_bold = c.font.file_bold;
+    s.font_italic = c.font.file_italic;
+    s.font_bold_italic = c.font.file_bold_italic;
     s.font_size = c.font.size;
     s.ligatures = c.font.ligatures;
     // Cursor
@@ -82,9 +86,15 @@ Settings Settings::from(const HandConfig &c) {
     s.copy_on_select = c.behavior.copy_on_select;
     s.confirm_close = c.behavior.confirm_close;
     // Window
+    s.title = c.window.title;
     s.padding = c.window.padding;
     s.opacity = c.window.opacity;
+    s.overlay_panel_opacity = c.window.overlay_panel_opacity;
+    s.overlay_scrim_opacity = c.window.overlay_scrim_opacity;
     s.decorations = c.window.decorations;
+    // Advanced
+    s.shell = c.behavior.shell;
+    s.term_env = c.behavior.term;
     return s;
 }
 
@@ -94,6 +104,9 @@ void Settings::into(HandConfig &c) const {
     c.font.family = font_family;
     c.font.file = font_file;
     c.font.fallback = font_fallback;
+    c.font.file_bold = font_bold;
+    c.font.file_italic = font_italic;
+    c.font.file_bold_italic = font_bold_italic;
     c.font.size = font_size;
     c.font.ligatures = ligatures;
     // Cursor
@@ -121,9 +134,15 @@ void Settings::into(HandConfig &c) const {
     c.behavior.copy_on_select = copy_on_select;
     c.behavior.confirm_close = confirm_close;
     // Window
+    c.window.title = title;
     c.window.padding = padding;
     c.window.opacity = opacity;
+    c.window.overlay_panel_opacity = overlay_panel_opacity;
+    c.window.overlay_scrim_opacity = overlay_scrim_opacity;
     c.window.decorations = decorations;
+    // Advanced
+    c.behavior.shell = shell;
+    c.behavior.term = term_env;
 }
 
 glyph::Input SettingsPanel::translate(const toe::win::Event &ev, bool &consumed) {
@@ -220,7 +239,7 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
     ensure_themes();
 
     static const std::vector<std::string> kSections = {
-        "Theme", "Font", "Cursor", "Colors", "Scroll", "Behavior", "Window"};
+        "Theme", "Font", "Cursor", "Colors", "Scroll", "Behavior", "Window", "Advanced"};
     const int nsec = static_cast<int>(kSections.size());
 
     // Tab / Shift-Tab switch SECTIONS (unless a dropdown is capturing input).
@@ -234,8 +253,14 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
 
     glyph::Ctx ui(buf, in, &focus_, ui_theme());
 
-    // Wider panel to fit the tab bar + two-column rows comfortably.
-    ui.begin_panel("hand · settings", 66, 26);
+    // Wider panel to fit the tab bar + two-column rows comfortably. Overlay
+    // translucency comes from the config (Window tab): the scrim dims the
+    // terminal lightly, the panel card stays near-opaque and readable.
+    const auto a8 = [](float f) {
+        return static_cast<std::uint8_t>(std::clamp(f, 0.0f, 1.0f) * 255.0f + 0.5f);
+    };
+    ui.begin_panel("hand · settings", 66, 26, a8(s_.overlay_scrim_opacity),
+                   a8(s_.overlay_panel_opacity));
 
     // Section tabs (focus row 0). ←/→ switch when the tab row is focused; each
     // section shows only its own options so the panel stays scannable.
@@ -282,8 +307,11 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
         }
         changed |= ui.slider_int("Size", &s_.font_size, 6, 48);
         changed |= ui.toggle("Ligatures", &s_.ligatures);
-        changed |= ui.text_input("Fallback", &s_.font_fallback);
+        changed |= ui.text_input("Fallback (CJK/emoji)", &s_.font_fallback);
         changed |= ui.text_input("File override", &s_.font_file);
+        changed |= ui.text_input("Bold face file", &s_.font_bold);
+        changed |= ui.text_input("Italic face file", &s_.font_italic);
+        changed |= ui.text_input("Bold-italic file", &s_.font_bold_italic);
         break;
     case 2: // Cursor
         changed |= ui.select("Shape", &s_.cursor_style, {"block", "bar", "underline"});
@@ -312,15 +340,31 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
         changed |= ui.toggle("Confirm on close", &s_.confirm_close);
         break;
     case 6: { // Window
+        changed |= ui.text_input("Title", &s_.title);
         changed |= ui.slider_int("Padding", &s_.padding, 0, 64, 1);
         int op = static_cast<int>(s_.opacity * 100.0f + 0.5f);
         if (ui.slider_int("Opacity %", &op, 20, 100, 1)) {
             s_.opacity = static_cast<float>(op) / 100.0f;
             changed = true;
         }
+        int pop = static_cast<int>(s_.overlay_panel_opacity * 100.0f + 0.5f);
+        if (ui.slider_int("Overlay panel %", &pop, 40, 100, 1)) {
+            s_.overlay_panel_opacity = static_cast<float>(pop) / 100.0f;
+            changed = true;
+        }
+        int sop = static_cast<int>(s_.overlay_scrim_opacity * 100.0f + 0.5f);
+        if (ui.slider_int("Overlay dim %", &sop, 0, 80, 1)) {
+            s_.overlay_scrim_opacity = static_cast<float>(sop) / 100.0f;
+            changed = true;
+        }
         changed |= ui.toggle("Decorations", &s_.decorations);
         break;
     }
+    case 7: // Advanced
+        ui.note("Shell / TERM take effect on the NEXT window.");
+        changed |= ui.text_input("Shell (empty = $SHELL)", &s_.shell);
+        changed |= ui.text_input("TERM", &s_.term_env);
+        break;
     default: break;
     }
 

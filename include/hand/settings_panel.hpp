@@ -44,6 +44,9 @@ struct Settings {
     std::string font_family = "monospace";
     std::string font_file{};
     std::string font_fallback{};
+    std::string font_bold{};        // real bold face file (empty = synthesise)
+    std::string font_italic{};      // real italic face file
+    std::string font_bold_italic{}; // real bold-italic face file
     int font_size = 13;      // logical points (host scales by DPI)
     bool ligatures = false;
 
@@ -77,9 +80,16 @@ struct Settings {
     bool confirm_close = false;
 
     // Window
+    std::string title = "hand";
     int padding = 0;
-    float opacity = 1.0f;
+    float opacity = 1.0f;                  // window background (compositor)
+    float overlay_panel_opacity = 0.95f;  // settings/help pane card
+    float overlay_scrim_opacity = 0.25f;  // dim around the pane
     bool decorations = true;
+
+    // Advanced (host-side; a restart may be needed for shell/TERM)
+    std::string shell{};     // program to run (empty = $SHELL)
+    std::string term_env = "xterm-256color"; // $TERM advertised to the child
 
     // Seed the editable view from the loaded config.
     static Settings from(const HandConfig &c);
