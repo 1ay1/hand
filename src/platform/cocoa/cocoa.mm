@@ -79,14 +79,21 @@ struct PendingMouse {
 struct PendingFocus {
     bool focused = false;
 };
+struct PendingZoom {
+    int delta = 0;     // +1 / -1 notch
+    int absolute = -1; // exact px when >= 0 (used for reset-to-default)
+};
 
 // The inbox: a queue of translated events plus latched lifecycle flags. The
 // ObjC view appends; the C++ surface drains in poll_events().
 struct CocoaInbox {
-    std::vector<std::variant<PendingKey, PendingText, PendingResize, PendingMouse, PendingFocus>>
+    std::vector<std::variant<PendingKey, PendingText, PendingResize, PendingMouse, PendingFocus,
+                             PendingZoom>>
         events;
     bool close_requested = false;
     bool saw_event = false; // any native event since the last wait (window-ready)
+    // The font size the app launched with, so Cmd-0 can reset to it.
+    int default_font_px = 0;
     // Fractional scroll accumulators: trackpad deltas are sub-"line"; we bank
     // them and emit one discrete wheel step per threshold crossed so small
     // two-finger scrolls aren't silently dropped by integer truncation.
@@ -255,6 +262,20 @@ std::optional<toe::SpecialKey> special_of_keycode(unsigned short kc) {
             toe::KeyEvent{.key = toe::TextInput{"l"}, .mods = {.ctrl = true}}});
         inbox_->saw_event = true;
         return YES;
+    case '+': // Zoom in (⌘+ / ⌘=)
+    case '=':
+        inbox_->events.push_back(hand::platform::PendingZoom{.delta = +1});
+        inbox_->saw_event = true;
+        return YES;
+    case '-': // Zoom out (⌘-)
+        inbox_->events.push_back(hand::platform::PendingZoom{.delta = -1});
+        inbox_->saw_event = true;
+        return YES;
+    case '0': // Reset zoom to the launch default (⌘0)
+        inbox_->events.push_back(
+            hand::platform::PendingZoom{.absolute = inbox_->default_font_px});
+        inbox_->saw_event = true;
+        return YES;
     default:
         // Let other ⌘ combos (e.g. ⌘M minimise, ⌘H hide) go to the menu/system.
         return NO;
@@ -361,9 +382,37 @@ std::optional<toe::SpecialKey> special_of_keycode(unsigned short kc) {
 }
 @end
 
+// ─────────────────────── the application delegate (quit) ────────────────────
+// Routes a menu / Dock / system Quit through the toe loop's clean teardown
+// (set close_requested, cancel the OS terminate) instead of a hard exit that
+// would skip the child's SIGHUP + reap.
+@interface HandAppDelegate : NSObject <NSApplicationDelegate> {
+@public
+    CocoaInbox *inbox_;
+}
+@end
+
+@implementation HandAppDelegate
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender {
+    if (inbox_) {
+        inbox_->close_requested = true;
+        inbox_->saw_event = true;
+    }
+    return NSTerminateCancel; // the toe loop observes should_close() and exits
+}
+- (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender {
+    return YES;
+}
+@end
+
 // ───────────────────────────── the C++ surface ─────────────────────────────
 
 namespace hand::platform {
+
+// The launch-time font pixel size, stashed by run_cocoa before toe::run opens
+// the surface (which happens inside toe::run<CocoaApp>, out of run_cocoa's
+// reach). Read once in CocoaSurface::open to seed Cmd-0 "reset zoom".
+static int g_default_font_px = 0;
 
 class CocoaSurface final {
 public:
@@ -392,6 +441,7 @@ private:
     NSWindow *window_ = nil;
     HandGLView *view_ = nil;
     HandWindowDelegate *delegate_ = nil;
+    HandAppDelegate *app_delegate_ = nil;
     CocoaInbox inbox_{};
     PixelSize size_{};
 };
@@ -434,10 +484,37 @@ Result<std::unique_ptr<CocoaSurface>> CocoaSurface::open(std::string_view title,
             [editMenu addItemWithTitle:@"Paste" action:@selector(paste:) keyEquivalent:@"v"];
             [editItem setSubmenu:editMenu];
 
+            // View menu: font zoom + fullscreen. The zoom items are for
+            // discoverability; performKeyEquivalent: already handles the keys.
+            NSMenuItem *viewItem = [[NSMenuItem alloc] init];
+            [bar addItem:viewItem];
+            NSMenu *viewMenu = [[NSMenu alloc] initWithTitle:@"View"];
+            [viewMenu addItemWithTitle:@"Bigger" action:nil keyEquivalent:@"+"];
+            [viewMenu addItemWithTitle:@"Smaller" action:nil keyEquivalent:@"-"];
+            [viewMenu addItemWithTitle:@"Actual Size" action:nil keyEquivalent:@"0"];
+            [viewMenu addItem:[NSMenuItem separatorItem]];
+            NSMenuItem *fs = [viewMenu addItemWithTitle:@"Enter Full Screen"
+                                                 action:@selector(toggleFullScreen:)
+                                          keyEquivalent:@"f"];
+            fs.keyEquivalentModifierMask = NSEventModifierFlagControl | NSEventModifierFlagCommand;
+            [viewItem setSubmenu:viewMenu];
+
+            // Window menu: Minimize / Zoom, and register it so macOS manages it.
+            NSMenuItem *winItem = [[NSMenuItem alloc] init];
+            [bar addItem:winItem];
+            NSMenu *winMenu = [[NSMenu alloc] initWithTitle:@"Window"];
+            [winMenu addItemWithTitle:@"Minimize"
+                               action:@selector(performMiniaturize:)
+                        keyEquivalent:@"m"];
+            [winMenu addItemWithTitle:@"Zoom" action:@selector(performZoom:) keyEquivalent:@""];
+            [winItem setSubmenu:winMenu];
+            [app setWindowsMenu:winMenu];
+
             [app setMainMenu:bar];
         }
 
         auto s = std::unique_ptr<CocoaSurface>(new CocoaSurface());
+        s->inbox_.default_font_px = g_default_font_px;
 
         // Content size is in POINTS; the GL drawable is in backing pixels.
         const NSRect content = NSMakeRect(0, 0, std::max(1, (int)initial.w),
@@ -456,6 +533,13 @@ Result<std::unique_ptr<CocoaSurface>> CocoaSurface::open(std::string_view title,
                                                length:(NSUInteger)title.size()
                                              encoding:NSUTF8StringEncoding];
         [s->window_ setTitle:(t ? t : @"hand")];
+
+        // Native feel: a dark aqua appearance so the titlebar matches a dark
+        // terminal background, no window tabbing (single-window terminal), and
+        // the toolbar-style titlebar so the chrome sits tight to the content.
+        s->window_.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+        if (@available(macOS 10.12, *)) [s->window_ setTabbingMode:NSWindowTabbingModeDisallowed];
+        s->window_.titlebarAppearsTransparent = NO;
 
         // 3.2 core profile — matches toe's #version 330 GLSL, within macOS's 4.1
         // ceiling. Double-buffered; no depth/stencil needed for 2D.
@@ -478,6 +562,10 @@ Result<std::unique_ptr<CocoaSurface>> CocoaSurface::open(std::string_view title,
         s->delegate_ = [[HandWindowDelegate alloc] init];
         s->delegate_->inbox_ = &s->inbox_;
         [s->window_ setDelegate:s->delegate_];
+
+        s->app_delegate_ = [[HandAppDelegate alloc] init];
+        s->app_delegate_->inbox_ = &s->inbox_;
+        [app setDelegate:s->app_delegate_];
 
         [s->window_ setContentView:s->view_];
         [s->window_ setAcceptsMouseMovedEvents:YES];
@@ -562,6 +650,8 @@ void CocoaSurface::poll_events(const toe::EventSink &sink) {
                     sink(toe::win::Resized{p.size});
                 } else if constexpr (std::is_same_v<T, PendingFocus>) {
                     sink(toe::win::FocusChanged{p.focused});
+                } else if constexpr (std::is_same_v<T, PendingZoom>) {
+                    sink(toe::win::FontZoom{p.delta, p.absolute});
                 } else if constexpr (std::is_same_v<T, PendingMouse>) {
                     using K = PendingMouse::Kind;
                     switch (p.kind) {
@@ -690,6 +780,8 @@ int run_cocoa(const toe::Config &cfg_in, const toe::WindowConfig &win) {
         // half-pixel that rounds up to the next point.
         cfg.font_pixel_size = (int)((CGFloat)cfg.font_pixel_size * scale);
     }
+    // Seed Cmd-0 "reset zoom" with the launch size (read in CocoaSurface::open).
+    platform::g_default_font_px = cfg.font_pixel_size;
     return toe::run<CocoaApp>(cfg, win);
 }
 
