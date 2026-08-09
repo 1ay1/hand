@@ -10,10 +10,20 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <system_error>
 #include <vector>
+
+// stb_truetype is vendored by toe (its impl is compiled into libtoe, which hand
+// links) — we include the header for DECLARATIONS only (no IMPLEMENTATION) to
+// read font metrics and detect monospace by ADVANCE WIDTH, not by name. This is
+// what lets us find Iosevka, Terminus, Berkeley Mono, PragmataPro, etc. — great
+// mono fonts whose names don't contain "mono".
+#include "stb/stb_truetype.h"
 
 namespace fs = std::filesystem;
 
@@ -33,19 +43,77 @@ bool is_font_file(const fs::path &p) {
     return e == ".ttf" || e == ".otf" || e == ".ttc";
 }
 
-// The standard search roots, most-specific first (user overrides system).
+// The standard search roots, most-specific first (user overrides system). We
+// cast a WIDE net so fonts installed anywhere a modern Linux stashes them are
+// found: user dirs, XDG_DATA_DIRS, Flatpak/host, and Nix profiles.
 std::vector<fs::path> font_roots() {
     std::vector<fs::path> roots;
+    auto add = [&](fs::path p) {
+        for (const auto &r : roots) if (r == p) return; // dedup
+        roots.emplace_back(std::move(p));
+    };
     if (const char *home = std::getenv("HOME"); home && *home) {
-        roots.emplace_back(fs::path(home) / ".local/share/fonts");
-        roots.emplace_back(fs::path(home) / ".fonts");
+        add(fs::path(home) / ".local/share/fonts");
+        add(fs::path(home) / ".fonts");
+        add(fs::path(home) / ".nix-profile/share/fonts"); // Nix (per-user)
     }
-    if (const char *xdg = std::getenv("XDG_DATA_HOME"); xdg && *xdg) {
-        roots.emplace_back(fs::path(xdg) / "fonts");
+    if (const char *xdg = std::getenv("XDG_DATA_HOME"); xdg && *xdg)
+        add(fs::path(xdg) / "fonts");
+    // Every dir in $XDG_DATA_DIRS (colon-separated) may hold a fonts/ subdir.
+    if (const char *dirs = std::getenv("XDG_DATA_DIRS"); dirs && *dirs) {
+        std::string s(dirs);
+        std::size_t i = 0;
+        while (i < s.size()) {
+            std::size_t j = s.find(':', i);
+            if (j == std::string::npos) j = s.size();
+            if (j > i) add(fs::path(s.substr(i, j - i)) / "fonts");
+            i = j + 1;
+        }
     }
-    roots.emplace_back("/usr/share/fonts");
-    roots.emplace_back("/usr/local/share/fonts");
+    add("/usr/share/fonts");
+    add("/usr/local/share/fonts");
+    add("/run/host/usr/share/fonts");        // Flatpak: host fonts
+    add("/run/host/usr/local/share/fonts");
+    add("/nix/var/nix/profiles/default/share/fonts"); // Nix (system)
+    add("/opt/homebrew/share/fonts");        // Linuxbrew / brew
+    add("/Library/Fonts");                   // (harmless on Linux; a no-op)
     return roots;
+}
+
+// Read a font file and decide whether it's MONOSPACE by comparing the advance
+// widths of a narrow glyph ('i'/'l') and a wide one ('M'/'W'): in a monospaced
+// face they're identical. Metric-based, so it works regardless of the family
+// name. `.ttc` collections: check face 0. Returns false on any read error.
+bool is_monospace_file(const fs::path &path) {
+    std::error_code ec;
+    const auto sz = fs::file_size(path, ec);
+    if (ec || sz == 0 || sz > 64u * 1024 * 1024) return false; // sanity cap
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return false;
+    std::vector<unsigned char> buf(static_cast<std::size_t>(sz));
+    if (!f.read(reinterpret_cast<char *>(buf.data()), static_cast<std::streamsize>(sz)))
+        return false;
+    const int off = stbtt_GetFontOffsetForIndex(buf.data(), 0);
+    if (off < 0) return false;
+    stbtt_fontinfo info;
+    if (!stbtt_InitFont(&info, buf.data(), off)) return false;
+    auto adv = [&](int cp) {
+        int a = 0, lsb = 0;
+        const int g = stbtt_FindGlyphIndex(&info, cp);
+        if (g == 0) return -1;
+        stbtt_GetGlyphHMetrics(&info, g, &a, &lsb);
+        return a;
+    };
+    const int narrow = adv('i') > 0 ? adv('i') : adv('l');
+    const int wide = adv('M') > 0 ? adv('M') : adv('W');
+    const int space = adv(' ');
+    if (narrow <= 0 || wide <= 0) return false;
+    // Exactly equal narrow/wide advance is the monospace signature. Also require
+    // the space to match (rules out a few proportional fonts that happen to have
+    // equal i/M). A tiny tolerance absorbs rounding in odd faces.
+    if (std::abs(narrow - wide) > 1) return false;
+    if (space > 0 && std::abs(space - wide) > 1) return false;
+    return true;
 }
 
 // Strip a trailing style descriptor ("-Bold", " Italic", "-Regular", "BoldOblique",
@@ -102,6 +170,49 @@ std::string resolve_font_file(std::string_view family) {
     const std::string needle = lower(family);
     const bool generic = needle.empty() || needle == "monospace" || needle == "mono";
 
+    // Fast path: ask fontconfig to resolve the family to a concrete file. This
+    // is the AUTHORITATIVE mapping (respects the user's fontconfig, aliases,
+    // and every install dir), so a name we listed from `fc-list` resolves to
+    // the right face — including families with no "mono" in the name. We only
+    // trust an EXACT-ish match (fc-match falls back to a default otherwise, so
+    // verify the returned file's family relates to what was asked).
+    if (!generic) {
+        std::string cmd = "fc-match -f '%{file}' ";
+        // Shell-quote the family (single quotes; escape any embedded quote).
+        std::string q = "'";
+        for (char c : family) { if (c == '\'') q += "'\\''"; else q += c; }
+        q += ":spacing=100'"; // prefer the monospaced face of that family
+        cmd += q + " 2>/dev/null";
+        if (FILE *pipe = ::popen(cmd.c_str(), "r")) {
+            char buf[4096];
+            std::string file;
+            if (std::fgets(buf, sizeof buf, pipe)) file = buf;
+            ::pclose(pipe);
+            while (!file.empty() && (file.back() == '\n' || file.back() == '\r')) file.pop_back();
+            // Accept only a real, readable font file whose name plausibly
+            // matches (fc-match ALWAYS returns something — its fallback default
+            // when the family is unknown; guard against that).
+            std::error_code fec;
+            if (!file.empty() && fs::exists(file, fec) && is_font_file(fs::path(file))) {
+                // Collapse spaces/hyphens on BOTH sides so "JetBrains Mono"
+                // matches a "JetBrainsMono-Regular.ttf" stem. fc-match ALWAYS
+                // returns something (its default when the family is unknown),
+                // so require the returned file's family to actually contain the
+                // requested one — else fall through to the metric-ranked walk.
+                auto collapse = [](std::string s) {
+                    std::string o;
+                    for (char c : s)
+                        if (c != ' ' && c != '-' && c != '_')
+                            o += static_cast<char>(std::tolower((unsigned char)c));
+                    return o;
+                };
+                const std::string want = collapse(std::string(family));
+                const std::string got = collapse(fs::path(file).stem().string());
+                if (!want.empty() && got.find(want) != std::string::npos) return file;
+            }
+        }
+    }
+
     // Rank a candidate's suitability as the REGULAR face (higher = better):
     // an exact "-regular"/no-weight stem beats a "-medium"/"-book", which beats
     // other weights (Light/Thin/ExtraLight) — so a family whose files are all
@@ -155,10 +266,52 @@ std::string resolve_font_file(std::string_view family) {
     return best_mono; // "" if nothing usable found
 }
 
+// --- fontconfig fast path --------------------------------------------------
+// When the `fc-list` CLI is available (nearly every Linux desktop), it is the
+// AUTHORITATIVE source: it knows every installed family, honours the user's
+// fontconfig, and can filter to monospaced faces (spacing=mono=100) directly.
+// We parse `fc-list :spacing=100 family` — one family per line, comma-separated
+// localised names (we keep the first). Returns empty if fc-list isn't present.
+std::vector<std::string> fc_list_mono() {
+    std::vector<std::string> out;
+    // -f prints just the family; :spacing=100 restricts to monospaced faces.
+    FILE *pipe = ::popen("fc-list :spacing=100 family 2>/dev/null", "r");
+    if (!pipe) return out;
+    char line[1024];
+    while (std::fgets(line, sizeof line, pipe)) {
+        std::string s(line);
+        // Trim trailing newline/CR.
+        while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
+        if (s.empty()) continue;
+        // fc-list may print several comma-separated localised names; take the
+        // first (usually the English/latin one).
+        if (auto comma = s.find(','); comma != std::string::npos) s.erase(comma);
+        // Some builds append a trailing "=" style token — strip anything after it.
+        if (auto eq = s.find("="); eq != std::string::npos) s.erase(eq);
+        while (!s.empty() && s.back() == ' ') s.pop_back();
+        if (!s.empty()) out.push_back(std::move(s));
+    }
+    ::pclose(pipe);
+    std::sort(out.begin(), out.end(),
+              [](const std::string &a, const std::string &b) { return lower(a) < lower(b); });
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return out;
+}
+
 std::vector<std::string> list_monospace_families() {
     std::vector<std::string> out;
     out.push_back("monospace"); // the system-default alias, always first
 
+    // 1) fontconfig: authoritative + fast when present. Use it if it returns
+    //    anything useful.
+    if (auto fc = fc_list_mono(); !fc.empty()) {
+        for (auto &f : fc) out.push_back(std::move(f));
+        return out;
+    }
+
+    // 2) Fallback: walk the font roots and detect monospace by METRICS (advance
+    //    width), not by name — so Iosevka, Terminus, Berkeley Mono, PragmataPro,
+    //    Departure Mono, etc. are all found even without "mono" in the name.
     std::vector<std::string> found;
     std::error_code ec;
     for (const auto &root : font_roots()) {
@@ -171,10 +324,10 @@ std::vector<std::string> list_monospace_families() {
             if (!it->is_regular_file(ec) || !is_font_file(p)) continue;
             const std::string stem = p.stem().string();
             const std::string lstem = lower(stem);
-            if (lstem.find("mono") == std::string::npos && !preferred_mono(lstem)) continue;
-            // Present the base family (strip -Bold/-Italic/-Regular/etc. and any
-            // trailing separators) so the dropdown lists one row per family;
-            // the atlas synthesizes bold/italic from the regular face.
+            // Quick accept for obvious mono names / our preferred list; otherwise
+            // fall back to the (more expensive) metric probe.
+            const bool named_mono = lstem.find("mono") != std::string::npos || preferred_mono(lstem);
+            if (!named_mono && !is_monospace_file(p)) continue;
             found.push_back(base_family(stem));
         }
     }
