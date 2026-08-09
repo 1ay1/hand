@@ -114,7 +114,7 @@ public:
         // Footer key hints.
         const int fy = panel_.bottom() - 2;
         buf_.hrule(content_.x, fy - 1, content_.w, Style{theme_.border, theme_.panel_bg});
-        const char *hint = "↑↓ move   ←→/space edit   enter ok   esc close";
+        const char *hint = "↑↓ move   ←→/space edit   ⌘S save   esc close";
         buf_.text(content_.x, fy, hint, Style{theme_.dim, theme_.panel_bg});
 
         // Focus wrap after we know the row count.

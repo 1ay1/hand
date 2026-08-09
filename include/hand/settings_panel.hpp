@@ -73,6 +73,9 @@ public:
     // not reach the terminal). Escape closes the panel.
     [[nodiscard]] bool handle(const toe::win::Event &ev);
 
+    // Request a save (e.g. from ⌘S). Persists on the next render().
+    void request_save() { force_save_ = true; }
+
     // Paint the form into `buf` (sized to the terminal grid in cells), using the
     // input accumulated since the last handle(). Out-params report a live edit
     // (apply to the running terminal) and a save request (persist to config).
@@ -90,6 +93,7 @@ private:
     bool want_save_ = false;
     bool dirty_ = false;     // edits since last save/open (unsaved-changes hint)
     bool saved_flash_ = false; // show a brief "saved" confirmation next frame
+    bool force_save_ = false;  // ⌘S requested a save this/next frame
     int focus_ = 0;          // persistent focus row (the Ctx is recreated per frame)
     // Font dropdown state.
     std::vector<std::string> fonts_{};  // installed monospace families

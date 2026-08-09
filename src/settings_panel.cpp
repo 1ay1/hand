@@ -167,7 +167,8 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed, bool &save) {
     const char *label = saved_flash_ ? "✓ Saved" : (dirty_ ? "Save changes *" : "Save to config");
     const bool hit = ui.button(label);
     saved_flash_ = false;
-    if (hit) want_save_ = true;
+    if (hit || force_save_) want_save_ = true;
+    force_save_ = false;
 
     ui.end_panel();
 

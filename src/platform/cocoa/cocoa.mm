@@ -21,6 +21,7 @@
 
 #include "hand/app.hpp"
 #include "hand/platform/surface.hpp"
+#include "hand/platform/fonts.hpp"
 #include "hand/settings_panel.hpp"
 #include "hand/glyph/glyph.hpp"
 
@@ -99,6 +100,7 @@ struct CocoaInbox {
     bool close_requested = false;
     bool saw_event = false; // any native event since the last wait (window-ready)
     bool settings_toggle = false; // ⌘, requested opening/closing the settings panel
+    bool settings_save = false;   // ⌘S requested saving the settings panel
     // The font size the app launched with, so Cmd-0 can reset to it.
     int default_font_px = 0;
     // Fractional scroll accumulators: trackpad deltas are sub-"line"; we bank
@@ -327,6 +329,10 @@ std::optional<toe::SpecialKey> special_of_keycode(unsigned short kc) {
         return YES;
     case ',': // Open/close the in-terminal settings panel (⌘,)
         inbox_->settings_toggle = true;
+        inbox_->saw_event = true;
+        return YES;
+    case 's': // Save the settings panel (⌘S) — only meaningful while it's open
+        inbox_->settings_save = true;
         inbox_->saw_event = true;
         return YES;
     default:
@@ -749,6 +755,10 @@ void CocoaSurface::poll_events(const toe::EventSink &sink) {
         inbox_.settings_toggle = false;
         toggle_settings();
     }
+    if (inbox_.settings_save) {
+        inbox_.settings_save = false;
+        if (settings_.active()) settings_.request_save();
+    }
 
     if (inbox_.close_requested) {
         sink(toe::win::CloseRequested{});
@@ -922,15 +932,30 @@ void CocoaSurface::overlay_render(toe::Terminal &term, toe::PixelSize px) {
     settings_.render(overlay_buf_, changed, save);
 
     // Live-apply edits to the running terminal so you SEE them as you change
-    // them: font size (DPI-scaled) applies immediately. (Family/colors persist
-    // on Save and take effect on next launch — a live font-family swap needs a
-    // toe atlas-rebuild-by-name API, a separate addition.)
+    // them: font size (DPI-scaled), font family, and default fg/bg colours all
+    // take effect immediately.
     if (changed) {
         const hand::Settings &s = settings_.state();
         CGFloat scale = 1.0;
         if (NSScreen *scr = window_.screen ?: [NSScreen mainScreen]) scale = scr.backingScaleFactor;
         if (scale < 1.0) scale = 1.0;
         session->set_font_pixel_size((int)((CGFloat)s.font_size * scale), px);
+        // Font family: resolve to a concrete file, then swap the atlas live.
+        std::string file = resolve_font_file(s.font_family);
+        if (!file.empty()) session->set_font(file, px);
+        // Default colours: parse the #rrggbb hex fields and apply.
+        auto hex = [](const std::string &h) -> toe::Rgb {
+            if (h.size() != 7 || h[0] != '#') return toe::rgb(200, 200, 200);
+            auto d = [](char c) -> int {
+                if (c >= '0' && c <= '9') return c - '0';
+                if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+                if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+                return 0;
+            };
+            auto v = [&](int i) { return (std::uint8_t)(d(h[i]) * 16 + d(h[i + 1])); };
+            return toe::rgb(v(1), v(3), v(5));
+        };
+        session->set_default_colors(hex(s.fg), hex(s.bg));
     }
     // Save persists to the VIBE file (handled inside settings_.render) and the
     // panel shows a "✓ Saved" confirmation — it stays open so you can keep
