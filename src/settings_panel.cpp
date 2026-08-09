@@ -233,7 +233,7 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
     case 0: { // Theme — the headline: one pick recolours grid + chrome live.
         sync_theme_index();
         if (ui.dropdown("Theme", &theme_index_, theme_labels_, &dd_open_,
-                        &theme_dd_sel_, &theme_dd_top_, 10)) {
+                        &theme_dd_sel_, &theme_dd_top_, 10, &theme_filter_)) {
             if (theme_index_ >= 0 && theme_index_ < static_cast<int>(theme_ids_.size())) {
                 // Refill the colour fields from the chosen theme so the Colors
                 // tab mirrors it and the host applies the full palette live.
@@ -257,7 +257,8 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
         break;
     }
     case 1: // Font
-        if (ui.dropdown("Family", &font_index_, fonts_, &dd_open_, &dd_sel_, &dd_top_, 6)) {
+        if (ui.dropdown("Family", &font_index_, fonts_, &dd_open_, &dd_sel_, &dd_top_, 6,
+                        &font_filter_)) {
             if (font_index_ >= 0 && font_index_ < static_cast<int>(fonts_.size()))
                 s_.font_family = fonts_[static_cast<std::size_t>(font_index_)];
             changed = true;
@@ -306,7 +307,10 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
     default: break;
     }
 
-    ui.end_panel("\u2190\u2192 section / edit   \u2191\u2193 move   changes apply + save live   esc close");
+    if (dd_open_ >= 0)
+        ui.end_panel("type to filter   \u2191\u2193 move   \u21b5 select   esc cancel");
+    else
+        ui.end_panel("\u2190\u2192 section / edit   \u2191\u2193 move   changes apply + save live   esc close");
 
     // Live config: any edit is scheduled for persistence. We debounce so a
     // slider drag writes the file once it settles, not on every tick; close()

@@ -38,6 +38,11 @@ namespace hand::platform {
 
 class SettingsHost {
 public:
+    // Background opacity of the overlay pane (glyphs stay fully opaque). Below 1
+    // the terminal shows through as frosted glass — the pane feels layered over
+    // the session, not a flat modal. 0.90 keeps text crisply readable.
+    static constexpr float kOverlayAlpha = 0.90f;
+
     // Seed the panel from the process-wide config source (main() installs it via
     // set_settings_source before the window opens). Also arms the inotify watch
     // on the config file so external edits hot-reload.
@@ -124,7 +129,8 @@ public:
         if (help_.active()) {
             help_.render(buf_);
             auto rc = toe::gfx::RenderContext::adopt_current();
-            session->render_overlay(rc, buf_.data(), buf_.width(), buf_.height(), px);
+            session->render_overlay(rc, buf_.data(), buf_.width(), buf_.height(), px, 0, 0,
+                                    kOverlayAlpha);
             return;
         }
 
@@ -136,7 +142,8 @@ public:
         if (changed) apply(*session, panel_.state(), px);
 
         auto rc = toe::gfx::RenderContext::adopt_current();
-        session->render_overlay(rc, buf_.data(), buf_.width(), buf_.height(), px);
+        session->render_overlay(rc, buf_.data(), buf_.width(), buf_.height(), px, 0, 0,
+                                kOverlayAlpha);
     }
 
     // Called when the config-watch fd wakes: drain inotify, and if a real

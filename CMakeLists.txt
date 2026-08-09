@@ -269,6 +269,13 @@ if(HAND_BUILD_TESTS AND NOT APPLE)
   target_link_libraries(themes_test PRIVATE hand::platform vibe)
   add_test(NAME themes COMMAND themes_test)
 
+  # Glyph IMGUI toolkit: header-only, paints into a plain cell Buffer (no GL).
+  # Exercises the dropdown filter/select flow.
+  add_executable(glyph_test tests/glyph_test.cpp)
+  target_include_directories(glyph_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+  target_link_libraries(glyph_test PRIVATE toe)
+  add_test(NAME glyph COMMAND glyph_test)
+
   # Config watcher: pure inotify logic, no GL / no deps.
   add_executable(config_watch_test tests/config_watch_test.cpp)
   target_include_directories(config_watch_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")

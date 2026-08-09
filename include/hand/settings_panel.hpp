@@ -168,6 +168,10 @@ private:
     std::vector<std::string> theme_ids_{};
     int theme_index_ = 0;              // selected index into theme_ids_
     int theme_dd_sel_ = 0, theme_dd_top_ = 0;
+    // Live incremental filter text for the theme + font dropdowns (persists
+    // across frames since the Ctx is recreated each frame).
+    std::string theme_filter_{};
+    std::string font_filter_{};
 
     static glyph::Input translate(const toe::win::Event &ev, bool &consumed);
 

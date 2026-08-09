@@ -65,6 +65,23 @@ struct Theme {
     [[nodiscard]] Style dimmed() const { return {dim, panel_bg}; }
     [[nodiscard]] Style focused() const { return {fg, focus_bg}; }
     [[nodiscard]] Style accented() const { return {accent, panel_bg}; }
+
+    // Linear blend a->b by t in [0,1]. The toolkit derives every incidental
+    // surface (title band, popup, shadow, scrollbar) from the core colours so a
+    // theme swap recolours the whole chrome coherently.
+    [[nodiscard]] static Rgb mix(Rgb a, Rgb b, float t) {
+        auto c = [t](std::uint8_t x, std::uint8_t y) {
+            const float v = static_cast<float>(x) + (static_cast<float>(y) - x) * t;
+            return static_cast<std::uint8_t>(v < 0 ? 0 : (v > 255 ? 255 : v) + 0.5f);
+        };
+        return rgb(c(a.r, b.r), c(a.g, b.g), c(a.b, b.b));
+    }
+    // The title bar: panel_bg lifted toward the accent for a coloured header.
+    [[nodiscard]] Rgb title_bg() const { return mix(panel_bg, accent, 0.16f); }
+    // A popup/menu surface: a touch lighter than the panel so it floats above.
+    [[nodiscard]] Rgb pop_bg() const { return mix(panel_bg, fg, 0.07f); }
+    // Drop-shadow colour (used at the pane's per-cell alpha).
+    [[nodiscard]] Rgb shadow() const { return mix(bg, rgb(0, 0, 0), 0.55f); }
 };
 
 class Ctx {
@@ -79,32 +96,50 @@ public:
     }
 
     // --- panel frame --------------------------------------------------------
-    // Open a centered panel of `cols`x`rows` with a titled rounded frame.
-    // Content is laid out row by row inside. Returns the content rect.
+    // Open a centered panel of `cols`x`rows` with a titled rounded frame,
+    // floated over the terminal with a soft drop shadow and a coloured title
+    // band. Content is laid out row by row inside.
     void begin_panel(std::string_view title, int cols = 56, int rows = 0) {
-        // Dim the whole backdrop first (a subtle scrim over the terminal).
-        buf_.clear(Style{theme_.dim, theme_.bg, Attr::None});
+        // Dim the whole backdrop first: a scrim that de-emphasises the terminal
+        // WITHOUT hiding it (the overlay pass makes this translucent). Blank
+        // glyphs so nothing from the pane text bleeds into the scrim.
+        buf_.clear(Style{theme_.dim, Theme::mix(theme_.bg, rgb(0, 0, 0), 0.35f), Attr::None});
         panel_w_ = std::min(cols, buf_.width() - 2);
-        // Auto-height: caller may pass 0 and we grow as widgets are added, but
-        // for a stable layout we reserve a generous height and frame at end.
         panel_h_ = rows > 0 ? std::min(rows, buf_.height() - 2) : buf_.height() - 4;
         panel_.x = (buf_.width() - panel_w_) / 2;
         panel_.y = (buf_.height() - panel_h_) / 2;
         panel_.w = panel_w_;
         panel_.h = panel_h_;
 
+        // Drop shadow: a soft dark rect offset down-right, so the card visibly
+        // floats above the terminal. Drawn BEFORE the panel body.
+        const Style shadow{theme_.shadow(), theme_.shadow()};
+        for (int dy = 1; dy <= 1; ++dy)
+            buf_.fill(Rect{panel_.x + 2, panel_.y + panel_.h, panel_.w, 1}, shadow);
+        buf_.fill(Rect{panel_.x + panel_.w, panel_.y + 1, 2, panel_.h}, shadow);
+
+        // Panel body + rounded frame.
         buf_.fill(panel_, Style{theme_.fg, theme_.panel_bg});
         buf_.frame(panel_, Style{theme_.border, theme_.panel_bg}, BoxStyle::Rounded);
 
-        // Title, centered in the top border with padding.
-        std::string t = " " + std::string(title) + " ";
+        // Coloured title BAND across the top interior row: fills row y+1 with a
+        // tint and centres the bold title on it. Reads like a real window
+        // titlebar rather than text hanging in the border.
+        const int band_y = panel_.y + 1;
+        const Rgb tbg = theme_.title_bg();
+        buf_.fill(Rect{panel_.x + 1, band_y, panel_.w - 2, 1}, Style{theme_.accent, tbg});
+        std::string t = std::string(title);
         const int tw = Buffer::text_width(t);
         const int tx = panel_.x + (panel_w_ - tw) / 2;
-        buf_.text(tx, panel_.y, t, Style{theme_.accent, theme_.panel_bg, Attr::Bold});
+        buf_.text(tx, band_y, t, Style{theme_.accent, tbg, Attr::Bold});
+        // A small ‹esc› affordance on the right of the band.
+        const char *hint = "esc";
+        buf_.text(panel_.right() - 2 - Buffer::text_width(hint), band_y, hint,
+                  Style{Theme::mix(theme_.accent, tbg, 0.35f), tbg});
 
         content_ = panel_.inset(1);
         content_.x += 1; content_.w -= 2; // horizontal breathing room
-        cursor_y_ = content_.y + 1;
+        cursor_y_ = band_y + 2;           // leave a blank line under the band
         row_index_ = 0;
         activated_ = -1;
         consumed_ = false;
@@ -281,7 +316,10 @@ public:
     // state (-1 = none); `list_sel` the highlighted index while open; `list_top`
     // the scroll offset. Returns true when the selection changed.
     bool dropdown(std::string_view label, int *index, const std::vector<std::string> &opts,
-                  int *open_row, int *list_sel, int *list_top, int max_visible = 8) {
+                  int *open_row, int *list_sel, int *list_top, int max_visible = 8,
+                  std::string *filter = nullptr) {
+        static std::string s_scratch; // fallback when the caller passes none
+        std::string &flt = filter ? *filter : s_scratch;
         const int r = begin_row();
         const bool foc = (r == focus_);
         const int n = static_cast<int>(opts.size());
@@ -289,10 +327,11 @@ public:
         const bool is_open = (*open_row == r);
 
         if (foc && !is_open && act()) {
-            // Open: seed the highlight at the current value.
+            // Open: seed the highlight at the current value, clear the filter.
             *open_row = r;
             *list_sel = std::clamp(*index, 0, std::max(0, n - 1));
             *list_top = std::clamp(*list_sel - max_visible / 2, 0, std::max(0, n - max_visible));
+            flt.clear();
             consumed_ = true;
         }
 
@@ -304,74 +343,112 @@ public:
         Style vs{is_open ? theme_.accent : theme_.fg, foc ? theme_.focus_bg : theme_.panel_bg,
                  Attr::Bold};
         buf_.text(vx, cursor_y_, val, vs, content_.right() - vx - 2);
+        // A pill-style chevron box on the right edge.
         buf_.put(content_.right() - 2, cursor_y_, is_open ? U'▴' : U'▾',
-                 Style{theme_.dim, foc ? theme_.focus_bg : theme_.panel_bg});
+                 Style{foc ? theme_.accent : theme_.dim, foc ? theme_.focus_bg : theme_.panel_bg});
         end_row();
 
         if (!is_open) return changed;
 
-        // --- the open list ---
-        if (in_.key == Key::Down) { *list_sel = std::min(n - 1, *list_sel + 1); consumed_ = true; }
+        // --- filtering: build the visible index list from flt ---------
+        // Substring match (case-insensitive) so you can type "night" and land on
+        // Tokyo Night among 600 entries — far better than a first-letter jump.
+        auto lc = [](std::string s) { for (char &c : s) c = char(std::tolower((unsigned char)c)); return s; };
+        const std::string needle = lc(flt);
+        std::vector<int> hits;
+        hits.reserve(static_cast<std::size_t>(n));
+        for (int i = 0; i < n; ++i)
+            if (needle.empty() || lc(opts[static_cast<std::size_t>(i)]).find(needle) != std::string::npos)
+                hits.push_back(i);
+        if (hits.empty()) hits.push_back(std::clamp(*index, 0, std::max(0, n - 1)));
+        const int m = static_cast<int>(hits.size());
+
+        // *list_sel is an index into the FILTERED list here.
+        if (in_.key == Key::Down) { *list_sel = std::min(m - 1, *list_sel + 1); consumed_ = true; }
         else if (in_.key == Key::Up) { *list_sel = std::max(0, *list_sel - 1); consumed_ = true; }
-        else if (in_.key == Key::PageDown) { *list_sel = std::min(n - 1, *list_sel + max_visible); consumed_ = true; }
+        else if (in_.key == Key::PageDown) { *list_sel = std::min(m - 1, *list_sel + max_visible); consumed_ = true; }
         else if (in_.key == Key::PageUp) { *list_sel = std::max(0, *list_sel - max_visible); consumed_ = true; }
-        else if (in_.key == Key::Escape) { *open_row = -1; consumed_ = true; return changed; }
+        else if (in_.key == Key::Escape) { *open_row = -1; flt.clear(); consumed_ = true; return changed; }
         else if (in_.key == Key::Enter || in_.key == Key::Space) {
-            if (*list_sel != *index) { *index = *list_sel; changed = true; }
-            *open_row = -1; consumed_ = true;
+            const int pick = hits[static_cast<std::size_t>(std::clamp(*list_sel, 0, m - 1))];
+            if (pick != *index) { *index = pick; changed = true; }
+            *open_row = -1; flt.clear(); consumed_ = true;
         }
-        // Type-ahead: a letter/digit jumps to the NEXT option whose label
-        // starts with it (case-insensitive), wrapping. Indispensable when the
-        // list is hundreds of themes long — you type "nor"-ish and land on Nord.
+        else if (in_.key == Key::Backspace) {
+            if (!flt.empty()) flt.pop_back();
+            *list_sel = 0; consumed_ = true;
+        }
+        // Any printable char extends the incremental filter.
         else if (in_.key == Key::Char && in_.ch > 0x20 && in_.ch < 0x7f) {
-            const char want = static_cast<char>(std::tolower(static_cast<int>(in_.ch)));
-            for (int step = 1; step <= n; ++step) {
-                const int oi = (*list_sel + step) % n;
-                const auto &o = opts[static_cast<std::size_t>(oi)];
-                if (!o.empty() &&
-                    std::tolower(static_cast<unsigned char>(o[0])) == want) {
-                    *list_sel = oi;
-                    break;
-                }
-            }
-            consumed_ = true;
+            flt.push_back(char(in_.ch));
+            *list_sel = 0; consumed_ = true;
         }
-        // Keep the highlighted item in view.
+        *list_sel = std::clamp(*list_sel, 0, std::max(0, m - 1));
+
+        // Keep the highlighted item in view (window over the FILTERED list).
         if (*list_sel < *list_top) *list_top = *list_sel;
         if (*list_sel >= *list_top + max_visible) *list_top = *list_sel - max_visible + 1;
-        *list_top = std::clamp(*list_top, 0, std::max(0, n - max_visible));
+        *list_top = std::clamp(*list_top, 0, std::max(0, m - max_visible));
 
-        const int vis = std::min(max_visible, n);
+        // Popup geometry: a framed menu that floats over following rows, clamped
+        // to the panel so it never overruns the footer. Width spans from the
+        // value column to the panel edge.
         const int lx = vx - 1;
-        const int lw = content_.right() - lx - 1;
-        // A bordered popup panel drawn over the following rows.
+        const int lw = content_.right() - lx;
+        const int top = cursor_y_;
+        // Space available from `top` to just above the footer rule (2 rows).
+        const int avail = panel_.bottom() - 3 - top - 3; // -frame(2) -header(1)
+        int vis = std::min(max_visible, m);
+        if (avail > 0) vis = std::min(vis, avail);
+        vis = std::max(vis, 1);
+        // Re-window the scroll to the possibly-smaller viewport.
+        if (*list_sel >= *list_top + vis) *list_top = *list_sel - vis + 1;
+        *list_top = std::clamp(*list_top, 0, std::max(0, m - vis));
+        const int box_h = vis + 2 /*frame*/ + 1 /*filter header*/;
+        const Rgb pbg = theme_.pop_bg();
+
+        // Drop shadow under the popup.
+        buf_.fill(Rect{lx + 1, top + box_h, lw, 1}, Style{theme_.shadow(), theme_.shadow()});
+        buf_.fill(Rect{lx + lw, top + 1, 1, box_h}, Style{theme_.shadow(), theme_.shadow()});
+        // Body + rounded frame.
+        buf_.fill(Rect{lx, top, lw, box_h}, Style{theme_.fg, pbg});
+        buf_.frame(Rect{lx, top, lw, box_h}, Style{theme_.accent, pbg}, BoxStyle::Rounded);
+
+        // Filter header row: a search glyph + the live query (or a hint).
+        const int hy = top + 1;
+        buf_.put(lx + 1, hy, U'🔍', Style{theme_.accent, pbg});
+        if (flt.empty())
+            buf_.text(lx + 3, hy, "type to filter…", Style{theme_.dim, pbg}, lw - 10);
+        else
+            buf_.text(lx + 3, hy, flt, Style{theme_.fg, pbg, Attr::Bold}, lw - 12);
+        // Match count, right-aligned.
+        char cnt[24];
+        std::snprintf(cnt, sizeof cnt, "%d/%d", m, n);
+        buf_.text(lx + lw - 2 - Buffer::text_width(cnt), hy, cnt, Style{theme_.dim, pbg});
+
+        // Options.
         for (int i = 0; i < vis; ++i) {
-            const int oi = *list_top + i;
-            const bool sel = (oi == *list_sel);
+            const int fi = *list_top + i;
+            const int oi = hits[static_cast<std::size_t>(fi)];
+            const int ry = top + 2 + i;
+            const bool sel = (fi == *list_sel);
             const bool cur = (oi == *index);
-            Style rs = sel ? Style{theme_.accent_fg, theme_.accent, Attr::Bold}
-                           : Style{cur ? theme_.accent : theme_.fg, rgb(22, 24, 34)};
-            buf_.fill(Rect{lx, cursor_y_, lw, 1}, rs);
-            buf_.text(lx + 1, cursor_y_, cur ? "• " : "  ",
-                      Style{sel ? theme_.accent_fg : theme_.accent, rs.bg});
-            buf_.text(lx + 3, cursor_y_, opts[static_cast<std::size_t>(oi)], rs, lw - 4);
-            // Scrollbar hint on the right edge.
-            if (n > max_visible) {
-                const int track_h = vis;
-                const int thumb = std::clamp(*list_top * track_h / std::max(1, n), 0, track_h - 1);
-                buf_.put(lx + lw - 1, cursor_y_, i == thumb ? U'█' : U'│',
-                         Style{i == thumb ? theme_.accent : theme_.border, rs.bg});
+            const Rgb rbg = sel ? theme_.accent : pbg;
+            const Rgb rfg = sel ? theme_.accent_fg : (cur ? theme_.accent : theme_.fg);
+            buf_.fill(Rect{lx + 1, ry, lw - 2, 1}, Style{rfg, rbg});
+            // A check on the current value, a caret on the highlighted one.
+            const char32_t mark = cur ? U'✓' : (sel ? U'›' : U' ');
+            buf_.put(lx + 2, ry, mark, Style{rfg, rbg, Attr::Bold});
+            buf_.text(lx + 4, ry, opts[static_cast<std::size_t>(oi)],
+                      Style{rfg, rbg, sel ? Attr::Bold : Attr::None}, lw - 6);
+            // Scrollbar thumb on the right inner edge.
+            if (m > max_visible) {
+                const int thumb = std::clamp(*list_top * vis / std::max(1, m), 0, vis - 1);
+                buf_.put(lx + lw - 2, ry, i == thumb ? U'█' : U'│',
+                         Style{i == thumb ? theme_.accent : theme_.border, rbg});
             }
-            cursor_y_ += 1;
         }
-        // A count footer when the list scrolls.
-        if (n > max_visible) {
-            char cnt[48];
-            std::snprintf(cnt, sizeof cnt, "  %d of %d  (↑↓ · enter select · esc cancel)",
-                          *list_sel + 1, n);
-            buf_.text(lx, cursor_y_, cnt, Style{theme_.dim, theme_.panel_bg});
-            cursor_y_ += 1;
-        }
+        cursor_y_ = top + box_h;
         return changed;
     }
 
@@ -453,10 +530,13 @@ private:
     int begin_row() {
         const int idx = row_index_++;
         row_start_y_ = cursor_y_;
-        // Highlight the whole focused row for a clear cursor.
-        if (idx == focus_)
+        // Highlight the whole focused row + a bright accent caret bar down its
+        // left edge — an unmistakable cursor that reads at a glance.
+        if (idx == focus_) {
             buf_.fill(Rect{content_.x, cursor_y_, content_.w, 1},
                       Style{theme_.fg, theme_.focus_bg});
+            buf_.put(content_.x, cursor_y_, U'▐', Style{theme_.accent, theme_.focus_bg});
+        }
         return idx;
     }
     void end_row() { cursor_y_ += 1; }

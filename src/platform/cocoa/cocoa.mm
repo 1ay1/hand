@@ -1044,9 +1044,11 @@ void CocoaSurface::overlay_render(toe::Terminal &term, toe::PixelSize px) {
     // tweaking. No forced close.
     (void)save;
 
-    // Composite the panel over the terminal via the engine's overlay pass.
+    // Composite the panel over the terminal via the engine's overlay pass, as a
+    // frosted-glass layer (0.90 bg alpha; glyphs stay opaque).
     auto rc = toe::gfx::RenderContext::adopt_current();
-    session->render_overlay(rc, overlay_buf_.data(), overlay_buf_.width(), overlay_buf_.height(), px);
+    session->render_overlay(rc, overlay_buf_.data(), overlay_buf_.width(),
+                            overlay_buf_.height(), px, 0, 0, 0.90f);
 }
 
 } // namespace hand::platform
