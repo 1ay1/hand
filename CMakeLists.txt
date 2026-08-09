@@ -195,6 +195,23 @@ endif()
 target_compile_options(hand PRIVATE -Wall -Wextra -Wpedantic)
 
 # ===========================================================================
+# hand-agent — the headless, GPU-free "terminal for AI" driver. Spawns a PTY,
+# runs toe's VT engine with no renderer/window, and speaks line-delimited JSON
+# on stdio so an agent (or an MCP shim) can drive interactive programs. It needs
+# only toe + posix_pty (forkpty), so it builds on any POSIX host — no GL, no
+# Cocoa. (A Windows port would swap posix_pty for a conpty sibling.)
+# ===========================================================================
+if(NOT WIN32)
+  add_executable(hand-agent
+    src/agent/driver.cpp
+    src/platform/posix_pty.cpp)
+  target_include_directories(hand-agent PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+  target_link_libraries(hand-agent PRIVATE toe::toe)
+  target_compile_features(hand-agent PRIVATE cxx_std_23)
+  target_compile_options(hand-agent PRIVATE -Wall -Wextra)
+endif()
+
+# ===========================================================================
 # Renderer tests. These need a live GL context (from hand's offscreen backend)
 # to exercise toe's GPU renderer, so they live here rather than in toe (which
 # no longer links any window system). They SKIP (exit 77) when EGL is absent.
