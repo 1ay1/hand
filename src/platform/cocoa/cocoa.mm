@@ -371,6 +371,11 @@ std::optional<toe::SpecialKey> special_of_keycode(unsigned short kc) {
     // (mouse wheel) deltas are already in lines. Bank them and emit one wheel
     // step per whole line crossed, so a gentle two-finger drag still scrolls
     // and a fast flick doesn't overshoot.
+    //
+    // Sign: macOS scrollingDeltaY is NEGATIVE when scrolling up (content moves
+    // up to reveal earlier lines). toe's win::MouseWheel uses dy>0 = up/into
+    // history, so we NEGATE here to match — otherwise scrolling up would try to
+    // scroll down and clamp to a no-op at the live bottom.
     double dx = e.scrollingDeltaX, dy = e.scrollingDeltaY;
     if (e.hasPreciseScrollingDeltas) {
         dx /= 16.0; // ~one line per 16pt of trackpad travel
@@ -394,7 +399,7 @@ std::optional<toe::SpecialKey> special_of_keycode(unsigned short kc) {
     pm.x = (int)pp.x;
     pm.y = (int)(px.size.height - pp.y);
     pm.dx = sx;
-    pm.dy = sy;
+    pm.dy = -sy; // negate: scroll-up (negative deltaY) -> dy>0 = into history
     inbox_->events.push_back(pm);
 }
 
@@ -566,6 +571,8 @@ Result<std::unique_ptr<CocoaSurface>> CocoaSurface::open(std::string_view title,
 
         auto s = std::unique_ptr<CocoaSurface>(new CocoaSurface());
         s->inbox_.default_font_px = g_default_font_px;
+        // Seed the settings panel from the loaded config + its path.
+        s->settings_.bind(hand::settings_source_config(), hand::settings_source_path());
 
         // Content size is in POINTS; the GL drawable is in backing pixels.
         const NSRect content = NSMakeRect(0, 0, std::max(1, (int)initial.w),
@@ -851,8 +858,7 @@ void CocoaSurface::open_url(std::string_view u) {
 // --- OverlayApp: settings panel ---------------------------------------------
 
 void CocoaSurface::toggle_settings() {
-    hand::Settings cur = settings_.state();
-    settings_.toggle(cur);
+    settings_.toggle();
     inbox_.saw_event = true; // force a repaint
 }
 
