@@ -943,6 +943,30 @@ void CocoaSurface::toggle_settings() {
 }
 
 void CocoaSurface::bind_terminal(toe::Terminal &term, toe::PixelSize) {
+    // Push the loaded theme's ANSI palette + cursor colour to the live session
+    // (the panel was already bound from the config at window open; to_toe()
+    // only carries fg/bg into create). Parity with wayland/x11.
+    if (auto *s = term.poll().running) {
+        const hand::Settings &st = settings_.state();
+        auto hex = [](const std::string &h) {
+            auto v = [&](int i) {
+                auto d = [](char c) -> int {
+                    if (c >= '0' && c <= '9') return c - '0';
+                    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+                    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+                    return 0;
+                };
+                return static_cast<std::uint8_t>(d(h[i]) * 16 + d(h[i + 1]));
+            };
+            return (h.size() == 7 && h[0] == '#') ? toe::rgb(v(1), v(3), v(5)) : toe::rgb(0, 0, 0);
+        };
+        if (!st.palette.empty()) {
+            std::vector<toe::Rgb> pal;
+            for (const auto &h : st.palette) pal.push_back(hex(h));
+            s->set_palette(pal);
+        }
+        s->set_cursor_color(hex(st.cursor_color));
+    }
     // Install the live-resize hook. During a window drag, AppKit owns the main
     // thread in a modal loop and our run loop is blocked; the view's reshape
     // calls this to resize the terminal and draw ONE frame in real time, so the
@@ -1005,6 +1029,15 @@ void CocoaSurface::overlay_render(toe::Terminal &term, toe::PixelSize px) {
             return toe::rgb(v(1), v(3), v(5));
         };
         session->set_default_colors(hex(s.fg), hex(s.bg));
+        session->set_cursor_color(hex(s.cursor_color));
+        session->set_selection_color(hex(s.selection));
+        // The 16 ANSI palette — what makes a theme switch recolour on-screen
+        // text, not just future output.
+        if (!s.palette.empty()) {
+            std::vector<toe::Rgb> pal;
+            for (const auto &h : s.palette) pal.push_back(hex(h));
+            session->set_palette(pal);
+        }
     }
     // Save persists to the VIBE file (handled inside settings_.render) and the
     // panel shows a "✓ Saved" confirmation — it stays open so you can keep

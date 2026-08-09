@@ -19,6 +19,7 @@
 #define HAND_PLATFORM_SETTINGS_HOST_HPP
 
 #include <string>
+#include <vector>
 #include <cstdlib>
 
 #include "hand/glyph/buffer.hpp"
@@ -76,6 +77,15 @@ public:
     // Any overlay pane open? (settings OR help). The run loop uses this to
     // capture input and repaint.
     [[nodiscard]] bool active() const noexcept { return panel_.active() || help_.active(); }
+
+    // Push the loaded config's colours (theme palette + fg/bg/cursor/selection)
+    // to the session ONCE at launch. to_toe() carries the font + fg/bg into
+    // Terminal::create, but the 16-colour ANSI palette and cursor colour have
+    // no toe::Config field — they're applied via the live setters. Without this
+    // the theme's palette would only take effect after the first pane edit.
+    void apply_startup(toe::Session &session, toe::PixelSize px) {
+        apply(session, panel_.state(), px);
+    }
 
     // Toggle the SETTINGS pane. Opening it closes help (one pane at a time).
     void toggle() {
@@ -163,6 +173,16 @@ private:
         if (!file.empty()) session.set_font(file, px);
         session.set_default_colors(parse_hex(s.fg), parse_hex(s.bg));
         session.set_selection_color(parse_hex(s.selection));
+        session.set_cursor_color(parse_hex(s.cursor_color));
+        // The 16 ANSI palette (from the active theme, or explicit overrides).
+        // Empty => keep the built-in palette. This is what makes a theme switch
+        // recolour existing on-screen text, not just future output.
+        if (!s.palette.empty()) {
+            std::vector<toe::Rgb> pal;
+            pal.reserve(s.palette.size());
+            for (const auto &h : s.palette) pal.push_back(parse_hex(h));
+            session.set_palette(pal);
+        }
         session.set_cursor_animation(s.animate_cursor, s.animate_ms, s.animate_trail);
         session.set_cursor_blink_ms(s.blink_cursor ? s.blink_ms : 0);
         session.set_behavior({s.scroll_mult, s.scroll_on_output, s.scroll_on_keystroke,

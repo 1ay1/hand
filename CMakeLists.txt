@@ -87,7 +87,8 @@ if(APPLE)
     src/platform/cocoa/fonts_mac.cpp
     src/platform/cocoa/cocoa.mm
     src/settings_panel.cpp
-    src/help_panel.cpp)
+    src/help_panel.cpp
+    src/theme/themes.cpp)
   add_library(hand::platform ALIAS hand-platform)
 
   target_include_directories(hand-platform
@@ -165,6 +166,7 @@ else()
     src/platform/fonts_posix.cpp
     src/settings_panel.cpp
     src/help_panel.cpp
+    src/theme/themes.cpp
     "${GEN}/xdg-shell-client-protocol.h"
     "${GEN}/xdg-shell-protocol.c"
     ${_ti_sources})
@@ -259,6 +261,13 @@ if(HAND_BUILD_TESTS AND NOT APPLE)
   target_include_directories(config_roundtrip_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
   target_link_libraries(config_roundtrip_test PRIVATE hand::platform vibe)
   add_test(NAME config_roundtrip COMMAND config_roundtrip_test)
+
+  # Theme table + terminal->UI derivation. Pulls config.cpp for the round-trip
+  # and hand::platform for the theme table (themes.cpp).
+  add_executable(themes_test tests/themes_test.cpp src/config/config.cpp)
+  target_include_directories(themes_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+  target_link_libraries(themes_test PRIVATE hand::platform vibe)
+  add_test(NAME themes COMMAND themes_test)
 
   # Config watcher: pure inotify logic, no GL / no deps.
   add_executable(config_watch_test tests/config_watch_test.cpp)

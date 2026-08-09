@@ -23,6 +23,7 @@
 #define HAND_GLYPH_HPP
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <functional>
 #include <string>
@@ -318,6 +319,22 @@ public:
         else if (in_.key == Key::Enter || in_.key == Key::Space) {
             if (*list_sel != *index) { *index = *list_sel; changed = true; }
             *open_row = -1; consumed_ = true;
+        }
+        // Type-ahead: a letter/digit jumps to the NEXT option whose label
+        // starts with it (case-insensitive), wrapping. Indispensable when the
+        // list is hundreds of themes long — you type "nor"-ish and land on Nord.
+        else if (in_.key == Key::Char && in_.ch > 0x20 && in_.ch < 0x7f) {
+            const char want = static_cast<char>(std::tolower(static_cast<int>(in_.ch)));
+            for (int step = 1; step <= n; ++step) {
+                const int oi = (*list_sel + step) % n;
+                const auto &o = opts[static_cast<std::size_t>(oi)];
+                if (!o.empty() &&
+                    std::tolower(static_cast<unsigned char>(o[0])) == want) {
+                    *list_sel = oi;
+                    break;
+                }
+            }
+            consumed_ = true;
         }
         // Keep the highlighted item in view.
         if (*list_sel < *list_top) *list_top = *list_sel;

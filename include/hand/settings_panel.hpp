@@ -35,6 +35,11 @@ namespace hand {
 // written to the VIBE config on save. This is the editable mirror of the WHOLE
 // HandConfig — every option is reachable from the settings pane.
 struct Settings {
+    // Theme (built-in id, e.g. "catppuccin-mocha"). The BASE colour layer; the
+    // hex colours below override it. Picking a theme in the pane recolours the
+    // grid AND the pane chrome live.
+    std::string theme = "catppuccin-mocha";
+
     // Font
     std::string font_family = "monospace";
     std::string font_file{};
@@ -55,6 +60,9 @@ struct Settings {
     std::string bg = "#171720";
     std::string cursor_color = "#dcdcdc";
     std::string selection = "#3c466e";
+    // The 16 ANSI palette (hex), from the active theme or explicit overrides.
+    // Empty => toe's built-in palette. Drives live recolour on theme switch.
+    std::vector<std::string> palette{};
 
     // Scroll
     int scrollback = 10000;  // lines
@@ -155,6 +163,12 @@ private:
     int dd_open_ = -1;                  // which row's dropdown is open (-1 none)
     int dd_sel_ = 0, dd_top_ = 0;       // dropdown highlight + scroll
 
+    // Theme picker state. Labels drive the dropdown; ids are what we persist.
+    std::vector<std::string> theme_labels_{};
+    std::vector<std::string> theme_ids_{};
+    int theme_index_ = 0;              // selected index into theme_ids_
+    int theme_dd_sel_ = 0, theme_dd_top_ = 0;
+
     static glyph::Input translate(const toe::win::Event &ev, bool &consumed);
 
     // Fold pending edits into cfg_ and write the VIBE file now (called by the
@@ -182,6 +196,21 @@ private:
         for (int i = 0; i < static_cast<int>(fonts_.size()); ++i)
             if (fonts_[static_cast<std::size_t>(i)] == s_.font_family) { font_index_ = i; break; }
     }
+
+    // Lazily fill theme_labels_/theme_ids_ from the built-in table and point
+    // theme_index_ at the active theme id.
+    void ensure_themes();
+    void sync_theme_index() {
+        theme_index_ = 0;
+        for (int i = 0; i < static_cast<int>(theme_ids_.size()); ++i)
+            if (theme_ids_[static_cast<std::size_t>(i)] == s_.theme) { theme_index_ = i; break; }
+    }
+
+public:
+    // The UI-chrome theme derived from the active terminal theme. The host reads
+    // this to tint the whole overlay (panels/borders/accents) so the settings
+    // pane recolours with the terminal. Falls back to a default if unresolved.
+    [[nodiscard]] glyph::Theme ui_theme() const;
 };
 
 // Process-wide binding for the settings panel: main() sets the loaded config +

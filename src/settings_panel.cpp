@@ -5,6 +5,7 @@
 
 #include "hand/settings_panel.hpp"
 #include "hand/config/config.hpp"
+#include "hand/theme/themes.hpp"
 
 #include <cstdio>
 #include <variant>
@@ -49,6 +50,7 @@ char32_t decode_first_utf8(std::string_view s) {
 
 Settings Settings::from(const HandConfig &c) {
     Settings s;
+    s.theme = c.theme_name;
     // Font
     s.font_family = c.font.family;
     s.font_file = c.font.file;
@@ -67,6 +69,8 @@ Settings Settings::from(const HandConfig &c) {
     s.bg = hex(c.colors.background);
     s.cursor_color = hex(c.colors.cursor);
     s.selection = hex(c.colors.selection_bg);
+    s.palette.clear();
+    for (toe::Rgb col : c.colors.palette) s.palette.push_back(hex(col));
     // Scroll
     s.scrollback = c.scroll.scrollback_lines;
     s.scroll_mult = c.scroll.wheel_lines;
@@ -85,6 +89,7 @@ Settings Settings::from(const HandConfig &c) {
 }
 
 void Settings::into(HandConfig &c) const {
+    c.theme_name = theme;
     // Font
     c.font.family = font_family;
     c.font.file = font_file;
@@ -103,6 +108,8 @@ void Settings::into(HandConfig &c) const {
     c.colors.background = unhex(bg);
     c.colors.cursor = unhex(cursor_color);
     c.colors.selection_bg = unhex(selection);
+    c.colors.palette.clear();
+    for (const auto &h : palette) c.colors.palette.push_back(unhex(h));
     // Scroll
     c.scroll.scrollback_lines = scrollback;
     c.scroll.wheel_lines = scroll_mult;
@@ -182,6 +189,21 @@ bool SettingsPanel::handle(const toe::win::Event &ev) {
     return true;
 }
 
+void SettingsPanel::ensure_themes() {
+    if (!theme_ids_.empty()) return;
+    for (const auto &t : all_themes()) {
+        theme_ids_.emplace_back(t.id);
+        theme_labels_.emplace_back(t.label);
+    }
+    sync_theme_index();
+}
+
+glyph::Theme SettingsPanel::ui_theme() const {
+    if (const NamedTheme *t = find_theme(s_.theme)) return to_glyph_theme(*t);
+    if (const NamedTheme *d = find_theme(kDefaultThemeId)) return to_glyph_theme(*d);
+    return glyph::Theme{};
+}
+
 void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
     changed = false;
 
@@ -189,7 +211,9 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
     glyph::Input in{};
     if (!queue_.empty()) { in = queue_.front(); queue_.pop_front(); }
 
-    glyph::Ctx ui(buf, in, &focus_);
+    ensure_themes();
+
+    glyph::Ctx ui(buf, in, &focus_, ui_theme());
 
     // Wider panel to fit the tab bar + two-column rows comfortably.
     ui.begin_panel("hand · settings", 66, 26);
@@ -197,7 +221,7 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
     // Section tabs (focus row 0). Left/Right switch; each section shows only its
     // own options, so the panel stays scannable instead of a 30-row wall.
     static const std::vector<std::string> kSections = {
-        "Font", "Cursor", "Colors", "Scroll", "Behavior", "Window"};
+        "Theme", "Font", "Cursor", "Colors", "Scroll", "Behavior", "Window"};
     if (ui.tab_bar(kSections, &section_)) {
         // Moved to another section: park focus on its first field and close any
         // open dropdown so state doesn't leak between tabs.
@@ -206,7 +230,33 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
     }
 
     switch (section_) {
-    case 0: // Font
+    case 0: { // Theme — the headline: one pick recolours grid + chrome live.
+        sync_theme_index();
+        if (ui.dropdown("Theme", &theme_index_, theme_labels_, &dd_open_,
+                        &theme_dd_sel_, &theme_dd_top_, 10)) {
+            if (theme_index_ >= 0 && theme_index_ < static_cast<int>(theme_ids_.size())) {
+                // Refill the colour fields from the chosen theme so the Colors
+                // tab mirrors it and the host applies the full palette live.
+                s_.theme = theme_ids_[static_cast<std::size_t>(theme_index_)];
+                if (const NamedTheme *t = find_theme(s_.theme)) {
+                    auto hex = [](toe::Rgb c) {
+                        char b[8];
+                        std::snprintf(b, sizeof b, "#%02x%02x%02x", c.r, c.g, c.b);
+                        return std::string(b);
+                    };
+                    s_.fg = hex(t->fg);
+                    s_.bg = hex(t->bg);
+                    s_.cursor_color = hex(t->cursor);
+                    s_.selection = hex(t->selection);
+                    s_.palette.clear();
+                    for (toe::Rgb c : t->ansi) s_.palette.push_back(hex(c));
+                }
+                changed = true;
+            }
+        }
+        break;
+    }
+    case 1: // Font
         if (ui.dropdown("Family", &font_index_, fonts_, &dd_open_, &dd_sel_, &dd_top_, 6)) {
             if (font_index_ >= 0 && font_index_ < static_cast<int>(fonts_.size()))
                 s_.font_family = fonts_[static_cast<std::size_t>(font_index_)];
@@ -217,7 +267,7 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
         changed |= ui.text_input("Fallback", &s_.font_fallback);
         changed |= ui.text_input("File override", &s_.font_file);
         break;
-    case 1: // Cursor
+    case 2: // Cursor
         changed |= ui.select("Shape", &s_.cursor_style, {"block", "bar", "underline"});
         changed |= ui.toggle("Blink", &s_.blink_cursor);
         changed |= ui.slider_int("Blink rate ms", &s_.blink_ms, 100, 2000, 10);
@@ -225,25 +275,25 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
         changed |= ui.slider_int("Glide ms", &s_.animate_ms, 10, 300, 5);
         changed |= ui.toggle("Comet trail", &s_.animate_trail);
         break;
-    case 2: // Colors
+    case 3: // Colors
         changed |= ui.color("Foreground", &s_.fg);
         changed |= ui.color("Background", &s_.bg);
         changed |= ui.color("Cursor", &s_.cursor_color);
         changed |= ui.color("Selection", &s_.selection);
         break;
-    case 3: // Scroll
+    case 4: // Scroll
         changed |= ui.slider_int("Scrollback", &s_.scrollback, 0, 100000, 1000);
         changed |= ui.slider_int("Wheel lines", &s_.scroll_mult, 1, 20, 1);
         changed |= ui.toggle("Scroll on output", &s_.scroll_on_output);
         changed |= ui.toggle("Scroll on keystroke", &s_.scroll_on_keystroke);
         break;
-    case 4: // Behavior
+    case 5: // Behavior
         changed |= ui.toggle("Audible bell", &s_.audible_bell);
         changed |= ui.toggle("Visual bell", &s_.visual_bell);
         changed |= ui.toggle("Copy on select", &s_.copy_on_select);
         changed |= ui.toggle("Confirm on close", &s_.confirm_close);
         break;
-    case 5: { // Window
+    case 6: { // Window
         changed |= ui.slider_int("Padding", &s_.padding, 0, 64, 1);
         int op = static_cast<int>(s_.opacity * 100.0f + 0.5f);
         if (ui.slider_int("Opacity %", &op, 20, 100, 1)) {

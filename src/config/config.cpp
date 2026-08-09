@@ -101,6 +101,13 @@ HandConfig load_hand_config(std::string_view path) {
     };
     const auto B = [&](const char *p, bool &dst) { dst = vibe_get_bool_or(r, p, dst); };
 
+    // theme: the BASE colour layer. Resolve it first so explicit `colors { }`
+    // keys below override the theme's palette rather than the other way round.
+    if (const char *tn = vibe_get_string_or(r, "theme", nullptr))
+        cfg.apply_theme(tn);
+    else
+        cfg.apply_theme(cfg.theme_name); // seed defaults from the default theme
+
     // window
     I("window.width", cfg.window.width);
     I("window.height", cfg.window.height);
@@ -171,6 +178,8 @@ bool save_hand_config(const HandConfig &cfg, std::string_view path) {
         vibe_object_set(r, key, o);
         return vibe_value_object(o);
     };
+
+    vibe_object_set_string(r, "theme", cfg.theme_name.c_str());
 
     VibeObject *win = obj("window");
     vibe_object_set_int(win, "width", cfg.window.width);

@@ -20,10 +20,13 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "toe/core/types.hpp" // Rgb, rgb()
 #include "toe/terminal.hpp"   // toe::Config (the engine subset)
+
+#include "hand/theme/named_theme.hpp" // NamedTheme, find_theme, kDefaultThemeId
 
 namespace hand {
 
@@ -86,12 +89,33 @@ struct BehaviorConfig {
 // The complete config. Loaded from VIBE, edited by the settings panel, saved
 // back. `to_toe()` projects the engine-relevant subset into a toe::Config.
 struct HandConfig {
+    // The active built-in theme id (see hand/theme). It is the BASE layer: on
+    // load, its 16-colour palette + fg/bg/cursor/selection seed ColorsConfig,
+    // then any explicit `colors { }` keys in the file override on top. So a
+    // theme gives instant premium colours, and per-colour tweaks still win.
+    std::string theme_name = std::string(kDefaultThemeId);
+
     WindowConfig window{};
     FontConfig font{};
     ColorsConfig colors{};
     CursorConfig cursor{};
     ScrollConfig scroll{};
     BehaviorConfig behavior{};
+
+    // Seed the colours from a named theme (the base layer). Unknown ids fall
+    // back to the default theme. Called at load BEFORE explicit `colors { }`
+    // overrides, and on a live theme switch.
+    void apply_theme(std::string_view id) {
+        const NamedTheme *t = find_theme(id);
+        if (!t) t = find_theme(kDefaultThemeId);
+        if (!t) return;
+        theme_name = std::string(t->id);
+        colors.foreground = t->fg;
+        colors.background = t->bg;
+        colors.cursor = t->cursor;
+        colors.selection_bg = t->selection;
+        colors.palette.assign(t->ansi.begin(), t->ansi.end());
+    }
 
     // Project into the engine config (font, colors — the bits toe consumes at
     // Terminal::create). Host-only options (window, keybinds, bell) are applied
