@@ -100,6 +100,9 @@ public:
     void set_clipboard(std::string_view) {}
     [[nodiscard]] std::string get_clipboard() { return {}; }
     void open_url(std::string_view) {}
+    [[nodiscard]] bool overlay_active() const { return false; }
+    bool overlay_event(const toe::win::Event &) { return false; }
+    void overlay_render(toe::Terminal &, toe::PixelSize) {}
     void poll_events(const toe::EventSink &) {}
     [[nodiscard]] int event_fd() const { return -1; }
     [[nodiscard]] int repeat_fd() const { return -1; }

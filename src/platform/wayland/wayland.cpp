@@ -62,6 +62,11 @@ public:
     void set_clipboard(std::string_view utf8);
     [[nodiscard]] std::string get_clipboard();
     void open_url(std::string_view uri) { hand::open_url_xdg(uri); }
+    // OverlayApp stubs: the in-terminal settings panel is macOS-first for now;
+    // these keep the Linux backends satisfying the concept, inert.
+    [[nodiscard]] bool overlay_active() const { return false; }
+    bool overlay_event(const toe::win::Event &) { return false; }
+    void overlay_render(toe::Terminal &, toe::PixelSize) {}
     void poll_events(const toe::EventSink &sink);
     [[nodiscard]] bool should_close() const { return closed_; }
     [[nodiscard]] toe::Readiness wait_readable(int pty_fd, toe::WaitDeadline d) {

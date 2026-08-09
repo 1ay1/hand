@@ -62,6 +62,9 @@ public:
     void set_clipboard(std::string_view t) { impl_->set_clipboard(t); }
     [[nodiscard]] std::string get_clipboard() { return impl_->get_clipboard(); }
     void open_url(std::string_view u) { impl_->open_url(u); }
+    [[nodiscard]] bool overlay_active() const { return impl_->overlay_active(); }
+    bool overlay_event(const toe::win::Event &ev) { return impl_->overlay_event(ev); }
+    void overlay_render(toe::Terminal &t, toe::PixelSize px) { impl_->overlay_render(t, px); }
     [[nodiscard]] toe::Readiness wait_readable(int pty_fd, toe::WaitDeadline d) {
         return impl_->wait_readable(pty_fd, d);
     }

@@ -86,7 +86,8 @@ if(APPLE)
     src/platform/backend.cpp
     src/platform/posix_pty.cpp
     src/platform/cocoa/fonts_mac.cpp
-    src/platform/cocoa/cocoa.mm)
+    src/platform/cocoa/cocoa.mm
+    src/settings_panel.cpp)
   add_library(hand::platform ALIAS hand-platform)
 
   target_include_directories(hand-platform

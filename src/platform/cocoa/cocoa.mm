@@ -21,8 +21,11 @@
 
 #include "hand/app.hpp"
 #include "hand/platform/surface.hpp"
+#include "hand/settings_panel.hpp"
+#include "hand/glyph/glyph.hpp"
 
 #include "toe/run.hpp" // toe::run<App>
+#include "toe/terminal.hpp" // toe::Session for overlay compositing
 
 #include <algorithm>
 #include <cstdint>
@@ -94,6 +97,7 @@ struct CocoaInbox {
         events;
     bool close_requested = false;
     bool saw_event = false; // any native event since the last wait (window-ready)
+    bool settings_toggle = false; // ⌘, requested opening/closing the settings panel
     // The font size the app launched with, so Cmd-0 can reset to it.
     int default_font_px = 0;
     // Fractional scroll accumulators: trackpad deltas are sub-"line"; we bank
@@ -307,6 +311,10 @@ std::optional<toe::SpecialKey> special_of_keycode(unsigned short kc) {
             hand::platform::PendingZoom{.absolute = inbox_->default_font_px});
         inbox_->saw_event = true;
         return YES;
+    case ',': // Open/close the in-terminal settings panel (⌘,)
+        inbox_->settings_toggle = true;
+        inbox_->saw_event = true;
+        return YES;
     default:
         // Let other ⌘ combos (e.g. ⌘M minimise, ⌘H hide) go to the menu/system.
         return NO;
@@ -466,6 +474,12 @@ public:
     void poll_events(const toe::EventSink &sink);
     [[nodiscard]] toe::Readiness wait_readable(int pty_fd, toe::WaitDeadline d);
 
+    // --- OverlayApp: the in-terminal settings panel -------------------------
+    [[nodiscard]] bool overlay_active() const { return settings_.active(); }
+    bool overlay_event(const toe::win::Event &ev) { return settings_.handle(ev); }
+    void overlay_render(toe::Terminal &term, toe::PixelSize px);
+    void toggle_settings();  // ⌘, opens/closes the panel
+
 private:
     CocoaSurface() = default;
     void pump_cocoa(bool force = false); // drain the NSApp queue into inbox_ (throttled)
@@ -477,6 +491,8 @@ private:
     CocoaInbox inbox_{};
     PixelSize size_{};
     std::uint64_t last_pump_ = 0; // mach ticks of the last event-queue scan
+    hand::SettingsPanel settings_{};
+    glyph::Buffer overlay_buf_{};
 };
 
 // --- open -------------------------------------------------------------------
@@ -648,8 +664,6 @@ CocoaSurface::~CocoaSurface() {
     }
 }
 
-// --- present ----------------------------------------------------------------
-
 void CocoaSurface::swap() {
     // vsync (swap-interval) is OFF, so flushBuffer returns immediately instead of
     // stalling this single render/drain loop on the display clock — under a flood
@@ -698,6 +712,11 @@ void CocoaSurface::pump_cocoa(bool force) {
 
 void CocoaSurface::poll_events(const toe::EventSink &sink) {
     pump_cocoa(/*force=*/true);
+
+    if (inbox_.settings_toggle) {
+        inbox_.settings_toggle = false;
+        toggle_settings();
+    }
 
     if (inbox_.close_requested) {
         sink(toe::win::CloseRequested{});
@@ -827,6 +846,49 @@ void CocoaSurface::open_url(std::string_view u) {
         // stray OSC 8 payload can't ask the OS to launch something unexpected.
         if (url && url.scheme) [[NSWorkspace sharedWorkspace] openURL:url];
     }
+}
+
+// --- OverlayApp: settings panel ---------------------------------------------
+
+void CocoaSurface::toggle_settings() {
+    hand::Settings cur = settings_.state();
+    settings_.toggle(cur);
+    inbox_.saw_event = true; // force a repaint
+}
+
+void CocoaSurface::overlay_render(toe::Terminal &term, toe::PixelSize px) {
+    auto *session = term.poll().running;
+    if (!session) return;
+    const toe::Extent cell = session->cell_size();
+    if (cell.cols <= 0 || cell.rows <= 0) return;
+
+    // Size the overlay buffer to the full terminal grid (in cells).
+    const int cols = std::max(1, px.w / cell.cols);
+    const int rows = std::max(1, px.h / cell.rows);
+    if (overlay_buf_.width() != cols || overlay_buf_.height() != rows)
+        overlay_buf_.resize(cols, rows);
+
+    bool changed = false, save = false;
+    settings_.render(overlay_buf_, changed, save);
+
+    // Live-apply edits to the running terminal so you SEE them as you change
+    // them: font size (DPI-scaled) and default fg/bg colours.
+    if (changed) {
+        const hand::Settings &s = settings_.state();
+        CGFloat scale = 1.0;
+        if (NSScreen *scr = window_.screen ?: [NSScreen mainScreen]) scale = scr.backingScaleFactor;
+        if (scale < 1.0) scale = 1.0;
+        session->set_font_pixel_size((int)((CGFloat)s.font_size * scale), px);
+    }
+    if (save) {
+        // Persist happens in the host layer (write_settings); left as a hook so
+        // the panel stays platform-free. For now, close on save.
+        settings_.close();
+    }
+
+    // Composite the panel over the terminal via the engine's overlay pass.
+    auto rc = toe::gfx::RenderContext::adopt_current();
+    session->render_overlay(rc, overlay_buf_.data(), overlay_buf_.width(), overlay_buf_.height(), px);
 }
 
 } // namespace hand::platform
