@@ -182,7 +182,13 @@ bool SettingsPanel::handle(const toe::win::Event &ev) {
     bool consumed = false;
     const glyph::Input in = translate(ev, consumed);
     if (!consumed) return false;
-    if (in.key == glyph::Key::Escape) { active_ = false; queue_.clear(); return true; }
+    // Escape closes the pane — UNLESS a dropdown is open, in which case it must
+    // close the dropdown first (queue it so render() feeds it to the widget).
+    if (in.key == glyph::Key::Escape && dd_open_ < 0) {
+        active_ = false;
+        queue_.clear();
+        return true;
+    }
     // Queue it — several events may arrive between frames (fast typing, held
     // arrows); render() drains one per frame so nothing is dropped.
     queue_.push_back(in);
@@ -213,15 +219,26 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
 
     ensure_themes();
 
+    static const std::vector<std::string> kSections = {
+        "Theme", "Font", "Cursor", "Colors", "Scroll", "Behavior", "Window"};
+    const int nsec = static_cast<int>(kSections.size());
+
+    // Tab / Shift-Tab switch SECTIONS (unless a dropdown is capturing input).
+    // Handled BEFORE the Ctx sees the input so it's fully consumed here; ←/→ on
+    // the tab row still works, and ↑↓ move focus between the section's fields.
+    if (dd_open_ < 0 && (in.key == glyph::Key::Tab || in.key == glyph::Key::ShiftTab)) {
+        section_ = (section_ + (in.key == glyph::Key::Tab ? 1 : nsec - 1)) % nsec;
+        focus_ = 1;
+        in = glyph::Input{}; // swallow: don't let it also move focus
+    }
+
     glyph::Ctx ui(buf, in, &focus_, ui_theme());
 
     // Wider panel to fit the tab bar + two-column rows comfortably.
     ui.begin_panel("hand · settings", 66, 26);
 
-    // Section tabs (focus row 0). Left/Right switch; each section shows only its
-    // own options, so the panel stays scannable instead of a 30-row wall.
-    static const std::vector<std::string> kSections = {
-        "Theme", "Font", "Cursor", "Colors", "Scroll", "Behavior", "Window"};
+    // Section tabs (focus row 0). ←/→ switch when the tab row is focused; each
+    // section shows only its own options so the panel stays scannable.
     if (ui.tab_bar(kSections, &section_)) {
         // Moved to another section: park focus on its first field and close any
         // open dropdown so state doesn't leak between tabs.
@@ -308,9 +325,9 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
     }
 
     if (dd_open_ >= 0)
-        ui.end_panel("type to filter   \u2191\u2193 move   \u21b5 select   esc cancel");
+        ui.end_panel("type to filter   \u2191\u2193 preview   \u21b5 keep   esc close menu");
     else
-        ui.end_panel("\u2190\u2192 section / edit   \u2191\u2193 move   changes apply + save live   esc close");
+        ui.end_panel("tab section   \u2191\u2193 move   \u2190\u2192/space edit   applies live   esc close");
 
     // Live config: any edit is scheduled for persistence. We debounce so a
     // slider drag writes the file once it settles, not on every tick; close()

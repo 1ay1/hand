@@ -148,10 +148,13 @@ public:
     // Finish: draw the footer hint line and resolve focus wrap. `footer`
     // overrides the default interactive hint (for read-only panes).
     void end_panel(std::string_view footer = {}) {
+        // Paint any open dropdown LAST so it floats above every row (overlay).
+        draw_popup();
+
         // Footer key hints.
         const int fy = panel_.bottom() - 2;
         buf_.hrule(content_.x, fy - 1, content_.w, Style{theme_.border, theme_.panel_bg});
-        const char *default_hint = "\u2191\u2193 move   \u2190\u2192/space edit   \u2318S save   esc close";
+        const char *default_hint = "\u2191\u2193 move   \u2190\u2192/space edit   tab section   esc close";
         if (footer.empty())
             buf_.text(content_.x, fy, default_hint, Style{theme_.dim, theme_.panel_bg});
         else
@@ -163,10 +166,12 @@ public:
             if (focus_ >= row_count_) focus_ = 0;
         }
         row_count_ = row_index_;
-        // Global nav that wasn't consumed by a widget: move focus.
+        // Global nav that wasn't consumed by a widget: Up/Down move focus.
+        // Tab is reserved by the caller for section switching (it never reaches
+        // here consumed, but we deliberately don't treat it as focus-move).
         if (!consumed_) {
-            if (in_.key == Key::Down || in_.key == Key::Tab) move_focus(+1);
-            else if (in_.key == Key::Up || in_.key == Key::ShiftTab) move_focus(-1);
+            if (in_.key == Key::Down) move_focus(+1);
+            else if (in_.key == Key::Up) move_focus(-1);
         }
         // Write the updated focus back to the caller's persistent state.
         if (focus_ext_) *focus_ext_ = focus_;
@@ -188,15 +193,26 @@ public:
             if (in_.key == Key::Left)  { *active = (*active - 1 + (int)sections.size()) % (int)sections.size(); changed = true; }
             if (in_.key == Key::Right) { *active = (*active + 1) % (int)sections.size(); changed = true; }
         }
+        // Pill strip: the active tab is a filled accent pill (padded), the rest
+        // are dim labels. Padded background reads as a rounded pill and never
+        // depends on Powerline glyphs being in the pane font.
         int x = content_.x + 1;
+        const int maxx = content_.right() - 1;
         for (int i = 0; i < (int)sections.size(); ++i) {
             const bool on = (i == *active);
-            Style st{on ? theme_.accent_fg : (foc ? theme_.fg : theme_.dim),
-                     on ? theme_.accent : theme_.panel_bg,
-                     on ? Attr::Bold : Attr::None};
-            std::string tab = " " + sections[(std::size_t)i] + " ";
-            buf_.text(x, cursor_y_, tab, st);
-            x += (int)sections[(std::size_t)i].size() + 3;
+            const std::string &name = sections[(std::size_t)i];
+            const int label_w = (int)Buffer::text_width(name);
+            const int need = label_w + (on ? 2 : 0); // active pill has 1-col pad
+            if (x + need + 1 > maxx) break; // don't overflow the frame
+            if (on) {
+                buf_.fill(Rect{x, cursor_y_, need, 1}, Style{theme_.accent_fg, theme_.accent});
+                buf_.text(x + 1, cursor_y_, name,
+                          Style{theme_.accent_fg, theme_.accent, Attr::Bold});
+            } else {
+                buf_.text(x, cursor_y_, name,
+                          Style{foc ? theme_.fg : theme_.dim, theme_.panel_bg});
+            }
+            x += need + 2; // gap between tabs
         }
         end_row();
         buf_.hrule(content_.x, cursor_y_, content_.w, Style{theme_.border, theme_.panel_bg});
@@ -270,19 +286,26 @@ public:
             else if (in_.key == Key::Right) { *value = std::min(hi, *value + step); changed = true; consumed_ = true; }
         }
         paint_label(label, foc);
-        // A compact [====----] bar + numeric value.
+        // A compact filled bar with a thumb knob + numeric value.
         const int vx = value_x();
         const int barw = std::max(8, content_.right() - vx - 8);
         const float frac = hi > lo ? float(*value - lo) / float(hi - lo) : 0.f;
         const int filled = int(frac * barw + 0.5f);
-        Style bar_on{theme_.accent, foc ? theme_.focus_bg : theme_.panel_bg};
-        Style bar_off{theme_.border, foc ? theme_.focus_bg : theme_.panel_bg};
-        for (int i = 0; i < barw; ++i)
-            buf_.put(vx + i, cursor_y_, i < filled ? U'━' : U'─', i < filled ? bar_on : bar_off);
+        const int knob = std::clamp(filled, 0, barw - 1);
+        const Rgb rowbg = foc ? theme_.focus_bg : theme_.panel_bg;
+        Style bar_on{theme_.accent, rowbg};
+        Style bar_off{theme_.border, rowbg};
+        for (int i = 0; i < barw; ++i) {
+            if (i == knob)
+                buf_.put(vx + i, cursor_y_, U'◉',
+                         Style{foc ? theme_.accent : theme_.fg, rowbg, Attr::Bold});
+            else
+                buf_.put(vx + i, cursor_y_, i < filled ? U'━' : U'─',
+                         i < filled ? bar_on : bar_off);
+        }
         char num[16];
         std::snprintf(num, sizeof num, " %d", *value);
-        buf_.text(vx + barw + 1, cursor_y_, num,
-                  Style{theme_.fg, foc ? theme_.focus_bg : theme_.panel_bg, Attr::Bold});
+        buf_.text(vx + barw + 1, cursor_y_, num, Style{theme_.fg, rowbg, Attr::Bold});
         end_row();
         return changed;
     }
@@ -370,6 +393,8 @@ public:
         else if (in_.key == Key::PageUp) { *list_sel = std::max(0, *list_sel - max_visible); consumed_ = true; }
         else if (in_.key == Key::Escape) { *open_row = -1; flt.clear(); consumed_ = true; return changed; }
         else if (in_.key == Key::Enter || in_.key == Key::Space) {
+            // Enter just commits + closes; the value already tracks the highlight
+            // (select-on-move below), so this is a confirm, not the only apply.
             const int pick = hits[static_cast<std::size_t>(std::clamp(*list_sel, 0, m - 1))];
             if (pick != *index) { *index = pick; changed = true; }
             *open_row = -1; flt.clear(); consumed_ = true;
@@ -385,71 +410,97 @@ public:
         }
         *list_sel = std::clamp(*list_sel, 0, std::max(0, m - 1));
 
+        // SELECT-ON-MOVE: the currently highlighted option becomes the live
+        // value immediately, so arrowing/filtering previews it (e.g. the theme
+        // recolours as you move). Enter/Esc just confirm/cancel the browse.
+        if (m > 0) {
+            const int hot = hits[static_cast<std::size_t>(std::clamp(*list_sel, 0, m - 1))];
+            if (hot != *index && *open_row == r) { *index = hot; changed = true; }
+        }
+
         // Keep the highlighted item in view (window over the FILTERED list).
         if (*list_sel < *list_top) *list_top = *list_sel;
         if (*list_sel >= *list_top + max_visible) *list_top = *list_sel - max_visible + 1;
         *list_top = std::clamp(*list_top, 0, std::max(0, m - max_visible));
 
-        // Popup geometry: a framed menu that floats over following rows, clamped
-        // to the panel so it never overruns the footer. Width spans from the
-        // value column to the panel edge.
-        const int lx = vx - 1;
-        const int lw = content_.right() - lx;
-        const int top = cursor_y_;
-        // Space available from `top` to just above the footer rule (2 rows).
+        // Record the popup to be painted LAST (as an overlay on top of every
+        // other row), not inline where it would be overdrawn by later widgets.
+        // The closed row already advanced cursor_y_ via end_row(), so following
+        // rows lay out normally underneath the floating menu.
+        popup_.active = true;
+        popup_.x = vx - 1;
+        popup_.w = content_.right() - popup_.x;
+        popup_.top = cursor_y_;
+        popup_.max_visible = max_visible;
+        popup_.list_sel = *list_sel;
+        popup_.list_top = list_top;
+        popup_.index = *index;
+        popup_.filter = flt;
+        popup_.n = n;
+        popup_.hits = std::move(hits);
+        popup_.opts = &opts;
+        return changed;
+    }
+
+    // Paint the deferred dropdown popup (see dropdown()). Called by end_panel()
+    // so the menu floats above all rows. A no-op when nothing is open.
+    void draw_popup() {
+        if (!popup_.active) return;
+        const int m = static_cast<int>(popup_.hits.size());
+        const int lx = popup_.x, lw = popup_.w, top = popup_.top;
+        const auto &opts = *popup_.opts;
+        int *list_top = popup_.list_top;
+
+        // Clamp height to fit between `top` and just above the footer rule.
         const int avail = panel_.bottom() - 3 - top - 3; // -frame(2) -header(1)
-        int vis = std::min(max_visible, m);
+        int vis = std::min(popup_.max_visible, m);
         if (avail > 0) vis = std::min(vis, avail);
         vis = std::max(vis, 1);
-        // Re-window the scroll to the possibly-smaller viewport.
-        if (*list_sel >= *list_top + vis) *list_top = *list_sel - vis + 1;
+        if (popup_.list_sel >= *list_top + vis) *list_top = popup_.list_sel - vis + 1;
         *list_top = std::clamp(*list_top, 0, std::max(0, m - vis));
         const int box_h = vis + 2 /*frame*/ + 1 /*filter header*/;
         const Rgb pbg = theme_.pop_bg();
 
-        // Drop shadow under the popup.
+        // Soft drop shadow (two offset bands) so the menu clearly floats.
         buf_.fill(Rect{lx + 1, top + box_h, lw, 1}, Style{theme_.shadow(), theme_.shadow()});
         buf_.fill(Rect{lx + lw, top + 1, 1, box_h}, Style{theme_.shadow(), theme_.shadow()});
-        // Body + rounded frame.
+        // Body + rounded accent frame.
         buf_.fill(Rect{lx, top, lw, box_h}, Style{theme_.fg, pbg});
         buf_.frame(Rect{lx, top, lw, box_h}, Style{theme_.accent, pbg}, BoxStyle::Rounded);
 
-        // Filter header row: a search glyph + the live query (or a hint).
+        // Filter header: search glyph + live query (or hint) + match count.
         const int hy = top + 1;
-        buf_.put(lx + 1, hy, U'🔍', Style{theme_.accent, pbg});
-        if (flt.empty())
-            buf_.text(lx + 3, hy, "type to filter…", Style{theme_.dim, pbg}, lw - 10);
+        buf_.put(lx + 2, hy, U'🔍', Style{theme_.accent, pbg});
+        if (popup_.filter.empty())
+            buf_.text(lx + 4, hy, "type to filter…", Style{theme_.dim, pbg}, lw - 12);
         else
-            buf_.text(lx + 3, hy, flt, Style{theme_.fg, pbg, Attr::Bold}, lw - 12);
-        // Match count, right-aligned.
+            buf_.text(lx + 4, hy, popup_.filter, Style{theme_.fg, pbg, Attr::Bold}, lw - 14);
         char cnt[24];
-        std::snprintf(cnt, sizeof cnt, "%d/%d", m, n);
+        std::snprintf(cnt, sizeof cnt, "%d/%d", m, popup_.n);
         buf_.text(lx + lw - 2 - Buffer::text_width(cnt), hy, cnt, Style{theme_.dim, pbg});
 
         // Options.
         for (int i = 0; i < vis; ++i) {
             const int fi = *list_top + i;
-            const int oi = hits[static_cast<std::size_t>(fi)];
+            if (fi < 0 || fi >= m) break;
+            const int oi = popup_.hits[static_cast<std::size_t>(fi)];
             const int ry = top + 2 + i;
-            const bool sel = (fi == *list_sel);
-            const bool cur = (oi == *index);
+            const bool sel = (fi == popup_.list_sel);
+            const bool cur = (oi == popup_.index);
             const Rgb rbg = sel ? theme_.accent : pbg;
             const Rgb rfg = sel ? theme_.accent_fg : (cur ? theme_.accent : theme_.fg);
             buf_.fill(Rect{lx + 1, ry, lw - 2, 1}, Style{rfg, rbg});
-            // A check on the current value, a caret on the highlighted one.
             const char32_t mark = cur ? U'✓' : (sel ? U'›' : U' ');
             buf_.put(lx + 2, ry, mark, Style{rfg, rbg, Attr::Bold});
             buf_.text(lx + 4, ry, opts[static_cast<std::size_t>(oi)],
                       Style{rfg, rbg, sel ? Attr::Bold : Attr::None}, lw - 6);
-            // Scrollbar thumb on the right inner edge.
-            if (m > max_visible) {
+            if (m > vis) {
                 const int thumb = std::clamp(*list_top * vis / std::max(1, m), 0, vis - 1);
                 buf_.put(lx + lw - 2, ry, i == thumb ? U'█' : U'│',
                          Style{i == thumb ? theme_.accent : theme_.border, rbg});
             }
         }
-        cursor_y_ = top + box_h;
-        return changed;
+        popup_.active = false;
     }
 
     // Free-text editor. Typing edits when focused; returns changed.
@@ -464,7 +515,9 @@ public:
         paint_label(label, foc);
         const int vx = value_x();
         const int field_w = content_.right() - vx;
-        Style fs{theme_.fg, foc ? rgb(20, 22, 30) : rgb(22, 24, 32)};
+        // Inset field surface derived from the theme (a hair darker than panel).
+        Style fs{theme_.fg, foc ? Theme::mix(theme_.panel_bg, theme_.bg, 0.5f)
+                                : Theme::mix(theme_.panel_bg, theme_.bg, 0.3f)};
         buf_.fill(Rect{vx, cursor_y_, field_w, 1}, fs);
         // Show the tail of the value if it overflows.
         std::string shown = *value;
@@ -488,11 +541,14 @@ public:
         paint_label(label, foc);
         const int vx = value_x();
         Rgb sw = parse_hex(*hex);
-        buf_.fill(Rect{vx, cursor_y_, 2, 1}, Style{sw, sw});     // live swatch
-        buf_.text(vx + 3, cursor_y_, *hex,
-                  Style{theme_.fg, foc ? theme_.focus_bg : theme_.panel_bg, Attr::Bold});
+        const Rgb rowbg = foc ? theme_.focus_bg : theme_.panel_bg;
+        // Live swatch: a rounded chip so the colour reads as a sample, not a
+        // stray block.
+        buf_.put(vx, cursor_y_, U'◉', Style{sw, rowbg, Attr::Bold});
+        buf_.put(vx + 1, cursor_y_, U'◉', Style{sw, rowbg, Attr::Bold});
+        buf_.text(vx + 3, cursor_y_, *hex, Style{theme_.fg, rowbg, Attr::Bold});
         if (foc) buf_.put(vx + 3 + Buffer::text_width(*hex), cursor_y_, U'▏',
-                          Style{theme_.accent, theme_.focus_bg});
+                          Style{theme_.accent, rowbg});
         end_row();
         return changed;
     }
@@ -586,6 +642,18 @@ private:
     Buffer &buf_;
     const Input &in_;
     Theme theme_;
+
+    // A dropdown popup recorded during a widget pass, painted last by end_panel
+    // so it floats above every other row (a true overlay). See dropdown().
+    struct DeferredPopup {
+        bool active = false;
+        int x = 0, w = 0, top = 0, max_visible = 8;
+        int list_sel = 0, index = 0, n = 0;
+        int *list_top = nullptr;
+        std::string filter;
+        std::vector<int> hits;
+        const std::vector<std::string> *opts = nullptr;
+    } popup_{};
 
     Rect panel_{}, content_{};
     int panel_w_ = 0, panel_h_ = 0;

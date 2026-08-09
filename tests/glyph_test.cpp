@@ -53,23 +53,26 @@ int main() {
     ck(!d.frame(key(Key::Enter)), "open: no change yet");
     ck(d.open == 0, "dropdown is open");
 
-    // Type "night" -> should filter to Tokyo Night and land selection on it.
-    for (char c : std::string("night")) d.frame(ch(c));
+    // Type "night" -> filters to Tokyo Night. SELECT-ON-MOVE: the value tracks
+    // the sole hit immediately, so typing already committed the change.
+    bool moved = false;
+    for (char c : std::string("night")) moved |= d.frame(ch(c));
     ck(d.filter == "night", "filter text accumulated");
+    ck(moved, "select-on-move committed while filtering");
+    ck(d.opts[static_cast<std::size_t>(d.index)] == "Tokyo Night",
+       "live value == Tokyo Night while open");
 
-    // Enter selects the single filtered hit.
-    bool changed = d.frame(key(Key::Enter));
-    ck(changed, "enter committed a change");
-    ck(d.open == -1, "dropdown closed after select");
-    ck(d.opts[static_cast<std::size_t>(d.index)] == "Tokyo Night", "filtered pick == Tokyo Night");
+    // Enter confirms + closes (value already applied by select-on-move).
+    d.frame(key(Key::Enter));
+    ck(d.open == -1, "dropdown closed after enter");
+    ck(d.opts[static_cast<std::size_t>(d.index)] == "Tokyo Night", "pick stuck == Tokyo Night");
     ck(d.filter.empty(), "filter cleared on close");
 
-    // Re-open, type a prefix that matches several, arrow down, select.
+    // Re-open, type a prefix that matches several, arrow down (previews live).
     d.frame(key(Key::Enter));
     ck(d.open == 0, "re-opened");
-    d.frame(ch('r')); // matches "Gruvbox daRk", "noRd", "Rose Pine", "dRacula", "everforest", "solaRized"
-    const std::string before = d.opts[static_cast<std::size_t>(d.index)];
-    d.frame(key(Key::Down));
+    d.frame(ch('r')); // matches Gruvbox daRk / noRd / Rose Pine / dRacula / ...
+    ck(d.frame(key(Key::Down)), "arrow-down previews (select-on-move)");
     d.frame(key(Key::Enter));
     ck(d.open == -1, "closed again");
     // Whatever it landed on must actually contain 'r' (case-insensitive).
@@ -77,13 +80,14 @@ int main() {
     for (char &c : picked) c = static_cast<char>(std::tolower((unsigned char)c));
     ck(picked.find('r') != std::string::npos, "filtered+arrowed pick matches query");
 
-    // Escape cancels without changing the value.
+    // Escape closes the dropdown (keeps the previewed value — no revert, since
+    // select-on-move is the whole point) and clears the filter.
     d.frame(key(Key::Enter));
-    const int keep = d.index;
-    d.frame(ch('z')); // filter to nothing meaningful
-    ck(!d.frame(key(Key::Escape)), "escape: no change");
-    ck(d.open == -1, "escape closed");
-    ck(d.index == keep, "escape preserved the value");
+    d.frame(ch('n')); // preview some 'n' theme
+    const int previewed = d.index;
+    ck(!d.frame(key(Key::Escape)), "escape itself reports no NEW change");
+    ck(d.open == -1, "escape closed the dropdown");
+    ck(d.index == previewed, "escape keeps the previewed value");
     ck(d.filter.empty(), "escape cleared filter");
 
     // Backspace edits the filter.
