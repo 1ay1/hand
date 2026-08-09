@@ -6,6 +6,7 @@
 // the platform-neutral Event sum type.
 
 #include "hand/app.hpp"
+#include "hand/platform/posix_url.hpp"
 #include "hand/platform/surface.hpp"
 #include "hand/reactor.hpp"
 
@@ -60,6 +61,7 @@ public:
     }
     void set_clipboard(std::string_view utf8);
     [[nodiscard]] std::string get_clipboard();
+    void open_url(std::string_view uri) { hand::open_url_xdg(uri); }
     void poll_events(const toe::EventSink &sink);
     [[nodiscard]] bool should_close() const { return closed_; }
     [[nodiscard]] toe::Readiness wait_readable(int pty_fd, toe::WaitDeadline d) {

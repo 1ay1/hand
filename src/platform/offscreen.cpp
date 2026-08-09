@@ -99,6 +99,7 @@ public:
     void set_title(std::string_view) {}
     void set_clipboard(std::string_view) {}
     [[nodiscard]] std::string get_clipboard() { return {}; }
+    void open_url(std::string_view) {}
     void poll_events(const toe::EventSink &) {}
     [[nodiscard]] int event_fd() const { return -1; }
     [[nodiscard]] int repeat_fd() const { return -1; }

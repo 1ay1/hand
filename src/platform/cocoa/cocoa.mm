@@ -171,6 +171,35 @@ std::optional<toe::SpecialKey> special_of_keycode(unsigned short kc) {
     [self addCursorRect:self.bounds cursor:[NSCursor IBeamCursor]];
 }
 
+// --- menu actions ----------------------------------------------------------
+// Implemented on the view so the Edit/View menu items are ENABLED (AppKit only
+// enables a menu item whose action is reachable in the responder chain). Each
+// pushes the same event the keyboard shortcut would.
+- (void)copy:(id)sender {
+    if (!inbox_) return;
+    inbox_->events.push_back(hand::platform::PendingKey{
+        toe::KeyEvent{.key = toe::TextInput{"c"}, .mods = {.ctrl = true, .shift = true}}});
+    inbox_->saw_event = true;
+}
+- (void)paste:(id)sender {
+    if (!inbox_) return;
+    inbox_->events.push_back(hand::platform::PendingKey{
+        toe::KeyEvent{.key = toe::TextInput{"v"}, .mods = {.ctrl = true, .shift = true}}});
+    inbox_->saw_event = true;
+}
+- (void)zoomIn:(id)sender {
+    if (inbox_) { inbox_->events.push_back(hand::platform::PendingZoom{.delta = +1}); inbox_->saw_event = true; }
+}
+- (void)zoomOut:(id)sender {
+    if (inbox_) { inbox_->events.push_back(hand::platform::PendingZoom{.delta = -1}); inbox_->saw_event = true; }
+}
+- (void)zoomReset:(id)sender {
+    if (inbox_) {
+        inbox_->events.push_back(hand::platform::PendingZoom{.absolute = inbox_->default_font_px});
+        inbox_->saw_event = true;
+    }
+}
+
 // Convert the view's backing-store (pixel) bounds and post a resize.
 - (void)pushResize {
     if (!inbox_) return;
@@ -430,6 +459,7 @@ public:
     void set_title(std::string_view t);
     void set_clipboard(std::string_view t);
     [[nodiscard]] std::string get_clipboard();
+    void open_url(std::string_view u);
 
     void poll_events(const toe::EventSink &sink);
     [[nodiscard]] toe::Readiness wait_readable(int pty_fd, toe::WaitDeadline d);
@@ -489,9 +519,11 @@ Result<std::unique_ptr<CocoaSurface>> CocoaSurface::open(std::string_view title,
             NSMenuItem *viewItem = [[NSMenuItem alloc] init];
             [bar addItem:viewItem];
             NSMenu *viewMenu = [[NSMenu alloc] initWithTitle:@"View"];
-            [viewMenu addItemWithTitle:@"Bigger" action:nil keyEquivalent:@"+"];
-            [viewMenu addItemWithTitle:@"Smaller" action:nil keyEquivalent:@"-"];
-            [viewMenu addItemWithTitle:@"Actual Size" action:nil keyEquivalent:@"0"];
+            [viewMenu addItemWithTitle:@"Bigger" action:@selector(zoomIn:) keyEquivalent:@"+"];
+            [viewMenu addItemWithTitle:@"Smaller" action:@selector(zoomOut:) keyEquivalent:@"-"];
+            [viewMenu addItemWithTitle:@"Actual Size"
+                                action:@selector(zoomReset:)
+                         keyEquivalent:@"0"];
             [viewMenu addItem:[NSMenuItem separatorItem]];
             NSMenuItem *fs = [viewMenu addItemWithTitle:@"Enter Full Screen"
                                                  action:@selector(toggleFullScreen:)
@@ -745,6 +777,19 @@ std::string CocoaSurface::get_clipboard() {
         if (!s) return {};
         const char *u = s.UTF8String;
         return u ? std::string{u} : std::string{};
+    }
+}
+
+void CocoaSurface::open_url(std::string_view u) {
+    @autoreleasepool {
+        NSString *s = [[NSString alloc] initWithBytes:u.data()
+                                               length:(NSUInteger)u.size()
+                                             encoding:NSUTF8StringEncoding];
+        if (!s) return;
+        NSURL *url = [NSURL URLWithString:s];
+        // Only open web/file-ish schemes NSURL could parse; ignore garbage so a
+        // stray OSC 8 payload can't ask the OS to launch something unexpected.
+        if (url && url.scheme) [[NSWorkspace sharedWorkspace] openURL:url];
     }
 }
 

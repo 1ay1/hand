@@ -154,6 +154,7 @@ else()
   add_library(hand-platform STATIC
     src/platform/backend.cpp
     src/platform/posix_pty.cpp
+    src/platform/posix_url.cpp
     src/platform/wayland/wayland.cpp
     src/platform/x11/x11.cpp
     src/platform/offscreen.cpp
