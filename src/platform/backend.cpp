@@ -91,6 +91,15 @@ int run(const toe::Config &cfg_in, const toe::WindowConfig &win, Backend force,
         std::string f = resolve_font_file(cfg.font_family);
         if (!f.empty()) cfg.font_file = std::move(f);
     }
+    // Resolve the family's REAL bold / italic / bold-italic variants so styled
+    // text renders from actual faces instead of synthesized embolden/shear.
+    // Only fill fields the user didn't set explicitly.
+    {
+        FontStyleFiles sf = resolve_font_styles(cfg.font_family, cfg.font_file);
+        if (cfg.font_file_bold.empty()) cfg.font_file_bold = std::move(sf.bold);
+        if (cfg.font_file_italic.empty()) cfg.font_file_italic = std::move(sf.italic);
+        if (cfg.font_file_bold_italic.empty()) cfg.font_file_bold_italic = std::move(sf.bold_italic);
+    }
 #endif
 
     switch (choose(force)) {

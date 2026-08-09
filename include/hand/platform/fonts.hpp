@@ -24,6 +24,20 @@ namespace hand {
 // unavailable. Always includes "monospace" (the system-default alias) first.
 [[nodiscard]] std::vector<std::string> list_monospace_families();
 
+// The concrete style-variant FILES for a family (empty when a variant isn't
+// installed — toe then synthesizes that style from the regular face).
+struct FontStyleFiles {
+    std::string bold;
+    std::string italic;
+    std::string bold_italic;
+};
+
+// Resolve the bold / italic / bold-italic files that belong to the SAME family
+// as `regular_file` (matched by shared base-family name in the same directory
+// tree). Lets the terminal render real styled faces instead of synthesizing.
+[[nodiscard]] FontStyleFiles resolve_font_styles(std::string_view family,
+                                                 std::string_view regular_file);
+
 } // namespace hand
 
 #endif // HAND_PLATFORM_FONTS_HPP

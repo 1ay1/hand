@@ -102,8 +102,31 @@ std::string resolve_font_file(std::string_view family) {
     const std::string needle = lower(family);
     const bool generic = needle.empty() || needle == "monospace" || needle == "mono";
 
-    std::string best;      // exact/substring family match
-    std::string best_mono; // fallback: any preferred monospace face
+    // Rank a candidate's suitability as the REGULAR face (higher = better):
+    // an exact "-regular"/no-weight stem beats a "-medium"/"-book", which beats
+    // other weights (Light/Thin/ExtraLight) — so a family whose files are all
+    // weight-suffixed doesn't accidentally resolve to ExtraLight.
+    auto regular_rank = [](const std::string &lstem) -> int {
+        if (lstem.find("italic") != std::string::npos ||
+            lstem.find("oblique") != std::string::npos || lstem.find("bold") != std::string::npos)
+            return -1; // not a regular face at all
+        if (lstem.find("regular") != std::string::npos) return 100;
+        if (lstem.find("medium") != std::string::npos || lstem.find("book") != std::string::npos ||
+            lstem.find("roman") != std::string::npos)
+            return 80;
+        // No explicit weight word — e.g. "DejaVuSansMono" — is the canonical
+        // regular for families that don't suffix their base file.
+        if (lstem.find("light") == std::string::npos && lstem.find("thin") == std::string::npos &&
+            lstem.find("black") == std::string::npos && lstem.find("heavy") == std::string::npos &&
+            lstem.find("semi") == std::string::npos && lstem.find("extra") == std::string::npos)
+            return 90;
+        return 20; // some off-weight (Light/Thin/…) — usable but last resort
+    };
+
+    std::string best;
+    int best_rank = -1;
+    std::string best_mono;
+    int best_mono_rank = -1;
 
     std::error_code ec;
     for (const auto &root : font_roots()) {
@@ -116,17 +139,14 @@ std::string resolve_font_file(std::string_view family) {
             if (!it->is_regular_file(ec) || !is_font_file(p)) continue;
 
             const std::string stem = lower(p.stem().string());
-            // Skip bold/italic variants for the default face — the atlas
-            // synthesizes those from the regular.
-            const bool variant = stem.find("bold") != std::string::npos ||
-                                 stem.find("italic") != std::string::npos ||
-                                 stem.find("oblique") != std::string::npos;
+            const int rank = regular_rank(stem);
+            if (rank < 0) continue; // bold/italic variant — not a regular face
 
             if (!generic && stem.find(needle) != std::string::npos) {
-                if (!variant) return p.string();
-                if (best.empty()) best = p.string();
+                if (rank > best_rank) { best_rank = rank; best = p.string(); }
             }
-            if (best_mono.empty() && !variant && preferred_mono(stem)) {
+            if (preferred_mono(stem) && rank > best_mono_rank) {
+                best_mono_rank = rank;
                 best_mono = p.string();
             }
         }
@@ -163,6 +183,77 @@ std::vector<std::string> list_monospace_families() {
     });
     found.erase(std::unique(found.begin(), found.end()), found.end());
     for (auto &f : found) out.push_back(std::move(f));
+    return out;
+}
+
+namespace {
+// Classify a font stem's style: bit0=bold, bit1=italic/oblique.
+int style_bits(const std::string &lstem) {
+    int b = 0;
+    if (lstem.find("bold") != std::string::npos) b |= 1;
+    if (lstem.find("italic") != std::string::npos || lstem.find("oblique") != std::string::npos)
+        b |= 2;
+    // "semibold"/"extrabold" also count as bold; "demibold" too — all contain
+    // "bold". "black"/"heavy" are heavier weights we treat as bold as well.
+    if (lstem.find("black") != std::string::npos || lstem.find("heavy") != std::string::npos)
+        b |= 1;
+    return b;
+}
+// How "plain" a styled candidate's weight is (higher = prefer). We want the
+// design bold, not ExtraBold/Black, and the plain italic, not Light-Italic.
+int weight_plainness(const std::string &lstem) {
+    int score = 10;
+    for (const char *w : {"extra", "semi", "demi", "ultra", "black", "heavy", "thin", "light"}) {
+        if (lstem.find(w) != std::string::npos) score -= 3;
+    }
+    return score;
+}
+} // namespace
+
+FontStyleFiles resolve_font_styles(std::string_view family, std::string_view regular_file) {
+    FontStyleFiles out;
+    int rank_b = -1, rank_i = -1, rank_bi = -1; // best weight-plainness seen per slot
+    // The base family we're matching. Prefer the regular file's own stem (most
+    // reliable), else the requested family name.
+    std::string base;
+    if (!regular_file.empty()) {
+        base = lower(base_family(fs::path(regular_file).stem().string()));
+    }
+    if (base.empty() || base == "monospace") base = lower(family);
+    if (base.empty() || base == "monospace" || base == "mono") return out; // can't match generically
+
+    // Search the regular file's directory subtree first (a family's variants
+    // almost always sit together), then the standard roots as a fallback.
+    std::vector<fs::path> roots;
+    if (!regular_file.empty()) {
+        fs::path dir = fs::path(regular_file).parent_path();
+        if (!dir.empty()) roots.push_back(dir);
+    }
+    for (const auto &r : font_roots()) roots.push_back(r);
+
+    std::error_code ec;
+    for (const auto &root : roots) {
+        if (!fs::exists(root, ec)) continue;
+        for (auto it = fs::recursive_directory_iterator(
+                 root, fs::directory_options::skip_permission_denied, ec);
+             it != fs::recursive_directory_iterator(); it.increment(ec)) {
+            if (ec) { ec.clear(); continue; }
+            const fs::path &p = it->path();
+            if (!it->is_regular_file(ec) || !is_font_file(p)) continue;
+            const std::string stem = lower(p.stem().string());
+            if (lower(base_family(p.stem().string())) != base) continue; // different family
+            const int plain = weight_plainness(stem);
+            switch (style_bits(stem)) {
+            case 1: if (plain > rank_b) { rank_b = plain; out.bold = p.string(); } break;
+            case 2: if (plain > rank_i) { rank_i = plain; out.italic = p.string(); } break;
+            case 3: if (plain > rank_bi) { rank_bi = plain; out.bold_italic = p.string(); } break;
+            default: break; // 0 = regular, ignore
+            }
+        }
+        // Keep scanning the fallback roots too — a plainer weight may live
+        // elsewhere — but stop once every slot has a design-weight match.
+        if (rank_b >= 10 && rank_i >= 10 && rank_bi >= 10) break;
+    }
     return out;
 }
 
