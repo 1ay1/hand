@@ -41,11 +41,14 @@ namespace {
 
 } // namespace
 
-int run(const toe::Config &cfg_in, const toe::WindowConfig &win, Backend force) {
+int run(const toe::Config &cfg_in, const toe::WindowConfig &win, Backend force,
+        const std::vector<std::string> &child_argv) {
     // Process creation is the HOST's job: forkpty the child here and hand toe an
     // adopt-able master fd. The engine never forks (see posix_pty.hpp).
     toe::Config cfg = cfg_in;
-    auto fd = spawn_pty(SpawnCommand{});
+    SpawnCommand sc;
+    sc.argv = child_argv; // empty -> $SHELL (posix_pty resolves it)
+    auto fd = spawn_pty(sc);
     if (!fd) {
         std::fprintf(stderr, "hand: %s\n", fd.error().message.c_str());
         return 1;

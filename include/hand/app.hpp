@@ -23,6 +23,7 @@
 
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "toe/app.hpp"
 #include "toe/core/types.hpp"
@@ -102,7 +103,8 @@ enum class Backend { automatic, wayland, x11, cocoa, offscreen };
 // and enters that backend's fully-monomorphic `toe::run<...>`. This is the line
 // main writes. Returns the child exit code (or a negative startup-failure code).
 [[nodiscard]] int run(const toe::Config &cfg, const toe::WindowConfig &win = {},
-                      Backend force = Backend::automatic);
+                      Backend force = Backend::automatic,
+                      const std::vector<std::string> &child_argv = {});
 
 // Per-backend entries, each defined in its own TU where it instantiates
 // `toe::run<ThatApp>` — the fully-monomorphic loop for that backend. hand::run

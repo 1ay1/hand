@@ -81,6 +81,9 @@ toe::Result<toe::AdoptFd> spawn_pty(const SpawnCommand &cmd) {
         // colour so apps enable truecolor (toe renders it).
         ::setenv("TERM", cmd.term.empty() ? "xterm-256color" : cmd.term.c_str(), 1);
         ::setenv("COLORTERM", "truecolor", 1);
+        // Identify ourselves like every native terminal does, so apps (and the
+        // bench) can tell which terminal they're running in.
+        ::setenv("TERM_PROGRAM", "hand", 1);
 
         // Host hook: setenv/chdir/setsid/drop-privs, before exec.
         if (cmd.pre_exec) cmd.pre_exec();
