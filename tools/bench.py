@@ -123,6 +123,102 @@ def wl_clear():
     return (CSI + "2J" + CSI + "H" + ("y" * 80 + "\r\n") * 24).encode(), 3000
 
 
+# ── BRUTAL workloads ─────────────────────────────────────────────────────────
+
+def wl_dense_cjk():
+    # Every cell a WIDE CJK glyph — max pressure on the width table, wide-cell
+    # bookkeeping, and the glyph atlas (huge distinct-glyph set).
+    pool = "漢字日本語中文韓國言語表示濫觴驫麤龘鬱靈鑫麤"
+    import random as _r
+    _r.seed(1)
+    line = "".join(_r.choice(pool) for _ in range(40)) + "\r\n"
+    return (line * 800).encode(), 200
+
+def wl_sgr_full():
+    # Full-screen truecolor REPAINT: home, then every cell gets a fresh 24-bit
+    # fg+bg + a block glyph. The single harshest realistic frame a TUI emits.
+    frame = [CSI + "H"]
+    for row in range(24):
+        for col in range(80):
+            r = (row * 11 + col * 7) & 255
+            g = (row * 23 + col * 5) & 255
+            b = (row * 3 + col * 17) & 255
+            frame.append(f"\x1b[38;2;{r};{g};{b};48;2;{255-r};{255-g};{255-b}m█")
+    return "".join(frame).encode(), 400
+
+def wl_mixed():
+    # Everything interleaved: cursor warp + truecolor + unicode + scroll, the
+    # realistic worst case with every pipeline hot at once.
+    import random as _r
+    _r.seed(7)
+    emoji = "🔥🚀💥⚡🌈★"
+    parts = []
+    for i in range(2500):
+        y = (i * 7) % 24 + 1
+        x = (i * 13) % 80 + 1
+        r, g, b = (i * 7) & 255, (i * 13) & 255, (i * 29) & 255
+        ch = _r.choice(emoji) if i % 9 == 0 else chr(33 + (i % 94))
+        parts.append(f"\x1b[{y};{x}H\x1b[38;2;{r};{g};{b}m{ch}")
+    return "".join(parts).encode(), 250
+
+def wl_wrap():
+    # No newlines: one enormous line that forces auto-wrap + reflow bookkeeping
+    # for every screen width. Kills naive per-line layout.
+    return (b"W" * 20000 + b"\r"), 800
+
+def wl_regions():
+    # Scroll-region ping-pong (DECSTBM): set a region, scroll it, repeat all over
+    # the screen. Thrashes the margin/scroll machinery.
+    parts = []
+    for i in range(1500):
+        top = (i % 20) + 1
+        bot = top + 3
+        parts.append(f"\x1b[{top};{bot}r\x1b[{bot};1H\n\ndata line here")
+    parts.append(CSI + "r")  # reset region
+    return "".join(parts).encode(), 250
+
+def wl_altscreen():
+    # Alt-screen enter/leave thrash: swap the whole grid in and out repeatedly.
+    one = CSI + "?1049h" + CSI + "2J" + CSI + "H" + "alt frame content here\r\n" * 20 + CSI + "?1049l"
+    return (one * 40).encode(), 400
+
+def wl_osc_links():
+    # OSC 8 hyperlink flood: every word its own link id. Stresses the link table
+    # + per-cell attribute storage.
+    parts = []
+    for i in range(1500):
+        parts.append(f"\x1b]8;id={i};https://example.com/{i}/path\x1b\\link{i}\x1b]8;;\x1b\\ ")
+    parts.append(b"\r\n".decode())
+    return "".join(parts).encode(), 250
+
+def wl_combining():
+    # Combining-mark / grapheme storm: base letters with stacks of diacritics —
+    # exercises grapheme clustering + cluster-width logic.
+    import random as _r
+    _r.seed(3)
+    marks = "".join(chr(c) for c in range(0x300, 0x30F))
+    out = []
+    for _ in range(1200):
+        base = chr(_r.randint(ord('a'), ord('z')))
+        out.append(base + "".join(_r.choice(marks) for _ in range(_r.randint(1, 6))))
+    return (" ".join(out) + "\r\n").encode(), 250
+
+def wl_reset():
+    # SGR reset storm: rapid attribute set/reset with no glyphs between — pure
+    # pen-state churn.
+    seq = "".join(f"\x1b[{a}m" for a in (1, 4, 7, 3, 9, 0, 22, 24, 27, 23, 29))
+    return (seq * 3000 + "\r\n").encode(), 300
+
+def wl_box():
+    # Box-drawing + block elements: the procedural-glyph render path (rects/SDF),
+    # not the atlas. A full grid of borders + shading.
+    glyphs = "─│┌┐└┘├┤┬┴┼╔╗╚╝║═▏▎▍▌▋▊▉█▓▒░"
+    import random as _r
+    _r.seed(5)
+    line = "".join(_r.choice(glyphs) for _ in range(80)) + "\r\n"
+    return (line * 600).encode(), 300
+
+
 WORKLOADS = [
     ("ascii    ", wl_ascii),
     ("scroll   ", wl_scroll),
@@ -130,6 +226,17 @@ WORKLOADS = [
     ("cursor   ", wl_cursor),
     ("unicode  ", wl_unicode),
     ("clear    ", wl_clear),
+    # brutal set
+    ("dense-cjk", wl_dense_cjk),
+    ("sgr-full ", wl_sgr_full),
+    ("mixed    ", wl_mixed),
+    ("wrap     ", wl_wrap),
+    ("regions  ", wl_regions),
+    ("altscreen", wl_altscreen),
+    ("osc-links", wl_osc_links),
+    ("combining", wl_combining),
+    ("sgr-reset", wl_reset),
+    ("box-draw ", wl_box),
 ]
 
 
@@ -201,9 +308,13 @@ def run():
     if out_path:
         try:
             with open(out_path, "a") as f:
-                f.write(f"{name}\tTOTAL\t{total_mb:.1f}\t{total_s:.3f}\t{agg:.1f}\n")
+                # Columns: term, workload, MB, seconds, MB/s, dsr_ok. dsr_ok=0
+                # means the terminal ignored our DSR sync — that number is NOT a
+                # real end-to-end measurement and must be discarded.
+                all_ok = 1 if all(ok for (_l, _mb, _dt, _r, ok) in results) else 0
+                f.write(f"{name}\tTOTAL\t{total_mb:.1f}\t{total_s:.3f}\t{agg:.1f}\t{all_ok}\n")
                 for label, mb, dt, rate, ok in results:
-                    f.write(f"{name}\t{label.strip()}\t{mb:.1f}\t{dt:.3f}\t{rate:.1f}\n")
+                    f.write(f"{name}\t{label.strip()}\t{mb:.1f}\t{dt:.3f}\t{rate:.1f}\t{1 if ok else 0}\n")
         except OSError:
             pass
     return 0
