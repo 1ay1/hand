@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include <fcntl.h>
 
@@ -702,9 +703,25 @@ Result<void> WaylandSurface::init_egl() {
         EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8,
         EGL_NONE,
     };
+    // eglChooseConfig treats sizes as MINIMUMS and may hand back a config whose
+    // native visual has no alpha (so the compositor renders us opaque and the
+    // `opacity` setting does nothing). Enumerate all matches and pick the first
+    // with EXACTLY 8-bit alpha AND a 32-bit buffer — an ARGB8888 visual the
+    // compositor will actually blend.
+    EGLint total = 0;
+    eglChooseConfig(egl_display_, cfg_attribs, nullptr, 0, &total);
+    if (total <= 0) return fail("egl: no matching config");
+    std::vector<EGLConfig> configs(static_cast<std::size_t>(total));
     EGLint num = 0;
-    if (!eglChooseConfig(egl_display_, cfg_attribs, &egl_config_, 1, &num) || num == 0) {
+    if (!eglChooseConfig(egl_display_, cfg_attribs, configs.data(), total, &num) || num == 0) {
         return fail("egl: no matching config");
+    }
+    egl_config_ = configs[0];
+    for (EGLint i = 0; i < num; ++i) {
+        EGLint a = 0, bufsz = 0;
+        eglGetConfigAttrib(egl_display_, configs[static_cast<std::size_t>(i)], EGL_ALPHA_SIZE, &a);
+        eglGetConfigAttrib(egl_display_, configs[static_cast<std::size_t>(i)], EGL_BUFFER_SIZE, &bufsz);
+        if (a == 8 && bufsz == 32) { egl_config_ = configs[static_cast<std::size_t>(i)]; break; }
     }
 
     // Prefer a 4.4 core context (enables persistent-mapped buffers for the

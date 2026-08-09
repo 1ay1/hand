@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <vector>
 
 // Fully-native GL: sokol GLCORE owns the GL entry points and links the real
 // libGL; the host only uses EGL to create the context. Real EGL header, no
@@ -280,9 +281,24 @@ Result<void> X11Surface::init_egl() {
         EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8,
         EGL_NONE,
     };
+    // Sizes are minimums; the first match may have an alpha-less native visual
+    // (window renders opaque, `opacity` ignored). Enumerate and prefer a config
+    // with exactly 8-bit alpha + a 32-bit buffer (an ARGB visual a compositor
+    // will blend).
+    EGLint total = 0;
+    eglChooseConfig(egl_display_, cfg_attribs, nullptr, 0, &total);
+    if (total <= 0) return fail("egl(x11): no matching config");
+    std::vector<EGLConfig> configs(static_cast<std::size_t>(total));
     EGLint num = 0;
-    if (!eglChooseConfig(egl_display_, cfg_attribs, &egl_config_, 1, &num) || num == 0) {
+    if (!eglChooseConfig(egl_display_, cfg_attribs, configs.data(), total, &num) || num == 0) {
         return fail("egl(x11): no matching config");
+    }
+    egl_config_ = configs[0];
+    for (EGLint i = 0; i < num; ++i) {
+        EGLint a = 0, bufsz = 0;
+        eglGetConfigAttrib(egl_display_, configs[static_cast<std::size_t>(i)], EGL_ALPHA_SIZE, &a);
+        eglGetConfigAttrib(egl_display_, configs[static_cast<std::size_t>(i)], EGL_BUFFER_SIZE, &bufsz);
+        if (a == 8 && bufsz == 32) { egl_config_ = configs[static_cast<std::size_t>(i)]; break; }
     }
 
     // Prefer a 4.4 core context (enables persistent-mapped buffers for the
