@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <set>
 #include <string>
+#include <string_view>
 
 int main() {
     int fails = 0;
@@ -109,6 +110,12 @@ int main() {
         hand::load_user_themes();
         const hand::NamedTheme *u = hand::find_theme("user:probe");
         ck(u != nullptr, "user theme file loads under id user:<stem>");
+        // User/custom themes must come FIRST in all_themes() so the picker lists
+        // them on top.
+        auto merged = hand::all_themes();
+        ck(!merged.empty() &&
+               std::string_view(merged.front().id).substr(0, 5) == "user:",
+           "user themes sort to the top of all_themes()");
         if (u) {
             ck(std::string(u->label) == "Probe Theme", "user theme label = name");
             ck(u->bg.r == 0x10, "user theme bg parsed");

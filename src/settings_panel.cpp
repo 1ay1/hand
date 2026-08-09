@@ -219,9 +219,14 @@ bool SettingsPanel::handle(const toe::win::Event &ev) {
 
 void SettingsPanel::ensure_themes() {
     if (!theme_ids_.empty()) return;
+    // all_themes() already returns user/custom themes FIRST, then the built-ins.
+    // Prefix the custom ones with a star so they're visually obvious at the top
+    // of the picker ("★ My Theme") — the id (user:<stem>) is what we persist.
     for (const auto &t : all_themes()) {
+        const bool custom = std::string_view(t.id).substr(0, 5) == "user:";
         theme_ids_.emplace_back(t.id);
-        theme_labels_.emplace_back(t.label);
+        theme_labels_.emplace_back(custom ? "★ " + std::string(t.label)
+                                          : std::string(t.label));
     }
     sync_theme_index();
 }
