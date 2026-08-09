@@ -647,7 +647,7 @@ Result<void> WaylandSurface::init(std::string_view title, PixelSize initial) {
     toplevel_ = xdg_surface_get_toplevel(xdg_surface_);
     xdg_toplevel_add_listener(toplevel_, &kToplevelListener, this);
     xdg_toplevel_set_title(toplevel_, std::string{title}.c_str());
-    xdg_toplevel_set_app_id(toplevel_, "toe");
+    xdg_toplevel_set_app_id(toplevel_, "hand");
 
     wl_surface_commit(surface_);
     wl_display_roundtrip(display_); // wait for first configure

@@ -193,6 +193,19 @@ Result<void> X11Surface::init(std::string_view title, PixelSize initial) {
 
     XStoreName(display_, win, std::string{title}.c_str());
 
+    // WM_CLASS: "instance\0Class" — lets window managers apply icons/rules and
+    // lets tools (wmctrl, xdotool, tiling WM rules) target hand's window.
+    {
+        XClassHint *ch = XAllocClassHint();
+        if (ch) {
+            char inst[] = "hand";
+            char cls[] = "Hand";
+            ch->res_name = inst;
+            ch->res_class = cls;
+            XSetClassHint(display_, win, ch);
+            XFree(ch);
+        }
+    }
     // WM close-button handling (WM_DELETE_WINDOW).
     wm_delete_ = intern_atom(xcb_, "WM_DELETE_WINDOW");
     Atom del = static_cast<Atom>(wm_delete_);
