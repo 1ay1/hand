@@ -219,6 +219,90 @@ public:
         return changed;
     }
 
+    // A DROPDOWN: shows the current value; Enter/Space opens an inline,
+    // scrollable list below it; arrows move within the list, Enter picks, Esc
+    // closes. `open_row` is the caller's persistent "which row is expanded"
+    // state (-1 = none); `list_sel` the highlighted index while open; `list_top`
+    // the scroll offset. Returns true when the selection changed.
+    bool dropdown(std::string_view label, int *index, const std::vector<std::string> &opts,
+                  int *open_row, int *list_sel, int *list_top, int max_visible = 8) {
+        const int r = begin_row();
+        const bool foc = (r == focus_);
+        const int n = static_cast<int>(opts.size());
+        bool changed = false;
+        const bool is_open = (*open_row == r);
+
+        if (foc && !is_open && act()) {
+            // Open: seed the highlight at the current value.
+            *open_row = r;
+            *list_sel = std::clamp(*index, 0, std::max(0, n - 1));
+            *list_top = std::clamp(*list_sel - max_visible / 2, 0, std::max(0, n - max_visible));
+            consumed_ = true;
+        }
+
+        // --- the closed row: label + current value + ▾ ---
+        paint_label(label, foc);
+        const int vx = value_x();
+        *index = n > 0 ? std::clamp(*index, 0, n - 1) : 0;
+        const std::string val = n > 0 ? opts[static_cast<std::size_t>(*index)] : "(none)";
+        Style vs{is_open ? theme_.accent : theme_.fg, foc ? theme_.focus_bg : theme_.panel_bg,
+                 Attr::Bold};
+        buf_.text(vx, cursor_y_, val, vs, content_.right() - vx - 2);
+        buf_.put(content_.right() - 2, cursor_y_, is_open ? U'▴' : U'▾',
+                 Style{theme_.dim, foc ? theme_.focus_bg : theme_.panel_bg});
+        end_row();
+
+        if (!is_open) return changed;
+
+        // --- the open list ---
+        if (in_.key == Key::Down) { *list_sel = std::min(n - 1, *list_sel + 1); consumed_ = true; }
+        else if (in_.key == Key::Up) { *list_sel = std::max(0, *list_sel - 1); consumed_ = true; }
+        else if (in_.key == Key::PageDown) { *list_sel = std::min(n - 1, *list_sel + max_visible); consumed_ = true; }
+        else if (in_.key == Key::PageUp) { *list_sel = std::max(0, *list_sel - max_visible); consumed_ = true; }
+        else if (in_.key == Key::Escape) { *open_row = -1; consumed_ = true; return changed; }
+        else if (in_.key == Key::Enter || in_.key == Key::Space) {
+            if (*list_sel != *index) { *index = *list_sel; changed = true; }
+            *open_row = -1; consumed_ = true;
+        }
+        // Keep the highlighted item in view.
+        if (*list_sel < *list_top) *list_top = *list_sel;
+        if (*list_sel >= *list_top + max_visible) *list_top = *list_sel - max_visible + 1;
+        *list_top = std::clamp(*list_top, 0, std::max(0, n - max_visible));
+
+        const int vis = std::min(max_visible, n);
+        const int lx = vx - 1;
+        const int lw = content_.right() - lx - 1;
+        // A bordered popup panel drawn over the following rows.
+        for (int i = 0; i < vis; ++i) {
+            const int oi = *list_top + i;
+            const bool sel = (oi == *list_sel);
+            const bool cur = (oi == *index);
+            Style rs = sel ? Style{theme_.accent_fg, theme_.accent, Attr::Bold}
+                           : Style{cur ? theme_.accent : theme_.fg, rgb(22, 24, 34)};
+            buf_.fill(Rect{lx, cursor_y_, lw, 1}, rs);
+            buf_.text(lx + 1, cursor_y_, cur ? "• " : "  ",
+                      Style{sel ? theme_.accent_fg : theme_.accent, rs.bg});
+            buf_.text(lx + 3, cursor_y_, opts[static_cast<std::size_t>(oi)], rs, lw - 4);
+            // Scrollbar hint on the right edge.
+            if (n > max_visible) {
+                const int track_h = vis;
+                const int thumb = std::clamp(*list_top * track_h / std::max(1, n), 0, track_h - 1);
+                buf_.put(lx + lw - 1, cursor_y_, i == thumb ? U'█' : U'│',
+                         Style{i == thumb ? theme_.accent : theme_.border, rs.bg});
+            }
+            cursor_y_ += 1;
+        }
+        // A count footer when the list scrolls.
+        if (n > max_visible) {
+            char cnt[48];
+            std::snprintf(cnt, sizeof cnt, "  %d of %d  (↑↓ · enter select · esc cancel)",
+                          *list_sel + 1, n);
+            buf_.text(lx, cursor_y_, cnt, Style{theme_.dim, theme_.panel_bg});
+            cursor_y_ += 1;
+        }
+        return changed;
+    }
+
     // Free-text editor. Typing edits when focused; returns changed.
     bool text_input(std::string_view label, std::string *value) {
         const int r = begin_row();

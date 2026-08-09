@@ -11,12 +11,18 @@
 
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace hand {
 
 // Resolve a monospace font FILE for the given family on this OS, or "" if none
 // is found. `family` is a generic alias ("monospace") or a family substring.
 [[nodiscard]] std::string resolve_font_file(std::string_view family);
+
+// List the installed MONOSPACE font family names on this OS, sorted, de-duped.
+// Used to populate the settings font dropdown. Empty if enumeration is
+// unavailable. Always includes "monospace" (the system-default alias) first.
+[[nodiscard]] std::vector<std::string> list_monospace_families();
 
 } // namespace hand
 

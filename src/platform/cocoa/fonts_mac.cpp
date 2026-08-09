@@ -12,7 +12,10 @@
 #include <cctype>
 #include <cstdlib>
 #include <filesystem>
+#include <set>
 #include <vector>
+
+#include <CoreText/CoreText.h>
 
 namespace hand {
 
@@ -80,6 +83,49 @@ std::string resolve_font_file(std::string_view family) {
         }
     }
     return best;
+}
+
+// List installed monospace font families via CoreText. A family is "monospace"
+// if its representative font advertises the fixed-pitch symbolic trait. Names
+// are sorted case-insensitively and de-duped; "monospace" (the system-default
+// alias) is always first so there's a sane default choice.
+std::vector<std::string> list_monospace_families() {
+    std::vector<std::string> out;
+    out.push_back("monospace");
+
+    CFArrayRef families = CTFontManagerCopyAvailableFontFamilyNames();
+    if (!families) return out;
+
+    std::set<std::string> mono; // sorted, de-duped
+    const CFIndex n = CFArrayGetCount(families);
+    for (CFIndex i = 0; i < n; ++i) {
+        CFStringRef fam = static_cast<CFStringRef>(CFArrayGetValueAtIndex(families, i));
+        if (!fam) continue;
+        // Build a font for this family and test the fixed-pitch trait.
+        CFMutableDictionaryRef attrs = CFDictionaryCreateMutable(
+            kCFAllocatorDefault, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        CFDictionaryAddValue(attrs, kCTFontFamilyNameAttribute, fam);
+        CTFontDescriptorRef desc = CTFontDescriptorCreateWithAttributes(attrs);
+        CFRelease(attrs);
+        if (!desc) continue;
+        CTFontRef font = CTFontCreateWithFontDescriptor(desc, 12.0, nullptr);
+        CFRelease(desc);
+        if (!font) continue;
+        const CTFontSymbolicTraits traits = CTFontGetSymbolicTraits(font);
+        CFRelease(font);
+        if (!(traits & kCTFontTraitMonoSpace)) continue;
+
+        // Skip families starting with a dot (system-hidden, e.g. ".SF NS Mono").
+        char buf[256];
+        if (CFStringGetCString(fam, buf, sizeof buf, kCFStringEncodingUTF8)) {
+            if (buf[0] == '.') continue;
+            mono.insert(buf);
+        }
+    }
+    CFRelease(families);
+
+    for (const std::string &m : mono) out.push_back(m);
+    return out;
 }
 
 } // namespace hand

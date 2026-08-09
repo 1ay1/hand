@@ -141,14 +141,19 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed, bool &save) {
 
     glyph::Ctx ui(buf, in, &focus_);
 
-    ui.begin_panel("hand · settings", 60, 24);
+    ui.begin_panel("hand · settings", 62, 28);
 
     ui.heading("Appearance");
     changed |= ui.slider_int("Font size", &s_.font_size, 6, 48);
     changed |= ui.toggle("Ligatures", &s_.ligatures);
     changed |= ui.select("Cursor", &s_.cursor_style, {"block", "bar", "underline"});
     changed |= ui.toggle("Blink cursor", &s_.blink_cursor);
-    changed |= ui.text_input("Font family", &s_.font_family);
+    // Font family: a real dropdown listing the installed monospace fonts.
+    if (ui.dropdown("Font", &font_index_, fonts_, &dd_open_, &dd_sel_, &dd_top_, /*max_visible=*/6)) {
+        if (font_index_ >= 0 && font_index_ < static_cast<int>(fonts_.size()))
+            s_.font_family = fonts_[static_cast<std::size_t>(font_index_)];
+        changed = true;
+    }
 
     ui.heading("Colors");
     changed |= ui.color("Foreground", &s_.fg);

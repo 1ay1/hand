@@ -99,10 +99,11 @@ if(APPLE)
     COMPILE_OPTIONS "-fobjc-arc")
   find_library(COCOA_FRAMEWORK Cocoa REQUIRED)
   find_library(OPENGL_FRAMEWORK OpenGL REQUIRED)
+  find_library(CORETEXT_FRAMEWORK CoreText REQUIRED)
 
   target_link_libraries(hand-platform
     PUBLIC  toe::toe vibe
-    PRIVATE PkgConfig::EPOXY ${COCOA_FRAMEWORK} ${OPENGL_FRAMEWORK})
+    PRIVATE PkgConfig::EPOXY ${COCOA_FRAMEWORK} ${OPENGL_FRAMEWORK} ${CORETEXT_FRAMEWORK})
 
   target_compile_features(hand-platform PUBLIC cxx_std_23)
   # GL is deprecated on macOS 10.14+: silence the pervasive deprecation noise.

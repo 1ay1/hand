@@ -30,6 +30,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -163,6 +164,11 @@ std::optional<toe::SpecialKey> special_of_keycode(unsigned short kc) {
 @interface HandGLView : NSOpenGLView {
 @public
     CocoaInbox *inbox_; // borrowed; owned by the C++ surface
+    // Borrowed live-resize hook: given the new backing-pixel (w,h), it resizes
+    // the terminal and draws ONE frame synchronously. Invoked from reshape
+    // during a live drag, when AppKit's modal resize loop has the main thread
+    // and our run loop is blocked — this is what makes resize LIVE.
+    std::function<void(int, int)> *live_render_;
 }
 @end
 
@@ -218,6 +224,14 @@ std::optional<toe::SpecialKey> special_of_keycode(unsigned short kc) {
     [super reshape];
     [[self openGLContext] update];
     [self pushResize];
+    // LIVE RESIZE: during a drag, AppKit runs its own modal event loop and our
+    // toe::run loop is blocked, so the queued PendingResize won't be handled
+    // until release. Drive a frame RIGHT HERE instead — resize the terminal and
+    // redraw synchronously — so the content reflows smoothly as you drag.
+    if (self.inLiveResize && live_render_ && *live_render_ && inbox_) {
+        const NSRect px = [self convertRectToBacking:self.bounds];
+        (*live_render_)(std::max(1, (int)px.size.width), std::max(1, (int)px.size.height));
+    }
 }
 
 - (void)keyDown:(NSEvent *)e {
@@ -485,6 +499,16 @@ public:
     void overlay_render(toe::Terminal &term, toe::PixelSize px);
     void toggle_settings();  // ⌘, opens/closes the panel
 
+    // Install the live-resize render hook: the view calls this synchronously
+    // from reshape during a drag to reflow + redraw mid-resize.
+    void set_live_render(std::function<void(int, int)> fn) {
+        live_render_ = std::move(fn);
+        if (view_) view_->live_render_ = &live_render_;
+    }
+    // Bound once by the run loop: wires the live-resize hook to the Terminal so
+    // a drag reflows + repaints in real time.
+    void bind_terminal(toe::Terminal &term, toe::PixelSize px);
+
 private:
     CocoaSurface() = default;
     void pump_cocoa(bool force = false); // drain the NSApp queue into inbox_ (throttled)
@@ -498,6 +522,7 @@ private:
     std::uint64_t last_pump_ = 0; // mach ticks of the last event-queue scan
     hand::SettingsPanel settings_{};
     glyph::Buffer overlay_buf_{};
+    std::function<void(int, int)> live_render_{}; // live-resize frame hook
 };
 
 // --- open -------------------------------------------------------------------
@@ -862,6 +887,25 @@ void CocoaSurface::toggle_settings() {
     inbox_.saw_event = true; // force a repaint
 }
 
+void CocoaSurface::bind_terminal(toe::Terminal &term, toe::PixelSize) {
+    // Install the live-resize hook. During a window drag, AppKit owns the main
+    // thread in a modal loop and our run loop is blocked; the view's reshape
+    // calls this to resize the terminal and draw ONE frame in real time, so the
+    // content reflows smoothly instead of freezing until release.
+    toe::Terminal *t = &term;
+    set_live_render([this, t](int w, int h) {
+        auto *session = t->poll().running;
+        if (!session) return;
+        const toe::PixelSize px{w, h};
+        size_ = px;
+        session->resize(px);
+        auto rc = toe::gfx::RenderContext::adopt_current();
+        session->render(rc, px);
+        if (settings_.active()) overlay_render(*t, px);
+        [[view_ openGLContext] flushBuffer];
+    });
+}
+
 void CocoaSurface::overlay_render(toe::Terminal &term, toe::PixelSize px) {
     auto *session = term.poll().running;
     if (!session) return;
@@ -878,7 +922,9 @@ void CocoaSurface::overlay_render(toe::Terminal &term, toe::PixelSize px) {
     settings_.render(overlay_buf_, changed, save);
 
     // Live-apply edits to the running terminal so you SEE them as you change
-    // them: font size (DPI-scaled) and default fg/bg colours.
+    // them: font size (DPI-scaled) applies immediately. (Family/colors persist
+    // on Save and take effect on next launch — a live font-family swap needs a
+    // toe atlas-rebuild-by-name API, a separate addition.)
     if (changed) {
         const hand::Settings &s = settings_.state();
         CGFloat scale = 1.0;
@@ -886,11 +932,10 @@ void CocoaSurface::overlay_render(toe::Terminal &term, toe::PixelSize px) {
         if (scale < 1.0) scale = 1.0;
         session->set_font_pixel_size((int)((CGFloat)s.font_size * scale), px);
     }
-    if (save) {
-        // Persist happens in the host layer (write_settings); left as a hook so
-        // the panel stays platform-free. For now, close on save.
-        settings_.close();
-    }
+    // Save persists to the VIBE file (handled inside settings_.render) and the
+    // panel shows a "✓ Saved" confirmation — it stays open so you can keep
+    // tweaking. No forced close.
+    (void)save;
 
     // Composite the panel over the terminal via the engine's overlay pass.
     auto rc = toe::gfx::RenderContext::adopt_current();

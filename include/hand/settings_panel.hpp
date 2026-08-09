@@ -17,6 +17,7 @@
 
 #include "hand/glyph/glyph.hpp"
 #include "hand/config/handconfig.hpp"
+#include "hand/platform/fonts.hpp"
 #include "toe/app.hpp"      // toe::win::Event
 #include "toe/terminal.hpp" // toe::Config
 
@@ -46,8 +47,8 @@ public:
     SettingsPanel() = default;
 
     [[nodiscard]] bool active() const noexcept { return active_; }
-    void open(const Settings &current) { s_ = current; active_ = true; queue_.clear(); dirty_ = false; focus_ = 0; }
-    void close() { active_ = false; queue_.clear(); }
+    void open(const Settings &current) { s_ = current; active_ = true; queue_.clear(); dirty_ = false; focus_ = 0; dd_open_ = -1; sync_font_index(); }
+    void close() { active_ = false; queue_.clear(); dd_open_ = -1; }
     void toggle(const Settings &current) { active_ ? close() : open(current); }
 
     // Bind the panel to the loaded config + the file it persists to. The panel
@@ -56,12 +57,14 @@ public:
     void bind(const HandConfig &cfg, std::string path) {
         cfg_ = cfg;
         save_path_ = std::move(path);
+        fonts_ = list_monospace_families();
         s_ = Settings::from(cfg_);
+        sync_font_index();
     }
     [[nodiscard]] const HandConfig &config() const noexcept { return cfg_; }
     void toggle() {
         if (active_) { close(); }
-        else { s_ = Settings::from(cfg_); active_ = true; queue_.clear(); dirty_ = false; focus_ = 0; }
+        else { s_ = Settings::from(cfg_); active_ = true; queue_.clear(); dirty_ = false; focus_ = 0; dd_open_ = -1; sync_font_index(); }
     }
 
     [[nodiscard]] const Settings &state() const noexcept { return s_; }
@@ -88,8 +91,20 @@ private:
     bool dirty_ = false;     // edits since last save/open (unsaved-changes hint)
     bool saved_flash_ = false; // show a brief "saved" confirmation next frame
     int focus_ = 0;          // persistent focus row (the Ctx is recreated per frame)
+    // Font dropdown state.
+    std::vector<std::string> fonts_{};  // installed monospace families
+    int font_index_ = 0;                // selected index into fonts_
+    int dd_open_ = -1;                  // which row's dropdown is open (-1 none)
+    int dd_sel_ = 0, dd_top_ = 0;       // dropdown highlight + scroll
 
     static glyph::Input translate(const toe::win::Event &ev, bool &consumed);
+
+    // Point font_index_ at the family currently in s_.font_family (or 0).
+    void sync_font_index() {
+        font_index_ = 0;
+        for (int i = 0; i < static_cast<int>(fonts_.size()); ++i)
+            if (fonts_[static_cast<std::size_t>(i)] == s_.font_family) { font_index_ = i; break; }
+    }
 };
 
 // Process-wide binding for the settings panel: main() sets the loaded config +
