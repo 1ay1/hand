@@ -47,6 +47,20 @@
 
 namespace hand::platform {
 
+// Wayland wire messages are capped at 4096 bytes by libwayland; a title longer
+// than that (an app can set any length via OSC 0/2) triggers
+// "message length N exceeds 4096" and KILLS the display connection. Clamp the
+// title to a safe length — no window manager shows more than a line anyway —
+// truncating on a UTF-8 boundary so we never split a codepoint mid-sequence.
+[[nodiscard]] inline std::string clamp_title(std::string_view t) {
+    constexpr std::size_t kMax = 512; // well under 4096 incl. protocol overhead
+    if (t.size() <= kMax) return std::string{t};
+    std::size_t n = kMax;
+    // Back up off any UTF-8 continuation byte (0b10xxxxxx) so the cut is clean.
+    while (n > 0 && (static_cast<unsigned char>(t[n]) & 0xC0) == 0x80) --n;
+    return std::string{t.substr(0, n)};
+}
+
 class WaylandSurface final {
 public:
     static Result<std::unique_ptr<WaylandSurface>> open(std::string_view title, PixelSize initial);
@@ -68,7 +82,7 @@ public:
     void flush() { wl_display_flush(display_); }
     void set_title(std::string_view title) {
         if (toplevel_) {
-            xdg_toplevel_set_title(toplevel_, std::string{title}.c_str());
+            xdg_toplevel_set_title(toplevel_, clamp_title(title).c_str());
         }
     }
     void set_clipboard(std::string_view utf8);
@@ -668,7 +682,7 @@ Result<void> WaylandSurface::init(std::string_view title, PixelSize initial) {
     xdg_surface_add_listener(xdg_surface_, &kXdgSurfaceListener, this);
     toplevel_ = xdg_surface_get_toplevel(xdg_surface_);
     xdg_toplevel_add_listener(toplevel_, &kToplevelListener, this);
-    xdg_toplevel_set_title(toplevel_, std::string{title}.c_str());
+    xdg_toplevel_set_title(toplevel_, clamp_title(title).c_str());
     xdg_toplevel_set_app_id(toplevel_, "hand");
 
     wl_surface_commit(surface_);
