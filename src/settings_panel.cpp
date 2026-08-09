@@ -278,7 +278,7 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
     ensure_themes();
 
     static const std::vector<std::string> kSections = {
-        "Theme", "Font", "Cursor", "Colors", "Scroll", "Behavior", "Window", "Advanced"};
+        "Theme", "Font", "Cursor", "Scroll", "Behavior", "Window", "Advanced"};
     const int nsec = static_cast<int>(kSections.size());
 
     // Tab / Shift-Tab switch SECTIONS (unless a dropdown is capturing input).
@@ -293,8 +293,8 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
     glyph::Ctx ui(buf, in, &focus_, ui_theme());
 
     // Rows each section shows (drives the auto-fitted panel height so there's no
-    // vast empty space under a short tab like Theme). Index matches kSections.
-    static const int kSectionRows[] = {1, 7, 6, 7, 4, 4, 6, 3};
+    // vast empty space under a short tab). Index matches kSections.
+    static const int kSectionRows[] = {11, 7, 6, 4, 4, 6, 3};
     const int rows = kSectionRows[std::clamp(section_, 0, nsec - 1)];
     // header band(1)+rule(1)+gap(1) + tab row(1)+rule(1) + content + gap +
     // footer rule(1)+text(1) + frame(2). A roomy but tight card.
@@ -330,13 +330,13 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
     }
 
     switch (section_) {
-    case 0: { // Theme — the headline: one pick recolours grid + chrome live.
+    case 0: { // Theme — pick a theme, then tweak its colours, then save your own.
         sync_theme_index();
         if (ui.dropdown("Theme", &theme_index_, theme_labels_, &dd_open_,
                         &theme_dd_sel_, &theme_dd_top_, 10, &theme_filter_)) {
             if (theme_index_ >= 0 && theme_index_ < static_cast<int>(theme_ids_.size())) {
-                // Refill the colour fields from the chosen theme so the Colors
-                // tab mirrors it and the host applies the full palette live.
+                // Refill the colour fields from the chosen theme so the swatches
+                // below mirror it and the host applies the full palette live.
                 s_.theme = theme_ids_[static_cast<std::size_t>(theme_index_)];
                 if (const NamedTheme *t = find_theme(s_.theme)) {
                     auto hex = [](toe::Rgb c) {
@@ -354,6 +354,24 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
                 changed = true;
             }
         }
+        // The theme's key colours, editable in place — tweaks layer over the
+        // theme (they persist as `colors { }` overrides). Editing a swatch marks
+        // the config custom without leaving the theme.
+        ui.note("tweak the theme's colours — or save your own below");
+        changed |= ui.color("Foreground", &s_.fg);
+        changed |= ui.color("Background", &s_.bg);
+        changed |= ui.color("Cursor", &s_.cursor_color);
+        changed |= ui.color("Selection", &s_.selection);
+        // Author a THEME from the current colours: name it + save. It lands in
+        // ~/.config/hand/themes/<slug>.vibe and instantly joins the picker above
+        // (and is shareable — just send the file).
+        ui.text_input("Save as", &export_name_);
+        if (ui.button("⬇ Save current colours as a theme")) {
+            const std::string path = export_current_theme();
+            export_status_ = path.empty() ? "export failed (no config dir?)"
+                                          : "saved → " + path;
+        }
+        if (!export_status_.empty()) ui.note(export_status_);
         break;
     }
     case 1: // Font
@@ -379,35 +397,19 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
         changed |= ui.slider_int("Glide ms", &s_.animate_ms, 10, 300, 5);
         changed |= ui.toggle("Comet trail", &s_.animate_trail);
         break;
-    case 3: // Colors
-        changed |= ui.color("Foreground", &s_.fg);
-        changed |= ui.color("Background", &s_.bg);
-        changed |= ui.color("Cursor", &s_.cursor_color);
-        changed |= ui.color("Selection", &s_.selection);
-        // Author a THEME from the current colours: name it + save. It lands in
-        // ~/.config/hand/themes/<slug>.vibe and instantly joins the Theme picker
-        // (and is shareable — just send the file).
-        ui.text_input("Save as theme", &export_name_);
-        if (ui.button("⬇ Export current colours")) {
-            const std::string path = export_current_theme();
-            export_status_ = path.empty() ? "export failed (no config dir?)"
-                                          : "saved → " + path;
-        }
-        if (!export_status_.empty()) ui.note(export_status_);
-        break;
-    case 4: // Scroll
+    case 3: // Scroll
         changed |= ui.slider_int("Scrollback", &s_.scrollback, 0, 100000, 1000);
         changed |= ui.slider_int("Wheel lines", &s_.scroll_mult, 1, 20, 1);
         changed |= ui.toggle("Scroll on output", &s_.scroll_on_output);
         changed |= ui.toggle("Scroll on keystroke", &s_.scroll_on_keystroke);
         break;
-    case 5: // Behavior
+    case 4: // Behavior
         changed |= ui.toggle("Audible bell", &s_.audible_bell);
         changed |= ui.toggle("Visual bell", &s_.visual_bell);
         changed |= ui.toggle("Copy on select", &s_.copy_on_select);
         changed |= ui.toggle("Confirm on close", &s_.confirm_close);
         break;
-    case 6: { // Window
+    case 5: { // Window
         changed |= ui.text_input("Title", &s_.title);
         changed |= ui.slider_int("Padding", &s_.padding, 0, 64, 1);
         int op = static_cast<int>(s_.opacity * 100.0f + 0.5f);
@@ -428,7 +430,7 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
         changed |= ui.toggle("Decorations", &s_.decorations);
         break;
     }
-    case 7: // Advanced
+    case 6: // Advanced
         ui.note("Shell / TERM take effect on the NEXT window.");
         changed |= ui.text_input("Shell (empty = $SHELL)", &s_.shell);
         changed |= ui.text_input("TERM", &s_.term_env);

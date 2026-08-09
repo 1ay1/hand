@@ -62,7 +62,7 @@ colors {
 #   bright_red "#f38ba8"  ...  bright_white "#a6adc8"
 #
 # It appears in the picker as "My Theme" (id user:mytheme) instantly. The
-# settings panel's Colors tab can also EXPORT your current colours as a theme.
+# settings panel's Theme tab can also EXPORT your current colours as a theme.
 
 cursor {
     shape    block   # block | bar | underline
