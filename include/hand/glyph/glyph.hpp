@@ -68,8 +68,14 @@ struct Theme {
 
 class Ctx {
 public:
-    Ctx(Buffer &buf, const Input &in, const Theme &theme = {})
-        : buf_(buf), in_(in), theme_(theme) {}
+    // `focus_state` is the caller's PERSISTENT focus index (which row is
+    // selected). The Ctx is recreated every frame, so focus can't live in it —
+    // the caller owns an int and passes its address; the Ctx reads and updates
+    // it. Pass nullptr for a static, non-interactive panel.
+    Ctx(Buffer &buf, const Input &in, int *focus_state = nullptr, const Theme &theme = {})
+        : buf_(buf), in_(in), theme_(theme), focus_ext_(focus_state) {
+        focus_ = focus_ext_ ? *focus_ext_ : 0;
+    }
 
     // --- panel frame --------------------------------------------------------
     // Open a centered panel of `cols`x`rows` with a titled rounded frame.
@@ -99,7 +105,6 @@ public:
         content_.x += 1; content_.w -= 2; // horizontal breathing room
         cursor_y_ = content_.y + 1;
         row_index_ = 0;
-        if (first_frame_) { focus_ = 0; first_frame_ = false; }
         activated_ = -1;
         consumed_ = false;
     }
@@ -123,6 +128,8 @@ public:
             if (in_.key == Key::Down || in_.key == Key::Tab) move_focus(+1);
             else if (in_.key == Key::Up || in_.key == Key::ShiftTab) move_focus(-1);
         }
+        // Write the updated focus back to the caller's persistent state.
+        if (focus_ext_) *focus_ext_ = focus_;
     }
 
     [[nodiscard]] bool escaped() const { return in_.key == Key::Escape; }
@@ -279,6 +286,9 @@ public:
         cursor_y_ += 1;
     }
 
+    // A blank spacer row (non-focusable).
+    void gap() { cursor_y_ += 1; }
+
     [[nodiscard]] int focus() const noexcept { return focus_; }
     void set_focus(int f) noexcept { focus_ = f; }
 
@@ -349,7 +359,7 @@ private:
     int label_w_ = 18;
     int activated_ = -1;
     bool consumed_ = false;
-    bool first_frame_ = true;
+    int *focus_ext_ = nullptr; // caller's persistent focus index (in/out)
 };
 
 } // namespace glyph

@@ -28,6 +28,23 @@ toe::Rgb unhex(const std::string &h) {
     auto v = [&](int i) { return std::uint8_t(d(h[i]) * 16 + d(h[i + 1])); };
     return toe::rgb(v(1), v(3), v(5));
 }
+
+// Decode the FIRST UTF-8 scalar of a byte string (settings text is one
+// codepoint per key event).
+char32_t decode_first_utf8(std::string_view s) {
+    if (s.empty()) return 0;
+    const unsigned char b0 = (unsigned char)s[0];
+    if (b0 < 0x80) return b0;
+    auto cont = [&](std::size_t k) { return k < s.size() && ((unsigned char)s[k] & 0xC0) == 0x80; };
+    if ((b0 & 0xE0) == 0xC0 && cont(1))
+        return ((b0 & 0x1F) << 6) | ((unsigned char)s[1] & 0x3F);
+    if ((b0 & 0xF0) == 0xE0 && cont(1) && cont(2))
+        return ((b0 & 0x0F) << 12) | (((unsigned char)s[1] & 0x3F) << 6) | ((unsigned char)s[2] & 0x3F);
+    if ((b0 & 0xF8) == 0xF0 && cont(1) && cont(2) && cont(3))
+        return ((b0 & 0x07) << 18) | (((unsigned char)s[1] & 0x3F) << 12) |
+               (((unsigned char)s[2] & 0x3F) << 6) | ((unsigned char)s[3] & 0x3F);
+    return 0xFFFD;
+}
 } // namespace
 
 Settings Settings::from(const HandConfig &c) {
@@ -84,17 +101,17 @@ glyph::Input SettingsPanel::translate(const toe::win::Event &ev, bool &consumed)
             }
         } else if (const auto *txt = std::get_if<TextInput>(&k.key)) {
             // A control-key text (e.g. space arrives as " ") — map space, else
-            // treat as a typed character for text fields.
+            // treat as a typed character (decoded as a full UTF-8 codepoint).
             if (txt->utf8 == " ") { in.key = glyph::Key::Space; }
             else if (!txt->utf8.empty() && (unsigned char)txt->utf8[0] >= 0x20) {
                 in.key = glyph::Key::Char;
-                in.ch = (char32_t)(unsigned char)txt->utf8[0]; // ASCII fast path
+                in.ch = decode_first_utf8(txt->utf8);
             } else consumed = false;
         } else consumed = false;
     } else if (const auto *te = std::get_if<win::TextEntered>(&ev)) {
-        if (!te->utf8.empty()) {
+        if (!te->utf8.empty() && (unsigned char)te->utf8[0] >= 0x20) {
             in.key = te->utf8 == " " ? glyph::Key::Space : glyph::Key::Char;
-            in.ch = (char32_t)(unsigned char)te->utf8[0];
+            in.ch = decode_first_utf8(te->utf8);
             consumed = true;
         }
     }
@@ -106,8 +123,10 @@ bool SettingsPanel::handle(const toe::win::Event &ev) {
     bool consumed = false;
     const glyph::Input in = translate(ev, consumed);
     if (!consumed) return false;
-    if (in.key == glyph::Key::Escape) { active_ = false; return true; }
-    pending_ = in; // processed on the next render()
+    if (in.key == glyph::Key::Escape) { active_ = false; queue_.clear(); return true; }
+    // Queue it — several events may arrive between frames (fast typing, held
+    // arrows); render() drains one per frame so nothing is dropped.
+    queue_.push_back(in);
     return true;
 }
 
@@ -115,9 +134,14 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed, bool &save) {
     changed = false;
     save = false;
     want_save_ = false;
-    glyph::Ctx ui(buf, pending_);
 
-    ui.begin_panel("hand · settings", 60, 22);
+    // Drain ONE queued input this frame (IMGUI processes one event per pass).
+    glyph::Input in{};
+    if (!queue_.empty()) { in = queue_.front(); queue_.pop_front(); }
+
+    glyph::Ctx ui(buf, in, &focus_);
+
+    ui.begin_panel("hand · settings", 60, 24);
 
     ui.heading("Appearance");
     changed |= ui.slider_int("Font size", &s_.font_size, 6, 48);
@@ -133,17 +157,26 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed, bool &save) {
     ui.heading("Behavior");
     changed |= ui.slider_int("Scrollback", &s_.scrollback, 0, 100000, 1000);
 
-    ui.heading("");
-    if (ui.button("Save to config")) want_save_ = true;
+    ui.gap();
+    // Save button label reflects state: unsaved edits, or a brief confirmation.
+    const char *label = saved_flash_ ? "✓ Saved" : (dirty_ ? "Save changes *" : "Save to config");
+    const bool hit = ui.button(label);
+    saved_flash_ = false;
+    if (hit) want_save_ = true;
 
     ui.end_panel();
 
+    if (changed) dirty_ = true;
     if (want_save_) {
         s_.into(cfg_);
-        if (!save_path_.empty()) (void)save_hand_config(cfg_, save_path_);
+        if (!save_path_.empty() && save_hand_config(cfg_, save_path_)) {
+            dirty_ = false;
+            saved_flash_ = true; // show "✓ Saved" on the next frame
+        }
     }
     save = want_save_;
-    pending_ = glyph::Input{}; // consume
+    // If more input is queued, keep repainting so it drains quickly.
+    if (!queue_.empty()) { /* the overlay force-repaints every frame anyway */ }
 }
 
 // --- process-wide settings source ------------------------------------------

@@ -11,6 +11,7 @@
 #ifndef HAND_SETTINGS_PANEL_HPP
 #define HAND_SETTINGS_PANEL_HPP
 
+#include <deque>
 #include <string>
 #include <vector>
 
@@ -45,8 +46,8 @@ public:
     SettingsPanel() = default;
 
     [[nodiscard]] bool active() const noexcept { return active_; }
-    void open(const Settings &current) { s_ = current; active_ = true; pending_ = glyph::Input{}; }
-    void close() { active_ = false; }
+    void open(const Settings &current) { s_ = current; active_ = true; queue_.clear(); dirty_ = false; focus_ = 0; }
+    void close() { active_ = false; queue_.clear(); }
     void toggle(const Settings &current) { active_ ? close() : open(current); }
 
     // Bind the panel to the loaded config + the file it persists to. The panel
@@ -60,7 +61,7 @@ public:
     [[nodiscard]] const HandConfig &config() const noexcept { return cfg_; }
     void toggle() {
         if (active_) { close(); }
-        else { s_ = Settings::from(cfg_); active_ = true; pending_ = glyph::Input{}; }
+        else { s_ = Settings::from(cfg_); active_ = true; queue_.clear(); dirty_ = false; focus_ = 0; }
     }
 
     [[nodiscard]] const Settings &state() const noexcept { return s_; }
@@ -79,8 +80,14 @@ private:
     HandConfig cfg_{};       // the full loaded config (edits folded back here)
     std::string save_path_;  // where Save persists the VIBE file
     bool active_ = false;
-    glyph::Input pending_{}; // the event to process on the next render()
+    // A QUEUE of pending inputs, not a single slot: fast typing / held keys
+    // produce several events between frames and none may be dropped. render()
+    // drains one per frame (the overlay repaints every frame, so it keeps up).
+    std::deque<glyph::Input> queue_;
     bool want_save_ = false;
+    bool dirty_ = false;     // edits since last save/open (unsaved-changes hint)
+    bool saved_flash_ = false; // show a brief "saved" confirmation next frame
+    int focus_ = 0;          // persistent focus row (the Ctx is recreated per frame)
 
     static glyph::Input translate(const toe::win::Event &ev, bool &consumed);
 };
