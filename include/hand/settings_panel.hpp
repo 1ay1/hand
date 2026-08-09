@@ -182,6 +182,10 @@ private:
     // across frames since the Ctx is recreated each frame).
     std::string theme_filter_{};
     std::string font_filter_{};
+    // "Save as theme" export: the name the user is typing + a transient status
+    // line ("Saved → ...") shown after a successful write.
+    std::string export_name_{"My Theme"};
+    std::string export_status_{};
 
     static glyph::Input translate(const toe::win::Event &ev, bool &consumed);
 
@@ -214,6 +218,10 @@ private:
     // Lazily fill theme_labels_/theme_ids_ from the built-in table and point
     // theme_index_ at the active theme id.
     void ensure_themes();
+    // Write the current colours (from s_) to a user theme file named by
+    // export_name_. Returns the path, or empty on failure. Reloads the theme
+    // registry so it shows up in the picker at once.
+    std::string export_current_theme();
     void sync_theme_index() {
         theme_index_ = 0;
         for (int i = 0; i < static_cast<int>(theme_ids_.size()); ++i)

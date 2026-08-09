@@ -10,8 +10,10 @@
 #include "hand/config/config.hpp"
 #include "hand/settings_panel.hpp"
 #include "hand/theme/themes.hpp"
-
+#include "hand/theme/user_themes.hpp"
 #include <cstdio>
+#include <cstdlib>
+#include <filesystem>
 #include <set>
 #include <string>
 
@@ -75,6 +77,56 @@ int main() {
     auto s = hand::Settings::from(d);
     ck(s.theme == "tokyonight", "Settings::from carries theme");
     ck(s.palette.size() == 16, "Settings::from carries palette");
+
+    // --- named palette colours in config -----------------------------------
+    {
+        FILE *f = std::fopen("/tmp/named_colors.vibe", "w");
+        std::fputs("theme catppuccin-mocha\n"
+                   "colors { red \"#ff0000\" bright_blue \"#0000ff\" }\n", f);
+        std::fclose(f);
+        auto nc = hand::load_hand_config("/tmp/named_colors.vibe");
+        ck(nc.colors.palette.size() == 16, "named colours build a 16-slot palette");
+        ck(nc.colors.palette[1].r == 0xff && nc.colors.palette[1].g == 0,
+           "colors.red -> slot 1");
+        ck(nc.colors.palette[12].b == 0xff && nc.colors.palette[12].r == 0,
+           "colors.bright_blue -> slot 12");
+        // Unspecified slots keep the theme's palette (not zeroed).
+        const hand::NamedTheme *moc2 = hand::find_theme("catppuccin-mocha");
+        ck(moc2 && nc.colors.palette[2] == moc2->ansi[2],
+           "unset named slot keeps the theme colour");
+    }
+
+    // --- user theme files --------------------------------------------------
+    {
+        // Point the loader at a temp themes dir and drop one theme in it.
+        setenv("XDG_CONFIG_HOME", "/tmp/hand_theme_test_cfg", 1);
+        std::filesystem::create_directories("/tmp/hand_theme_test_cfg/hand/themes");
+        FILE *f = std::fopen("/tmp/hand_theme_test_cfg/hand/themes/probe.vibe", "w");
+        std::fputs("name \"Probe Theme\"\nbackground \"#101010\"\n"
+                   "foreground \"#e0e0e0\"\naccent \"#00ffcc\"\n"
+                   "green \"#00ff00\"\n", f);
+        std::fclose(f);
+        hand::load_user_themes();
+        const hand::NamedTheme *u = hand::find_theme("user:probe");
+        ck(u != nullptr, "user theme file loads under id user:<stem>");
+        if (u) {
+            ck(std::string(u->label) == "Probe Theme", "user theme label = name");
+            ck(u->bg.r == 0x10, "user theme bg parsed");
+            ck(u->accent.g == 0xff && u->accent.b == 0xcc, "user theme accent parsed");
+            ck(u->ansi[2].g == 0xff, "user theme named green -> slot 2");
+        }
+        // Export round-trip: save colours -> reload -> find it.
+        hand::ThemeColors tc;
+        tc.dark = true;
+        tc.bg = toe::rgb(0x22, 0x22, 0x22); tc.fg = toe::rgb(0xdd, 0xdd, 0xdd);
+        tc.cursor = tc.fg; tc.selection = toe::rgb(0x44, 0x44, 0x44);
+        tc.accent = toe::rgb(0xff, 0x88, 0x00);
+        for (int i = 0; i < 16; ++i) tc.ansi[static_cast<std::size_t>(i)] = toe::rgb(i * 16, i * 8, i * 4);
+        const std::string p = hand::save_user_theme("Exported One", tc);
+        ck(!p.empty(), "save_user_theme writes a file");
+        ck(hand::find_theme("user:exported-one") != nullptr,
+           "exported theme is immediately findable");
+    }
 
     std::printf(fails ? "%d THEME CHECK(S) FAILED\n" : "ALL THEME CHECKS PASS\n", fails);
     return fails ? 1 : 0;

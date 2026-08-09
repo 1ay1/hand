@@ -8,6 +8,7 @@
 // persist edits.
 
 #include "hand/config/config.hpp"
+#include "hand/theme/palette_names.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -135,18 +136,41 @@ HandConfig load_hand_config(std::string_view path) {
     load_color(r, "colors.background", cfg.colors.background);
     load_color(r, "colors.cursor", cfg.colors.cursor);
     load_color(r, "colors.selection", cfg.colors.selection_bg);
-    // Optional 16-color palette array of "#rrggbb".
+    // The 16-colour ANSI palette can be authored two ways (both optional; the
+    // theme's palette is the base). NAMED keys are the friendly form:
+    //   colors { red "#.." green "#.." bright_blue "#.." ... }
+    // and an indexed `palette [ ... ]` array still works for bulk paste. Named
+    // keys win over the array where both are set.
     if (VibeObject *colors = vibe_get_object(r, "colors")) {
-        if (VibeValue *pal = vibe_object_get(colors, "palette")) {
-            if (VibeArray *arr = vibe_value_array(pal)) {
+        // Start from the theme's palette (already seeded) so a partial set of
+        // named overrides only touches those slots.
+        std::vector<toe::Rgb> pal = cfg.colors.palette;
+        bool touched = false;
+        // 1) indexed array (bulk).
+        if (VibeValue *pv = vibe_object_get(colors, "palette")) {
+            if (VibeArray *arr = vibe_value_array(pv)) {
                 const std::size_t n = vibe_array_size(arr);
-                cfg.colors.palette.clear();
-                for (std::size_t i = 0; i < n && i < 16; ++i) {
-                    if (const char *s = vibe_value_string_or(vibe_array_get(arr, i), nullptr))
-                        if (auto c = HexColor::parse(s)) cfg.colors.palette.push_back(c->rgb());
+                if (n > 0) {
+                    if (pal.size() < 16) pal.resize(16, toe::rgb(0, 0, 0));
+                    for (std::size_t i = 0; i < n && i < 16; ++i)
+                        if (const char *s = vibe_value_string_or(vibe_array_get(arr, i), nullptr))
+                            if (auto c = HexColor::parse(s)) { pal[i] = c->rgb(); touched = true; }
                 }
             }
         }
+        // 2) named keys (red, green, bright_blue, ...). The obvious way to hand-
+        //    author a theme without memorising which index is which colour.
+        for (int i = 0; i < 16; ++i) {
+            const std::string key = "colors." + std::string(kAnsiNames[static_cast<std::size_t>(i)]);
+            if (const char *s = vibe_get_string_or(r, key.c_str(), nullptr)) {
+                if (auto c = HexColor::parse(s)) {
+                    if (pal.size() < 16) pal.resize(16, toe::rgb(0, 0, 0));
+                    pal[static_cast<std::size_t>(i)] = c->rgb();
+                    touched = true;
+                }
+            }
+        }
+        if (touched) cfg.colors.palette = std::move(pal);
     }
 
     // cursor
@@ -214,11 +238,12 @@ bool save_hand_config(const HandConfig &cfg, std::string_view path) {
     vibe_object_set_string(col, "background", hex_of(cfg.colors.background).c_str());
     vibe_object_set_string(col, "cursor", hex_of(cfg.colors.cursor).c_str());
     vibe_object_set_string(col, "selection", hex_of(cfg.colors.selection_bg).c_str());
+    // Write the 16 palette slots by NAME (red, green, bright_blue, ...) so the
+    // saved file is human-readable and easy to hand-edit — not a cryptic array.
     if (!cfg.colors.palette.empty()) {
-        VibeValue *arr = vibe_value_new_array();
-        VibeArray *a = vibe_value_array(arr);
-        for (toe::Rgb c : cfg.colors.palette) vibe_array_push_string(a, hex_of(c).c_str());
-        vibe_object_set(col, "palette", arr);
+        for (std::size_t i = 0; i < cfg.colors.palette.size() && i < 16; ++i)
+            vibe_object_set_string(col, std::string(kAnsiNames[i]).c_str(),
+                                   hex_of(cfg.colors.palette[i]).c_str());
     }
 
     VibeObject *cur = obj("cursor");

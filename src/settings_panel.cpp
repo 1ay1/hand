@@ -6,9 +6,12 @@
 #include "hand/settings_panel.hpp"
 #include "hand/config/config.hpp"
 #include "hand/theme/themes.hpp"
+#include "hand/theme/user_themes.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
+#include <filesystem>
 #include <variant>
 
 namespace hand {
@@ -229,6 +232,42 @@ glyph::Theme SettingsPanel::ui_theme() const {
     return glyph::Theme{};
 }
 
+std::string SettingsPanel::export_current_theme() {
+    auto unhex = [](const std::string &h) -> toe::Rgb {
+        if (auto c = HexColor::parse(h)) return c->rgb();
+        return toe::rgb(0, 0, 0);
+    };
+    ThemeColors tc;
+    tc.bg = unhex(s_.bg);
+    tc.fg = unhex(s_.fg);
+    tc.cursor = unhex(s_.cursor_color);
+    tc.selection = unhex(s_.selection);
+    // Dark/light inferred from background brightness.
+    tc.dark = (0.2126f * tc.bg.r + 0.7152f * tc.bg.g + 0.0722f * tc.bg.b) < 128.0f;
+    // Palette: fall back to the active theme's if the user hasn't set 16.
+    std::array<toe::Rgb, 16> ansi{};
+    if (s_.palette.size() >= 16) {
+        for (int i = 0; i < 16; ++i) ansi[static_cast<std::size_t>(i)] = unhex(s_.palette[static_cast<std::size_t>(i)]);
+    } else if (const NamedTheme *base = find_theme(s_.theme)) {
+        ansi = base->ansi;
+    }
+    tc.ansi = ansi;
+    tc.accent = ansi[12]; // bright blue as the brand accent
+
+    const std::string path = save_user_theme(export_name_, tc);
+    if (!path.empty()) {
+        // Refresh the picker so the new theme appears immediately, and select it.
+        theme_ids_.clear();
+        theme_labels_.clear();
+        ensure_themes();
+        // The new theme's id is "user:<file-stem>"; derive it from the path.
+        std::string stem = std::filesystem::path(path).stem().string();
+        const std::string id = "user:" + stem;
+        if (find_theme(id)) { s_.theme = id; sync_theme_index(); }
+    }
+    return path;
+}
+
 void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
     changed = false;
 
@@ -255,7 +294,7 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
 
     // Rows each section shows (drives the auto-fitted panel height so there's no
     // vast empty space under a short tab like Theme). Index matches kSections.
-    static const int kSectionRows[] = {1, 7, 6, 4, 4, 4, 6, 3};
+    static const int kSectionRows[] = {1, 7, 6, 7, 4, 4, 6, 3};
     const int rows = kSectionRows[std::clamp(section_, 0, nsec - 1)];
     // header band(1)+rule(1)+gap(1) + tab row(1)+rule(1) + content + gap +
     // footer rule(1)+text(1) + frame(2). A roomy but tight card.
@@ -345,6 +384,16 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
         changed |= ui.color("Background", &s_.bg);
         changed |= ui.color("Cursor", &s_.cursor_color);
         changed |= ui.color("Selection", &s_.selection);
+        // Author a THEME from the current colours: name it + save. It lands in
+        // ~/.config/hand/themes/<slug>.vibe and instantly joins the Theme picker
+        // (and is shareable — just send the file).
+        ui.text_input("Save as theme", &export_name_);
+        if (ui.button("⬇ Export current colours")) {
+            const std::string path = export_current_theme();
+            export_status_ = path.empty() ? "export failed (no config dir?)"
+                                          : "saved → " + path;
+        }
+        if (!export_status_.empty()) ui.note(export_status_);
         break;
     case 4: // Scroll
         changed |= ui.slider_int("Scrollback", &s_.scrollback, 0, 100000, 1000);

@@ -8,9 +8,10 @@
 
 # Theme — the base colour layer. One of the 600+ built-in schemes (from
 # iterm2-color-schemes), e.g. catppuccin-mocha, tokyonight, nord, gruvbox-dark,
-# dracula, rose-pine, everforest-dark-med. Pick one live in the settings panel (⌘,):
-# choosing a theme recolours the grid AND the UI chrome instantly. Any explicit
-# `colors { }` keys below override the theme per-colour.
+# dracula, rose-pine, everforest-dark-med — OR one of YOUR OWN themes dropped in
+# ~/.config/hand/themes/*.vibe (referenced as user:<filename>). Pick one live in
+# the settings panel (⌘,): choosing a theme recolours the grid AND the UI chrome
+# instantly. Any `colors { }` keys below override the theme per-colour.
 theme catppuccin-mocha
 
 window {
@@ -42,13 +43,26 @@ colors {
     # background "#171720"
     # cursor     "#dcdcdc"
     # selection  "#3c466e"
-    # Optional 16-color ANSI palette (0-7 normal, 8-15 bright). Omit to use the
-    # theme's palette.
-    # palette [
-    #   "#171720" "#e05561" "#8cc265" "#d18f52" "#4aa5f0" "#c162de" "#42b3c2" "#d7dae0"
-    #   "#454b5a" "#ff616e" "#a5e075" "#f9c859" "#4dc4ff" "#de73ff" "#4cd1e0" "#e6e6e6"
-    # ]
+    # The 16 ANSI colours, by NAME (the easy way — no need to memorise indices).
+    # Set any subset; unset ones keep the theme's colour.
+    #   red "#.."  green "#.."  yellow "#.."  blue "#.."
+    #   magenta "#.."  cyan "#.."  white "#.."  black "#.."
+    #   bright_red "#.."  bright_green "#.."  ...  bright_white "#.."
 }
+
+# ─── Authoring your own theme ───
+# Drop a file in ~/.config/hand/themes/, e.g. mytheme.vibe:
+#
+#   name       "My Theme"
+#   dark       true
+#   background "#1e1e2e"   foreground "#cdd6f4"
+#   cursor     "#f5e0dc"   selection  "#585b70"   accent "#89b4fa"
+#   red "#f38ba8"  green "#a6e3a1"  yellow "#f9e2af"  blue "#89b4fa"
+#   magenta "#f5c2e7"  cyan "#94e2d5"  white "#bac2de"  black "#45475a"
+#   bright_red "#f38ba8"  ...  bright_white "#a6adc8"
+#
+# It appears in the picker as "My Theme" (id user:mytheme) instantly. The
+# settings panel's Colors tab can also EXPORT your current colours as a theme.
 
 cursor {
     shape    block   # block | bar | underline
