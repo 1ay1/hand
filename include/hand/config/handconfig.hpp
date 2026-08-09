@@ -106,6 +106,8 @@ struct HandConfig {
         c.default_fg = colors.foreground;
         c.default_bg = colors.background;
         c.selection_bg = colors.selection_bg;
+        // Blink OFF => steady cursor (period 0); else the configured half-period.
+        c.cursor_blink_ms = cursor.blink ? cursor.blink_ms : 0;
         c.cursor_anim.enabled = cursor.animate;
         c.cursor_anim.time_ms = cursor.animate_ms;
         c.cursor_anim.trail = cursor.animate_trail;

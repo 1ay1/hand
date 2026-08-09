@@ -12,6 +12,8 @@
 #define HAND_SETTINGS_PANEL_HPP
 
 #include <deque>
+#include <chrono>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -22,6 +24,10 @@
 #include "toe/terminal.hpp" // toe::Config
 
 namespace hand {
+
+// Declared in hand/config/config.hpp; forward-declared here so flush_pending()
+// can live-persist without pulling the whole VIBE parser into every consumer.
+[[nodiscard]] bool save_hand_config(const HandConfig &cfg, std::string_view path);
 
 // The subset of options the panel edits live. Mirrors toe::Config plus a couple
 // of host-owned bits (cursor style). Applied back to the running terminal and
@@ -77,8 +83,8 @@ public:
     SettingsPanel() = default;
 
     [[nodiscard]] bool active() const noexcept { return active_; }
-    void open(const Settings &current) { s_ = current; active_ = true; queue_.clear(); dirty_ = false; focus_ = 0; section_ = 0; dd_open_ = -1; sync_font_index(); }
-    void close() { active_ = false; queue_.clear(); dd_open_ = -1; }
+    void open(const Settings &current) { s_ = current; active_ = true; queue_.clear(); focus_ = 0; section_ = 0; dd_open_ = -1; sync_font_index(); }
+    void close() { flush_pending(); active_ = false; queue_.clear(); dd_open_ = -1; }
     void toggle(const Settings &current) { active_ ? close() : open(current); }
 
     // Bind the panel to the loaded config + the file it persists to. The panel
@@ -94,7 +100,7 @@ public:
     [[nodiscard]] const HandConfig &config() const noexcept { return cfg_; }
     void toggle() {
         if (active_) { close(); }
-        else { s_ = Settings::from(cfg_); active_ = true; queue_.clear(); dirty_ = false; focus_ = 0; section_ = 0; dd_open_ = -1; sync_font_index(); }
+        else { s_ = Settings::from(cfg_); active_ = true; queue_.clear(); focus_ = 0; section_ = 0; dd_open_ = -1; sync_font_index(); }
     }
 
     [[nodiscard]] const Settings &state() const noexcept { return s_; }
@@ -103,27 +109,28 @@ public:
     // not reach the terminal). Escape closes the panel.
     [[nodiscard]] bool handle(const toe::win::Event &ev);
 
-    // Request a save (e.g. from ⌘S). Persists on the next render().
-    void request_save() { force_save_ = true; }
-
     // Paint the form into `buf` (sized to the terminal grid in cells), using the
-    // input accumulated since the last handle(). Out-params report a live edit
-    // (apply to the running terminal) and a save request (persist to config).
-    void render(glyph::Buffer &buf, bool &changed, bool &save);
+    // input accumulated since the last handle(). `changed` reports a live edit
+    // this frame — the host applies it to the running terminal immediately. The
+    // panel PERSISTS every change itself (debounced), so there is no save step.
+    void render(glyph::Buffer &buf, bool &changed);
 
 private:
     Settings s_{};
     HandConfig cfg_{};       // the full loaded config (edits folded back here)
-    std::string save_path_;  // where Save persists the VIBE file
+    std::string save_path_;  // VIBE file every edit live-persists to
     bool active_ = false;
     // A QUEUE of pending inputs, not a single slot: fast typing / held keys
     // produce several events between frames and none may be dropped. render()
     // drains one per frame (the overlay repaints every frame, so it keeps up).
     std::deque<glyph::Input> queue_;
-    bool want_save_ = false;
-    bool dirty_ = false;     // edits since last save/open (unsaved-changes hint)
-    bool saved_flash_ = false; // show a brief "saved" confirmation next frame
-    bool force_save_ = false;  // ⌘S requested a save this/next frame
+    // Live persistence: an edit sets pending_save_ + stamps edited_ms_; the
+    // panel flushes to disk once the edits settle (kSaveDebounceMs) so a slider
+    // drag writes the file once, not on every tick. flush_pending() also runs on
+    // close so nothing is lost.
+    bool pending_save_ = false;
+    std::uint64_t edited_ms_ = 0;
+    static constexpr std::uint64_t kSaveDebounceMs = 400;
     int focus_ = 0;          // persistent focus row (the Ctx is recreated per frame)
     int section_ = 0;        // active settings tab (Appearance/Font/Colors/…)
     // Font dropdown state.
@@ -133,6 +140,21 @@ private:
     int dd_sel_ = 0, dd_top_ = 0;       // dropdown highlight + scroll
 
     static glyph::Input translate(const toe::win::Event &ev, bool &consumed);
+
+    // Fold pending edits into cfg_ and write the VIBE file now (called by the
+    // debounce in render() and unconditionally on close, so nothing is lost).
+    void flush_pending() {
+        if (!pending_save_) return;
+        pending_save_ = false;
+        s_.into(cfg_);
+        if (!save_path_.empty()) (void)save_hand_config(cfg_, save_path_);
+    }
+    [[nodiscard]] static std::uint64_t now_ms() noexcept {
+        return static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch())
+                .count());
+    }
 
     // Point font_index_ at the family currently in s_.font_family (or 0).
     void sync_font_index() {

@@ -81,13 +81,14 @@ public:
             return;
         }
 
-        bool changed = false, save = false;
-        panel_.render(buf_, changed, save);
+        bool changed = false;
+        panel_.render(buf_, changed);
 
         // Live-apply edits so you SEE them change. The panel's font size is a
         // LOGICAL POINT size; convert to pixels the same way backend.cpp does at
         // startup (pt * 96/72 * HiDPI scale) so the slider matches the launch
-        // size exactly.
+        // size exactly. Persistence is handled inside the panel (debounced), so
+        // there is nothing to save here — config is live end to end.
         if (changed) {
             const hand::Settings &s = panel_.state();
             session->set_font_pixel_size(scale_font_px(s.font_size), px);
@@ -96,8 +97,8 @@ public:
             session->set_default_colors(parse_hex(s.fg), parse_hex(s.bg));
             session->set_selection_color(parse_hex(s.selection));
             session->set_cursor_animation(s.animate_cursor, s.animate_ms, s.animate_trail);
+            session->set_cursor_blink_ms(s.blink_cursor ? s.blink_ms : 0);
         }
-        (void)save; // persistence handled inside panel_.render()
 
         auto rc = toe::gfx::RenderContext::adopt_current();
         session->render_overlay(rc, buf_.data(), buf_.width(), buf_.height(), px);

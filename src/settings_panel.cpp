@@ -182,10 +182,8 @@ bool SettingsPanel::handle(const toe::win::Event &ev) {
     return true;
 }
 
-void SettingsPanel::render(glyph::Buffer &buf, bool &changed, bool &save) {
+void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
     changed = false;
-    save = false;
-    want_save_ = false;
 
     // Drain ONE queued input this frame (IMGUI processes one event per pass).
     glyph::Input in{};
@@ -258,27 +256,14 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed, bool &save) {
     default: break;
     }
 
-    ui.gap();
-    // Save button label reflects state: unsaved edits, or a brief confirmation.
-    const char *label = saved_flash_ ? "\u2713 Saved" : (dirty_ ? "Save changes *" : "Save to config");
-    const bool hit = ui.button(label);
-    saved_flash_ = false;
-    if (hit || force_save_) want_save_ = true;
-    force_save_ = false;
+    ui.end_panel("\u2190\u2192 section / edit   \u2191\u2193 move   changes apply + save live   esc close");
 
-    ui.end_panel("\u2190\u2192 section / edit   \u2191\u2193 move   \u2318S save   esc close");
-
-    if (changed) dirty_ = true;
-    if (want_save_) {
-        s_.into(cfg_);
-        if (!save_path_.empty() && save_hand_config(cfg_, save_path_)) {
-            dirty_ = false;
-            saved_flash_ = true; // show "✓ Saved" on the next frame
-        }
-    }
-    save = want_save_;
-    // If more input is queued, keep repainting so it drains quickly.
-    if (!queue_.empty()) { /* the overlay force-repaints every frame anyway */ }
+    // Live config: any edit is scheduled for persistence. We debounce so a
+    // slider drag writes the file once it settles, not on every tick; close()
+    // flushes unconditionally. The edit is ALREADY applied live by the host
+    // (via `changed`), so the disk write is just durability.
+    if (changed) { pending_save_ = true; edited_ms_ = now_ms(); }
+    if (pending_save_ && now_ms() - edited_ms_ >= kSaveDebounceMs) flush_pending();
 }
 
 // --- process-wide settings source ------------------------------------------
