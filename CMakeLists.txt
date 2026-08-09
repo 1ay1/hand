@@ -262,6 +262,13 @@ if(HAND_BUILD_TESTS AND NOT APPLE)
   target_link_libraries(opacity_test PRIVATE hand::platform toe::toe OpenGL::GL)
   add_test(NAME opacity COMMAND opacity_test)
 
+  # Font rebuild leak: repeatedly rebuilding the Renderer (font/ligature change)
+  # must not leak GL shaders ("shader pool exhausted", sokol id 154).
+  add_executable(font_rebuild_test tests/font_rebuild_test.cpp)
+  target_include_directories(font_rebuild_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+  target_link_libraries(font_rebuild_test PRIVATE hand::platform toe::toe OpenGL::GL)
+  add_test(NAME font_rebuild COMMAND font_rebuild_test)
+
   # Config round-trip: no GL needed — pure config/settings logic. config.cpp
   # (the VIBE parse/save) lives in the hand exe, so compile it in directly.
   add_executable(config_roundtrip_test tests/config_roundtrip_test.cpp src/config/config.cpp)
@@ -288,5 +295,5 @@ if(HAND_BUILD_TESTS AND NOT APPLE)
   target_include_directories(config_watch_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
   add_test(NAME config_watch COMMAND config_watch_test)
 
-  set_tests_properties(render cache atlas_grow opacity PROPERTIES ENVIRONMENT "TOE_HEADLESS=1")
+  set_tests_properties(render cache atlas_grow opacity font_rebuild PROPERTIES ENVIRONMENT "TOE_HEADLESS=1")
 endif()
