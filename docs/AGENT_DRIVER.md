@@ -76,8 +76,31 @@ printf '%s\n' \
 {"ok":true,"bye":true}
 ```
 
-## Notes
+## MCP server (`hand-agent-mcp`)
 
+The same driver, exposed as a stdio **Model Context Protocol** server so it drops
+straight into Claude Code / Codex / OpenCode / any MCP client:
+
+```json
+{ "mcpServers": { "terminal": {
+    "command": "hand-agent-mcp",
+    "args": ["--redact", "--", "/bin/bash"] } } }
+```
+
+It serves one persistent PTY session and these tools:
+
+| Tool | Args | Returns |
+|------|------|---------|
+| `terminal_snapshot` | — | the settled screen as clean text |
+| `terminal_blocks` | `last?` | recent OSC 133 command blocks as JSON |
+| `terminal_send` | `text` \| `keys` | types, settles briefly, returns the fresh screen |
+| `terminal_wait` | `for` (`idle`\|`pattern`), `re?`, `ms?` | the settled screen after the wait |
+| `terminal_resize` | `cols`, `rows` | confirmation |
+
+`terminal_send` deliberately returns the post-settle snapshot, so a type-then-read
+is **one** tool call, not two — halving the round-trips (and tokens) per action.
+
+## Notes
 - **Settled reads:** `wait for:idle` treats the screen as unsettled while an app
   holds a DEC 2026 synchronized-output frame open, so a snapshot never captures a
   torn, half-drawn frame.

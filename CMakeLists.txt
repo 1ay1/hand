@@ -209,6 +209,16 @@ if(NOT WIN32)
   target_link_libraries(hand-agent PRIVATE toe::toe)
   target_compile_features(hand-agent PRIVATE cxx_std_23)
   target_compile_options(hand-agent PRIVATE -Wall -Wextra)
+
+  # hand-agent-mcp — the same driver, exposed as a stdio MCP server so it drops
+  # straight into Claude Code / Codex / OpenCode / any MCP client.
+  add_executable(hand-agent-mcp
+    src/agent/mcp.cpp
+    src/platform/posix_pty.cpp)
+  target_include_directories(hand-agent-mcp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+  target_link_libraries(hand-agent-mcp PRIVATE toe::toe)
+  target_compile_features(hand-agent-mcp PRIVATE cxx_std_23)
+  target_compile_options(hand-agent-mcp PRIVATE -Wall -Wextra)
 endif()
 
 # ===========================================================================
