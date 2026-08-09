@@ -49,6 +49,7 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <functional>
 
 #include <sys/epoll.h>
 #include <sys/syscall.h>
@@ -200,14 +201,19 @@ private:
 };
 
 // --- the terminal's readiness wait, as toe::App expects it -----------------
-// The three sources a terminal blocks on, as compile-time tags.
+// The sources a terminal blocks on, as compile-time tags.
 struct PtySource {};
 struct WindowSource {};
 struct RepeatSource {};
+// The config-file watcher (inotify). Like RepeatSource it is a purely HOST-
+// internal wakeup: toe never learns it exists. When it fires we run the host's
+// reload hook and return a spurious (all-false) Readiness — which the loop is
+// documented to tolerate — so the engine's contract is untouched.
+struct ConfigSource {};
 
 // A Reactor pre-typed for a terminal's fixed interest set. A backend holds one,
 // arms its window + repeat fds once at open, and re-arms the PTY per session.
-using TermReactor = Reactor<PtySource, WindowSource, RepeatSource>;
+using TermReactor = Reactor<PtySource, WindowSource, RepeatSource, ConfigSource>;
 
 // Stateful helper a backend embeds to implement toe::App::wait_readable. It owns
 // the epoll reactor and arms each source EXACTLY ONCE, the first time it is seen
@@ -225,14 +231,27 @@ public:
         repeat_fd_ = repeat_fd;
     }
 
+    // Fold a config-watcher fd into the wait, with the hook to run when it wakes
+    // (drain the inotify events + hot-reload). The reactor stays oblivious to
+    // what the fd means — it just calls the hook. Pass -1 fd to disable.
+    void watch_config(int fd, std::function<void()> on_change) noexcept {
+        config_fd_ = fd;
+        on_config_ = std::move(on_change);
+    }
+
     // toe::App::wait_readable. Arms each source exactly once, the first time it
     // is seen with a valid fd, then blocks on a single epoll_pwait2.
     [[nodiscard]] toe::Readiness wait(int pty_fd, toe::WaitDeadline d) noexcept {
         if (pty_fd != armed_pty_) { r_.arm<PtySource>(pty_fd); armed_pty_ = pty_fd; }
         if (window_fd_ != armed_win_) { r_.arm<WindowSource>(window_fd_); armed_win_ = window_fd_; }
         if (repeat_fd_ != armed_rep_) { r_.arm<RepeatSource>(repeat_fd_); armed_rep_ = repeat_fd_; }
+        if (config_fd_ != armed_cfg_) { r_.arm<ConfigSource>(config_fd_); armed_cfg_ = config_fd_; }
         const Deadline dd = d.blocks_forever() ? Deadline::forever() : Deadline::nanos(d.ns);
-        const Ready<PtySource, WindowSource, RepeatSource> ready = r_.wait(dd);
+        const Ready<PtySource, WindowSource, RepeatSource, ConfigSource> ready = r_.wait(dd);
+        // The config wake is handled entirely here (host-internal), then folded
+        // out of the Readiness — exactly like the repeat timer. toe sees only
+        // {pty, window}; a config-only wake looks like a benign spurious one.
+        if (ready.template get<ConfigSource>() && on_config_) on_config_();
         return toe::Readiness{.pty = ready.get<PtySource>(), .window = ready.get<WindowSource>()};
     }
 
@@ -240,8 +259,9 @@ public:
 
 private:
     TermReactor r_;
-    int window_fd_ = -1, repeat_fd_ = -1;
-    int armed_pty_ = -2, armed_win_ = -2, armed_rep_ = -2; // sentinels
+    int window_fd_ = -1, repeat_fd_ = -1, config_fd_ = -1;
+    int armed_pty_ = -2, armed_win_ = -2, armed_rep_ = -2, armed_cfg_ = -2; // sentinels
+    std::function<void()> on_config_{};
 };
 
 } // namespace hand

@@ -67,7 +67,13 @@ public:
     [[nodiscard]] bool overlay_active() const { return settings_.active(); }
     bool overlay_event(const toe::win::Event &ev) { return settings_.handle(ev); }
     void overlay_render(toe::Terminal &term, toe::PixelSize px) { settings_.render(term, px); }
-    void bind_terminal(toe::Terminal &, toe::PixelSize) { settings_.bind(); }
+    void bind_terminal(toe::Terminal &term, toe::PixelSize px) {
+        (void)px; // reload reads the live size_ (window may have resized)
+        settings_.bind();
+        // Fold the config-file watcher into the same epoll wait (reactor.hpp).
+        wait_.watch_config(settings_.config_fd(),
+                           [this, &term] { settings_.on_config_fd_ready(term, size_); });
+    }
     void poll_events(const toe::EventSink &sink);
     [[nodiscard]] bool should_close() const { return closed_; }
     [[nodiscard]] toe::Readiness wait_readable(int pty_fd, toe::WaitDeadline d) {

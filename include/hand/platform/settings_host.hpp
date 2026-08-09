@@ -25,6 +25,8 @@
 #include "hand/platform/fonts.hpp"
 #include "hand/settings_panel.hpp"
 #include "hand/help_panel.hpp"
+#include "hand/config/config.hpp" // load_hand_config for hot-reload
+#include "hand/config_watch.hpp"  // inotify config watcher
 #include "toe/app.hpp"      // toe::win::Event
 #include "toe/terminal.hpp"
 
@@ -33,8 +35,19 @@ namespace hand::platform {
 class SettingsHost {
 public:
     // Seed the panel from the process-wide config source (main() installs it via
-    // set_settings_source before the window opens).
-    void bind() { panel_.bind(settings_source_config(), settings_source_path()); }
+    // set_settings_source before the window opens). Also arms the inotify watch
+    // on the config file so external edits hot-reload.
+    void bind() {
+        panel_.bind(settings_source_config(), settings_source_path());
+        watch_.start(settings_source_path());
+        // Suppress the inotify echo of our own saves: when the pane writes the
+        // file, mark it so on_config_fd_ready ignores the resulting event.
+        panel_.set_on_saved([this] { watch_.note_self_write(); });
+    }
+
+    // The inotify fd for the config watch (-1 if none). The backend folds this
+    // into its epoll wait via TerminalWait::watch_config.
+    [[nodiscard]] int config_fd() const noexcept { return watch_.fd(); }
 
     // Any overlay pane open? (settings OR help). The run loop uses this to
     // capture input and repaint.
@@ -84,27 +97,51 @@ public:
         bool changed = false;
         panel_.render(buf_, changed);
 
-        // Live-apply edits so you SEE them change. The panel's font size is a
-        // LOGICAL POINT size; convert to pixels the same way backend.cpp does at
-        // startup (pt * 96/72 * HiDPI scale) so the slider matches the launch
-        // size exactly. Persistence is handled inside the panel (debounced), so
-        // there is nothing to save here — config is live end to end.
-        if (changed) {
-            const hand::Settings &s = panel_.state();
-            session->set_font_pixel_size(scale_font_px(s.font_size), px);
-            std::string file = s.font_file.empty() ? resolve_font_file(s.font_family) : s.font_file;
-            if (!file.empty()) session->set_font(file, px);
-            session->set_default_colors(parse_hex(s.fg), parse_hex(s.bg));
-            session->set_selection_color(parse_hex(s.selection));
-            session->set_cursor_animation(s.animate_cursor, s.animate_ms, s.animate_trail);
-            session->set_cursor_blink_ms(s.blink_cursor ? s.blink_ms : 0);
-        }
+        // Live-apply edits so you SEE them change. Persistence is handled inside
+        // the panel (debounced) — config is live end to end, no save step.
+        if (changed) apply(*session, panel_.state(), px);
 
         auto rc = toe::gfx::RenderContext::adopt_current();
         session->render_overlay(rc, buf_.data(), buf_.width(), buf_.height(), px);
     }
 
+    // Called when the config-watch fd wakes: drain inotify, and if a real
+    // (non-self) change landed, hot-reload. Runs on the loop thread from inside
+    // the backend's wait_readable, so no locking is needed.
+    void on_config_fd_ready(toe::Terminal &term, toe::PixelSize px) {
+        if (!watch_.drained()) return; // spurious / self-write / unrelated file
+        reload_from_disk(term, px);
+    }
+
+    // Hot-reload: the config FILE changed on disk (edited in $EDITOR, or synced).
+    // Re-read it and live-apply through the SAME path a pane edit takes, then
+    // refresh the panel's in-memory form so an open pane shows the new values.
+    // This is the other half of "live config": file <-> running terminal, both
+    // directions, one apply path. Skipped while the user is actively editing the
+    // pane so a reload can't fight a live edit.
+    void reload_from_disk(toe::Terminal &term, toe::PixelSize px) {
+        auto *session = term.poll().running;
+        if (!session) return;
+        if (panel_.active()) return; // don't stomp an in-progress edit
+        HandConfig fresh = load_hand_config(settings_source_path());
+        panel_.reload(fresh);        // re-seed cfg_ + Settings from disk
+        apply(*session, panel_.state(), px);
+    }
+
 private:
+    // The ONE live-apply path: push a Settings snapshot into the running session.
+    // Both a pane edit and an external file reload funnel through here, so the
+    // two config sources are guaranteed to behave identically.
+    void apply(toe::Session &session, const hand::Settings &s, toe::PixelSize px) {
+        session.set_font_pixel_size(scale_font_px(s.font_size), px);
+        std::string file = s.font_file.empty() ? resolve_font_file(s.font_family) : s.font_file;
+        if (!file.empty()) session.set_font(file, px);
+        session.set_default_colors(parse_hex(s.fg), parse_hex(s.bg));
+        session.set_selection_color(parse_hex(s.selection));
+        session.set_cursor_animation(s.animate_cursor, s.animate_ms, s.animate_trail);
+        session.set_cursor_blink_ms(s.blink_cursor ? s.blink_ms : 0);
+    }
+
     // Logical point size -> pixels @96dpi, times the HiDPI scale (GDK_SCALE).
     // Mirrors backend.cpp so the settings slider matches the launch size.
     static int scale_font_px(int pts) {
@@ -130,6 +167,7 @@ private:
 
     hand::SettingsPanel panel_{};
     hand::HelpPanel help_{};
+    hand::ConfigWatch watch_{}; // inotify watch on the config file
     glyph::Buffer buf_{};
 };
 

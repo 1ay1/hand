@@ -14,6 +14,7 @@
 #include <deque>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -97,7 +98,21 @@ public:
         s_ = Settings::from(cfg_);
         sync_font_index();
     }
+    // Invoked right after the panel writes the config file, so the host can mark
+    // the inotify event that follows as a self-write (and not hot-reload it).
+    void set_on_saved(std::function<void()> cb) { on_saved_ = std::move(cb); }
+
     [[nodiscard]] const HandConfig &config() const noexcept { return cfg_; }
+
+    // Re-seed from a freshly-loaded config (external file edit). Refreshes the
+    // editable form so an open pane reflects on-disk values. The caller only
+    // calls this when the pane is inactive, so it can't fight a live edit.
+    void reload(const HandConfig &fresh) {
+        cfg_ = fresh;
+        s_ = Settings::from(cfg_);
+        pending_save_ = false; // now in sync with disk
+        sync_font_index();
+    }
     void toggle() {
         if (active_) { close(); }
         else { s_ = Settings::from(cfg_); active_ = true; queue_.clear(); focus_ = 0; section_ = 0; dd_open_ = -1; sync_font_index(); }
@@ -130,6 +145,7 @@ private:
     // close so nothing is lost.
     bool pending_save_ = false;
     std::uint64_t edited_ms_ = 0;
+    std::function<void()> on_saved_{}; // host hook: mark our own writes
     static constexpr std::uint64_t kSaveDebounceMs = 400;
     int focus_ = 0;          // persistent focus row (the Ctx is recreated per frame)
     int section_ = 0;        // active settings tab (Appearance/Font/Colors/…)
@@ -143,11 +159,15 @@ private:
 
     // Fold pending edits into cfg_ and write the VIBE file now (called by the
     // debounce in render() and unconditionally on close, so nothing is lost).
+    // Notifies on_saved_ AFTER a successful write so the host can suppress the
+    // inotify echo of our own save.
     void flush_pending() {
         if (!pending_save_) return;
         pending_save_ = false;
         s_.into(cfg_);
-        if (!save_path_.empty()) (void)save_hand_config(cfg_, save_path_);
+        if (!save_path_.empty() && save_hand_config(cfg_, save_path_)) {
+            if (on_saved_) on_saved_();
+        }
     }
     [[nodiscard]] static std::uint64_t now_ms() noexcept {
         return static_cast<std::uint64_t>(

@@ -260,5 +260,10 @@ if(HAND_BUILD_TESTS AND NOT APPLE)
   target_link_libraries(config_roundtrip_test PRIVATE hand::platform vibe)
   add_test(NAME config_roundtrip COMMAND config_roundtrip_test)
 
+  # Config watcher: pure inotify logic, no GL / no deps.
+  add_executable(config_watch_test tests/config_watch_test.cpp)
+  target_include_directories(config_watch_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+  add_test(NAME config_watch COMMAND config_watch_test)
+
   set_tests_properties(render cache atlas_grow PROPERTIES ENVIRONMENT "TOE_HEADLESS=1")
 endif()
