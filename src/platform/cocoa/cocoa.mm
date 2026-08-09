@@ -38,7 +38,10 @@
 
 #import <Cocoa/Cocoa.h>
 #import <OpenGL/OpenGL.h>
-#import <OpenGL/gl3.h>
+// NOTE: we deliberately do NOT include <OpenGL/gl3.h> here. toe's headers pull
+// in epoxy/gl.h (its GL loader), and including gl3.h alongside it trips a
+// "gl.h and gl3.h both included" warning. We issue no GL calls in this TU
+// anyway — all rendering is toe's; we only manage the NSOpenGLContext.
 
 // ───────────────────────── Objective-C view/window ─────────────────────────
 //
@@ -84,6 +87,10 @@ struct CocoaInbox {
         events;
     bool close_requested = false;
     bool saw_event = false; // any native event since the last wait (window-ready)
+    // Fractional scroll accumulators: trackpad deltas are sub-"line"; we bank
+    // them and emit one discrete wheel step per threshold crossed so small
+    // two-finger scrolls aren't silently dropped by integer truncation.
+    double scroll_ax = 0.0, scroll_ay = 0.0;
 };
 
 } // namespace hand::platform
@@ -152,6 +159,11 @@ std::optional<toe::SpecialKey> special_of_keycode(unsigned short kc) {
 - (BOOL)acceptsFirstResponder { return YES; }
 - (BOOL)canBecomeKeyView { return YES; }
 
+// Show an I-beam over the terminal, like every other text surface on macOS.
+- (void)resetCursorRects {
+    [self addCursorRect:self.bounds cursor:[NSCursor IBeamCursor]];
+}
+
 // Convert the view's backing-store (pixel) bounds and post a resize.
 - (void)pushResize {
     if (!inbox_) return;
@@ -200,6 +212,55 @@ std::optional<toe::SpecialKey> special_of_keycode(unsigned short kc) {
     if (inbox_) inbox_->saw_event = true; // wake the loop; modifiers alone do nothing
 }
 
+// Command-key shortcuts. A mac terminal must not leak ⌘C/⌘V/⌘Q to the shell as
+// raw keystrokes. We translate the clipboard shortcuts into the Ctrl+Shift+C/V
+// form toe's EventRouter already understands (reusing the engine's copy/paste,
+// no engine change), and route ⌘Q / ⌘W to a clean close.
+- (BOOL)performKeyEquivalent:(NSEvent *)e {
+    if (!inbox_) return NO;
+    const NSEventModifierFlags f = e.modifierFlags;
+    if ((f & NSEventModifierFlagCommand) == 0) return NO;
+    // Ignore if other command-ish modifiers muddy it (e.g. ⌃⌘).
+    NSString *ch = [e.charactersIgnoringModifiers lowercaseString];
+    if (ch.length != 1) return NO;
+    const unichar c = [ch characterAtIndex:0];
+    const bool shift = (f & NSEventModifierFlagShift) != 0;
+
+    switch (c) {
+    case 'q': // Quit the app
+        inbox_->close_requested = true;
+        inbox_->saw_event = true;
+        return YES;
+    case 'w': // Close the window (single-window app: same as quit)
+        inbox_->close_requested = true;
+        inbox_->saw_event = true;
+        return YES;
+    case 'c': { // Copy selection (⌘C -> Ctrl+Shift+C for toe's router)
+        toe::Modifiers m{.ctrl = true, .alt = false, .shift = true};
+        inbox_->events.push_back(hand::platform::PendingKey{
+            toe::KeyEvent{.key = toe::TextInput{"c"}, .mods = m}});
+        inbox_->saw_event = true;
+        return YES;
+    }
+    case 'v': { // Paste (⌘V -> Ctrl+Shift+V)
+        toe::Modifiers m{.ctrl = true, .alt = false, .shift = true};
+        inbox_->events.push_back(hand::platform::PendingKey{
+            toe::KeyEvent{.key = toe::TextInput{"v"}, .mods = m}});
+        inbox_->saw_event = true;
+        return YES;
+    }
+    case 'k': // Clear — send Ctrl+L (form feed) which most shells treat as clear
+        (void)shift;
+        inbox_->events.push_back(hand::platform::PendingKey{
+            toe::KeyEvent{.key = toe::TextInput{"l"}, .mods = {.ctrl = true}}});
+        inbox_->saw_event = true;
+        return YES;
+    default:
+        // Let other ⌘ combos (e.g. ⌘M minimise, ⌘H hide) go to the menu/system.
+        return NO;
+    }
+}
+
 - (toe::win::MouseButton)btnOf:(NSEvent *)e {
     switch (e.type) {
     case NSEventTypeRightMouseDown:
@@ -242,7 +303,40 @@ std::optional<toe::SpecialKey> special_of_keycode(unsigned short kc) {
 - (void)otherMouseUp:(NSEvent *)e { [self pushMouse:e kind:hand::platform::PendingMouse::Kind::up]; }
 - (void)mouseDragged:(NSEvent *)e { [self pushMouse:e kind:hand::platform::PendingMouse::Kind::move]; }
 - (void)mouseMoved:(NSEvent *)e { [self pushMouse:e kind:hand::platform::PendingMouse::Kind::move]; }
-- (void)scrollWheel:(NSEvent *)e { [self pushMouse:e kind:hand::platform::PendingMouse::Kind::wheel]; }
+- (void)scrollWheel:(NSEvent *)e {
+    if (!inbox_) return;
+    inbox_->saw_event = true;
+
+    // Normalise to "lines": precise (trackpad) deltas are in points, coarse
+    // (mouse wheel) deltas are already in lines. Bank them and emit one wheel
+    // step per whole line crossed, so a gentle two-finger drag still scrolls
+    // and a fast flick doesn't overshoot.
+    double dx = e.scrollingDeltaX, dy = e.scrollingDeltaY;
+    if (e.hasPreciseScrollingDeltas) {
+        dx /= 16.0; // ~one line per 16pt of trackpad travel
+        dy /= 16.0;
+    }
+    inbox_->scroll_ax += dx;
+    inbox_->scroll_ay += dy;
+
+    const int sx = (int)inbox_->scroll_ax;
+    const int sy = (int)inbox_->scroll_ay;
+    if (sx == 0 && sy == 0) return;
+    inbox_->scroll_ax -= sx;
+    inbox_->scroll_ay -= sy;
+
+    const NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
+    const NSPoint pp = [self convertPointToBacking:p];
+    const NSRect px = [self convertRectToBacking:self.bounds];
+    hand::platform::PendingMouse pm;
+    pm.kind = hand::platform::PendingMouse::Kind::wheel;
+    pm.mods = mods_of(e.modifierFlags);
+    pm.x = (int)pp.x;
+    pm.y = (int)(px.size.height - pp.y);
+    pm.dx = sx;
+    pm.dy = sy;
+    inbox_->events.push_back(pm);
+}
 
 @end
 
@@ -306,16 +400,48 @@ private:
 
 Result<std::unique_ptr<CocoaSurface>> CocoaSurface::open(std::string_view title, PixelSize initial) {
     @autoreleasepool {
-        // A regular (foreground, dockable) app with a menu-less bare window.
+        // A regular (foreground, dockable) app.
         NSApplication *app = [NSApplication sharedApplication];
         [app setActivationPolicy:NSApplicationActivationPolicyRegular];
 
+        // A minimal menu bar so the app feels native: an app menu (Hide/Quit
+        // with their standard ⌘ equivalents) and an Edit menu (Copy/Paste).
+        // Without this, the standard ⌘H/⌘Q/⌘M never work and there's no title.
+        if (![app mainMenu]) {
+            NSMenu *bar = [[NSMenu alloc] init];
+            NSString *appName = @"hand";
+
+            NSMenuItem *appItem = [[NSMenuItem alloc] init];
+            [bar addItem:appItem];
+            NSMenu *appMenu = [[NSMenu alloc] init];
+            [appMenu addItemWithTitle:[@"Hide " stringByAppendingString:appName]
+                               action:@selector(hide:)
+                        keyEquivalent:@"h"];
+            [appMenu addItemWithTitle:@"Hide Others"
+                               action:@selector(hideOtherApplications:)
+                        keyEquivalent:@"h"].keyEquivalentModifierMask =
+                NSEventModifierFlagOption | NSEventModifierFlagCommand;
+            [appMenu addItem:[NSMenuItem separatorItem]];
+            [appMenu addItemWithTitle:[@"Quit " stringByAppendingString:appName]
+                               action:@selector(terminate:)
+                        keyEquivalent:@"q"];
+            [appItem setSubmenu:appMenu];
+
+            NSMenuItem *editItem = [[NSMenuItem alloc] init];
+            [bar addItem:editItem];
+            NSMenu *editMenu = [[NSMenu alloc] initWithTitle:@"Edit"];
+            [editMenu addItemWithTitle:@"Copy" action:@selector(copy:) keyEquivalent:@"c"];
+            [editMenu addItemWithTitle:@"Paste" action:@selector(paste:) keyEquivalent:@"v"];
+            [editItem setSubmenu:editMenu];
+
+            [app setMainMenu:bar];
+        }
+
         auto s = std::unique_ptr<CocoaSurface>(new CocoaSurface());
 
-        // Content size is in POINTS; the GL drawable is in backing pixels. Ask
-        // for a point size that yields roughly the requested pixels at 1x, and
-        // read the true backing size back after creation for size_.
-        const NSRect content = NSMakeRect(0, 0, initial.w, initial.h);
+        // Content size is in POINTS; the GL drawable is in backing pixels.
+        const NSRect content = NSMakeRect(0, 0, std::max(1, (int)initial.w),
+                                          std::max(1, (int)initial.h));
         const NSWindowStyleMask style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
                                         NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
         s->window_ = [[NSWindow alloc] initWithContentRect:content
@@ -323,14 +449,16 @@ Result<std::unique_ptr<CocoaSurface>> CocoaSurface::open(std::string_view title,
                                                    backing:NSBackingStoreBuffered
                                                      defer:NO];
         if (!s->window_) return fail("cocoa: NSWindow allocation failed");
+        [s->window_ setReleasedWhenClosed:NO]; // we own its lifetime via ARC
+        s->window_.minSize = NSMakeSize(120, 60);
 
         NSString *t = [[NSString alloc] initWithBytes:title.data()
                                                length:(NSUInteger)title.size()
                                              encoding:NSUTF8StringEncoding];
         [s->window_ setTitle:(t ? t : @"hand")];
 
-        // 3.3 core profile — matches toe's #version 330 GLSL, within macOS's 4.1
-        // ceiling. Double-buffered, 24-bit depth is unnecessary (2D), 0 is fine.
+        // 3.2 core profile — matches toe's #version 330 GLSL, within macOS's 4.1
+        // ceiling. Double-buffered; no depth/stencil needed for 2D.
         NSOpenGLPixelFormatAttribute attrs[] = {
             NSOpenGLPFAOpenGLProfile, NSOpenGLProfileVersion3_2Core,
             NSOpenGLPFAColorSize, 24,
@@ -356,15 +484,27 @@ Result<std::unique_ptr<CocoaSurface>> CocoaSurface::open(std::string_view title,
         [s->window_ makeFirstResponder:s->view_];
         [s->window_ center];
         [s->window_ makeKeyAndOrderFront:nil];
+
+        // finishLaunching wires up the run loop/app lifecycle so our manual
+        // nextEventMatchingMask pump behaves like a normally-launched app.
+        [app finishLaunching];
         [app activateIgnoringOtherApps:YES];
 
         // Make the GL context current for toe's Renderer::create (called right
-        // after open()) and read the true backing-pixel size.
+        // after open()) and turn on vsync.
         [[s->view_ openGLContext] makeCurrentContext];
         GLint one = 1;
-        [[s->view_ openGLContext] setValues:&one forParameter:NSOpenGLContextParameterSwapInterval];
+        [[s->view_ openGLContext] setValues:&one
+                              forParameter:NSOpenGLContextParameterSwapInterval];
 
-        const NSRect px = [s->view_ convertRectToBacking:s->view_.bounds];
+        NSRect px = [s->view_ convertRectToBacking:s->view_.bounds];
+        if (px.size.width < 1 || px.size.height < 1) {
+            // Backing bounds can read 0 before the first layout; fall back to the
+            // requested size scaled by the screen factor.
+            const CGFloat sc = s->window_.screen ? s->window_.screen.backingScaleFactor : 1.0;
+            px.size.width = std::max<CGFloat>(1, initial.w * sc);
+            px.size.height = std::max<CGFloat>(1, initial.h * sc);
+        }
         s->size_ = PixelSize{std::max(1, (int)px.size.width), std::max(1, (int)px.size.height)};
 
         return s;
@@ -435,11 +575,10 @@ void CocoaSurface::poll_events(const toe::EventSink &sink) {
                         sink(toe::win::MouseMove{p.x, p.y, p.button_down});
                         break;
                     case K::wheel: {
-                        // Cocoa gives pixel/line deltas; toe wants discrete
-                        // steps with dy>0 = up. Cocoa scrollingDeltaY>0 is also
-                        // "content up", so the sign matches directly.
-                        const std::int32_t dx = (std::int32_t)(p.dx / 10.0);
-                        const std::int32_t dy = (std::int32_t)(p.dy / 10.0);
+                        // dx/dy are already discrete line steps (banked in the
+                        // scrollWheel handler); dy>0 = content up, matching toe.
+                        const std::int32_t dx = (std::int32_t)p.dx;
+                        const std::int32_t dy = (std::int32_t)p.dy;
                         if (dx != 0 || dy != 0) sink(toe::win::MouseWheel{dx, dy});
                         break;
                     }

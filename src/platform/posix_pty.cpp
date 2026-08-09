@@ -39,6 +39,15 @@ namespace {
 } // namespace
 
 toe::Result<toe::AdoptFd> spawn_pty(const SpawnCommand &cmd) {
+    // A write to a PTY whose child has exited raises SIGPIPE, whose default
+    // action kills us. We want the EPIPE errno instead so toe's Pty::write can
+    // report the hangup through its normal channel. Ignore it once, globally.
+    static const bool sigpipe_ignored = [] {
+        std::signal(SIGPIPE, SIG_IGN);
+        return true;
+    }();
+    (void)sigpipe_ignored;
+
     // Resolve argv: explicit -> $SHELL -> /bin/sh.
     std::vector<std::string> args = cmd.argv;
     if (args.empty()) {
@@ -60,8 +69,19 @@ toe::Result<toe::AdoptFd> spawn_pty(const SpawnCommand &cmd) {
     if (pid < 0) return toe::fail(std::string{"forkpty failed: "} + std::strerror(errno));
 
     if (pid == 0) {
-        // --- child --- TERM is host-chosen, not hard-coded in the engine.
+        // --- child ---
+        // Restore the default signal disposition + an empty mask: the child (a
+        // shell) must not inherit our SIG_IGN on SIGPIPE or any blocked signals.
+        ::signal(SIGPIPE, SIG_DFL);
+        sigset_t empty;
+        sigemptyset(&empty);
+        ::sigprocmask(SIG_SETMASK, &empty, nullptr);
+
+        // TERM is host-chosen, not hard-coded in the engine. Advertise 24-bit
+        // colour so apps enable truecolor (toe renders it).
         ::setenv("TERM", cmd.term.empty() ? "xterm-256color" : cmd.term.c_str(), 1);
+        ::setenv("COLORTERM", "truecolor", 1);
+
         // Host hook: setenv/chdir/setsid/drop-privs, before exec.
         if (cmd.pre_exec) cmd.pre_exec();
         ::execvp(cargv[0], cargv.data());
@@ -74,6 +94,10 @@ toe::Result<toe::AdoptFd> spawn_pty(const SpawnCommand &cmd) {
     }
 
     // --- parent ---
+    // The master must not leak into any process we later fork/exec.
+    if (const int fl = ::fcntl(master, F_GETFD, 0); fl >= 0)
+        ::fcntl(master, F_SETFD, fl | FD_CLOEXEC);
+
     if (auto nb = set_nonblocking(master); !nb) {
         ::close(master);
         ::kill(pid, SIGHUP);
