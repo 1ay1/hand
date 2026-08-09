@@ -138,6 +138,36 @@ public:
 
     [[nodiscard]] bool escaped() const { return in_.key == Key::Escape; }
 
+    // --- section tab bar ---------------------------------------------------
+    // A focusable row of section tabs (e.g. Appearance · Font · Colors). When
+    // focused, Left/Right switch sections; the active one is highlighted. Draws
+    // a rule under it. Returns true when the section changed this frame — the
+    // caller then lays out only that section's widgets. This is what turns the
+    // panel from a flat wall of options into a navigable, categorized UI.
+    bool tab_bar(const std::vector<std::string> &sections, int *active) {
+        const int r = begin_row();
+        const bool foc = (r == focus_);
+        bool changed = false;
+        if (foc) {
+            if (in_.key == Key::Left)  { *active = (*active - 1 + (int)sections.size()) % (int)sections.size(); changed = true; }
+            if (in_.key == Key::Right) { *active = (*active + 1) % (int)sections.size(); changed = true; }
+        }
+        int x = content_.x + 1;
+        for (int i = 0; i < (int)sections.size(); ++i) {
+            const bool on = (i == *active);
+            Style st{on ? theme_.accent_fg : (foc ? theme_.fg : theme_.dim),
+                     on ? theme_.accent : theme_.panel_bg,
+                     on ? Attr::Bold : Attr::None};
+            std::string tab = " " + sections[(std::size_t)i] + " ";
+            buf_.text(x, cursor_y_, tab, st);
+            x += (int)sections[(std::size_t)i].size() + 3;
+        }
+        end_row();
+        buf_.hrule(content_.x, cursor_y_, content_.w, Style{theme_.border, theme_.panel_bg});
+        cursor_y_ += 1;
+        return changed;
+    }
+
     // --- section heading (non-focusable) -----------------------------------
     void heading(std::string_view text) {
         row_gap();

@@ -25,17 +25,46 @@ namespace hand {
 
 // The subset of options the panel edits live. Mirrors toe::Config plus a couple
 // of host-owned bits (cursor style). Applied back to the running terminal and
-// written to the VIBE config on save.
+// written to the VIBE config on save. This is the editable mirror of the WHOLE
+// HandConfig — every option is reachable from the settings pane.
 struct Settings {
+    // Font
+    std::string font_family = "monospace";
+    std::string font_file{};
+    std::string font_fallback{};
     int font_size = 13;      // logical points (host scales by DPI)
     bool ligatures = false;
+
+    // Cursor
     int cursor_style = 0;    // 0 block, 1 bar, 2 underline
-    std::string font_family = "monospace";
+    bool blink_cursor = true;
+    int blink_ms = 530;
+    bool animate_cursor = true;
+    int animate_ms = 55;
+    bool animate_trail = true;
+
+    // Colors (hex "#rrggbb")
     std::string fg = "#dcdcdc";
     std::string bg = "#171720";
+    std::string cursor_color = "#dcdcdc";
+    std::string selection = "#3c466e";
+
+    // Scroll
     int scrollback = 10000;  // lines
-    bool blink_cursor = true;
-    bool animate_cursor = true; // smooth caret glide
+    int scroll_mult = 3;     // lines per wheel notch
+    bool scroll_on_output = false;
+    bool scroll_on_keystroke = true;
+
+    // Behavior
+    bool audible_bell = false;
+    bool visual_bell = true;
+    bool copy_on_select = false;
+    bool confirm_close = false;
+
+    // Window
+    int padding = 0;
+    float opacity = 1.0f;
+    bool decorations = true;
 
     // Seed the editable view from the loaded config.
     static Settings from(const HandConfig &c);
@@ -48,7 +77,7 @@ public:
     SettingsPanel() = default;
 
     [[nodiscard]] bool active() const noexcept { return active_; }
-    void open(const Settings &current) { s_ = current; active_ = true; queue_.clear(); dirty_ = false; focus_ = 0; dd_open_ = -1; sync_font_index(); }
+    void open(const Settings &current) { s_ = current; active_ = true; queue_.clear(); dirty_ = false; focus_ = 0; section_ = 0; dd_open_ = -1; sync_font_index(); }
     void close() { active_ = false; queue_.clear(); dd_open_ = -1; }
     void toggle(const Settings &current) { active_ ? close() : open(current); }
 
@@ -65,7 +94,7 @@ public:
     [[nodiscard]] const HandConfig &config() const noexcept { return cfg_; }
     void toggle() {
         if (active_) { close(); }
-        else { s_ = Settings::from(cfg_); active_ = true; queue_.clear(); dirty_ = false; focus_ = 0; dd_open_ = -1; sync_font_index(); }
+        else { s_ = Settings::from(cfg_); active_ = true; queue_.clear(); dirty_ = false; focus_ = 0; section_ = 0; dd_open_ = -1; sync_font_index(); }
     }
 
     [[nodiscard]] const Settings &state() const noexcept { return s_; }
@@ -96,6 +125,7 @@ private:
     bool saved_flash_ = false; // show a brief "saved" confirmation next frame
     bool force_save_ = false;  // ⌘S requested a save this/next frame
     int focus_ = 0;          // persistent focus row (the Ctx is recreated per frame)
+    int section_ = 0;        // active settings tab (Appearance/Font/Colors/…)
     // Font dropdown state.
     std::vector<std::string> fonts_{};  // installed monospace families
     int font_index_ = 0;                // selected index into fonts_

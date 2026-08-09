@@ -49,28 +49,74 @@ char32_t decode_first_utf8(std::string_view s) {
 
 Settings Settings::from(const HandConfig &c) {
     Settings s;
+    // Font
+    s.font_family = c.font.family;
+    s.font_file = c.font.file;
+    s.font_fallback = c.font.fallback;
     s.font_size = c.font.size;
     s.ligatures = c.font.ligatures;
+    // Cursor
     s.cursor_style = static_cast<int>(c.cursor.shape);
-    s.font_family = c.font.family;
+    s.blink_cursor = c.cursor.blink;
+    s.blink_ms = c.cursor.blink_ms;
+    s.animate_cursor = c.cursor.animate;
+    s.animate_ms = c.cursor.animate_ms;
+    s.animate_trail = c.cursor.animate_trail;
+    // Colors
     s.fg = hex(c.colors.foreground);
     s.bg = hex(c.colors.background);
+    s.cursor_color = hex(c.colors.cursor);
+    s.selection = hex(c.colors.selection_bg);
+    // Scroll
     s.scrollback = c.scroll.scrollback_lines;
-    s.blink_cursor = c.cursor.blink;
-    s.animate_cursor = c.cursor.animate;
+    s.scroll_mult = c.scroll.wheel_lines;
+    s.scroll_on_output = c.scroll.scroll_on_output;
+    s.scroll_on_keystroke = c.scroll.scroll_on_keystroke;
+    // Behavior
+    s.audible_bell = c.behavior.audible_bell;
+    s.visual_bell = c.behavior.visual_bell;
+    s.copy_on_select = c.behavior.copy_on_select;
+    s.confirm_close = c.behavior.confirm_close;
+    // Window
+    s.padding = c.window.padding;
+    s.opacity = c.window.opacity;
+    s.decorations = c.window.decorations;
     return s;
 }
 
 void Settings::into(HandConfig &c) const {
+    // Font
+    c.font.family = font_family;
+    c.font.file = font_file;
+    c.font.fallback = font_fallback;
     c.font.size = font_size;
     c.font.ligatures = ligatures;
+    // Cursor
     c.cursor.shape = static_cast<CursorShape>(cursor_style);
-    c.font.family = font_family;
+    c.cursor.blink = blink_cursor;
+    c.cursor.blink_ms = blink_ms;
+    c.cursor.animate = animate_cursor;
+    c.cursor.animate_ms = animate_ms;
+    c.cursor.animate_trail = animate_trail;
+    // Colors
     c.colors.foreground = unhex(fg);
     c.colors.background = unhex(bg);
+    c.colors.cursor = unhex(cursor_color);
+    c.colors.selection_bg = unhex(selection);
+    // Scroll
     c.scroll.scrollback_lines = scrollback;
-    c.cursor.blink = blink_cursor;
-    c.cursor.animate = animate_cursor;
+    c.scroll.wheel_lines = scroll_mult;
+    c.scroll.scroll_on_output = scroll_on_output;
+    c.scroll.scroll_on_keystroke = scroll_on_keystroke;
+    // Behavior
+    c.behavior.audible_bell = audible_bell;
+    c.behavior.visual_bell = visual_bell;
+    c.behavior.copy_on_select = copy_on_select;
+    c.behavior.confirm_close = confirm_close;
+    // Window
+    c.window.padding = padding;
+    c.window.opacity = opacity;
+    c.window.decorations = decorations;
 }
 
 glyph::Input SettingsPanel::translate(const toe::win::Event &ev, bool &consumed) {
@@ -147,37 +193,80 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed, bool &save) {
 
     glyph::Ctx ui(buf, in, &focus_);
 
-    ui.begin_panel("hand · settings", 62, 28);
+    // Wider panel to fit the tab bar + two-column rows comfortably.
+    ui.begin_panel("hand · settings", 66, 26);
 
-    ui.heading("Appearance");
-    changed |= ui.slider_int("Font size", &s_.font_size, 6, 48);
-    changed |= ui.toggle("Ligatures", &s_.ligatures);
-    changed |= ui.select("Cursor", &s_.cursor_style, {"block", "bar", "underline"});
-    changed |= ui.toggle("Blink cursor", &s_.blink_cursor);
-    changed |= ui.toggle("Animate cursor", &s_.animate_cursor);
-    // Font family: a real dropdown listing the installed monospace fonts.
-    if (ui.dropdown("Font", &font_index_, fonts_, &dd_open_, &dd_sel_, &dd_top_, /*max_visible=*/6)) {
-        if (font_index_ >= 0 && font_index_ < static_cast<int>(fonts_.size()))
-            s_.font_family = fonts_[static_cast<std::size_t>(font_index_)];
-        changed = true;
+    // Section tabs (focus row 0). Left/Right switch; each section shows only its
+    // own options, so the panel stays scannable instead of a 30-row wall.
+    static const std::vector<std::string> kSections = {
+        "Font", "Cursor", "Colors", "Scroll", "Behavior", "Window"};
+    if (ui.tab_bar(kSections, &section_)) {
+        // Moved to another section: park focus on its first field and close any
+        // open dropdown so state doesn't leak between tabs.
+        focus_ = 1;
+        dd_open_ = -1;
     }
 
-    ui.heading("Colors");
-    changed |= ui.color("Foreground", &s_.fg);
-    changed |= ui.color("Background", &s_.bg);
-
-    ui.heading("Behavior");
-    changed |= ui.slider_int("Scrollback", &s_.scrollback, 0, 100000, 1000);
+    switch (section_) {
+    case 0: // Font
+        if (ui.dropdown("Family", &font_index_, fonts_, &dd_open_, &dd_sel_, &dd_top_, 6)) {
+            if (font_index_ >= 0 && font_index_ < static_cast<int>(fonts_.size()))
+                s_.font_family = fonts_[static_cast<std::size_t>(font_index_)];
+            changed = true;
+        }
+        changed |= ui.slider_int("Size", &s_.font_size, 6, 48);
+        changed |= ui.toggle("Ligatures", &s_.ligatures);
+        changed |= ui.text_input("Fallback", &s_.font_fallback);
+        changed |= ui.text_input("File override", &s_.font_file);
+        break;
+    case 1: // Cursor
+        changed |= ui.select("Shape", &s_.cursor_style, {"block", "bar", "underline"});
+        changed |= ui.toggle("Blink", &s_.blink_cursor);
+        changed |= ui.slider_int("Blink rate ms", &s_.blink_ms, 100, 2000, 10);
+        changed |= ui.toggle("Animate (glide)", &s_.animate_cursor);
+        changed |= ui.slider_int("Glide ms", &s_.animate_ms, 10, 300, 5);
+        changed |= ui.toggle("Comet trail", &s_.animate_trail);
+        break;
+    case 2: // Colors
+        changed |= ui.color("Foreground", &s_.fg);
+        changed |= ui.color("Background", &s_.bg);
+        changed |= ui.color("Cursor", &s_.cursor_color);
+        changed |= ui.color("Selection", &s_.selection);
+        break;
+    case 3: // Scroll
+        changed |= ui.slider_int("Scrollback", &s_.scrollback, 0, 100000, 1000);
+        changed |= ui.slider_int("Wheel lines", &s_.scroll_mult, 1, 20, 1);
+        changed |= ui.toggle("Scroll on output", &s_.scroll_on_output);
+        changed |= ui.toggle("Scroll on keystroke", &s_.scroll_on_keystroke);
+        break;
+    case 4: // Behavior
+        changed |= ui.toggle("Audible bell", &s_.audible_bell);
+        changed |= ui.toggle("Visual bell", &s_.visual_bell);
+        changed |= ui.toggle("Copy on select", &s_.copy_on_select);
+        changed |= ui.toggle("Confirm on close", &s_.confirm_close);
+        break;
+    case 5: { // Window
+        changed |= ui.slider_int("Padding", &s_.padding, 0, 64, 1);
+        int op = static_cast<int>(s_.opacity * 100.0f + 0.5f);
+        if (ui.slider_int("Opacity %", &op, 20, 100, 5)) {
+            s_.opacity = static_cast<float>(op) / 100.0f;
+            changed = true;
+        }
+        changed |= ui.toggle("Decorations", &s_.decorations);
+        break;
+    }
+    default: break;
+    }
 
     ui.gap();
     // Save button label reflects state: unsaved edits, or a brief confirmation.
-    const char *label = saved_flash_ ? "✓ Saved" : (dirty_ ? "Save changes *" : "Save to config");
+    const char *label = saved_flash_ ? "\u2713 Saved" : (dirty_ ? "Save changes *" : "Save to config");
     const bool hit = ui.button(label);
     saved_flash_ = false;
     if (hit || force_save_) want_save_ = true;
     force_save_ = false;
 
-    ui.end_panel();
+    ui.end_panel("\u2190\u2192 section / edit   \u2191\u2193 move   \u2318S save   esc close");
 
     if (changed) dirty_ = true;
     if (want_save_) {

@@ -91,10 +91,11 @@ public:
         if (changed) {
             const hand::Settings &s = panel_.state();
             session->set_font_pixel_size(scale_font_px(s.font_size), px);
-            std::string file = resolve_font_file(s.font_family);
+            std::string file = s.font_file.empty() ? resolve_font_file(s.font_family) : s.font_file;
             if (!file.empty()) session->set_font(file, px);
             session->set_default_colors(parse_hex(s.fg), parse_hex(s.bg));
-            session->set_cursor_animation(s.animate_cursor);
+            session->set_selection_color(parse_hex(s.selection));
+            session->set_cursor_animation(s.animate_cursor, s.animate_ms, s.animate_trail);
         }
         (void)save; // persistence handled inside panel_.render()
 

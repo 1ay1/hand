@@ -253,5 +253,12 @@ if(HAND_BUILD_TESTS AND NOT APPLE)
   target_link_libraries(atlas_grow_test PRIVATE hand::platform toe::toe OpenGL::GL)
   add_test(NAME atlas_grow COMMAND atlas_grow_test)
 
+  # Config round-trip: no GL needed — pure config/settings logic. config.cpp
+  # (the VIBE parse/save) lives in the hand exe, so compile it in directly.
+  add_executable(config_roundtrip_test tests/config_roundtrip_test.cpp src/config/config.cpp)
+  target_include_directories(config_roundtrip_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+  target_link_libraries(config_roundtrip_test PRIVATE hand::platform vibe)
+  add_test(NAME config_roundtrip COMMAND config_roundtrip_test)
+
   set_tests_properties(render cache atlas_grow PROPERTIES ENVIRONMENT "TOE_HEADLESS=1")
 endif()
