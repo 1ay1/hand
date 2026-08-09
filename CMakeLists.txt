@@ -246,5 +246,10 @@ if(HAND_BUILD_TESTS AND NOT APPLE)
   target_link_libraries(cache_test PRIVATE hand::platform toe::toe OpenGL::GL)
   add_test(NAME cache COMMAND cache_test)
 
-  set_tests_properties(render cache PROPERTIES ENVIRONMENT "TOE_HEADLESS=1")
+  add_executable(atlas_grow_test tests/atlas_grow_test.cpp)
+  target_include_directories(atlas_grow_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+  target_link_libraries(atlas_grow_test PRIVATE hand::platform toe::toe OpenGL::GL)
+  add_test(NAME atlas_grow COMMAND atlas_grow_test)
+
+  set_tests_properties(render cache atlas_grow PROPERTIES ENVIRONMENT "TOE_HEADLESS=1")
 endif()
