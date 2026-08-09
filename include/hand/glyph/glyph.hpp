@@ -172,9 +172,9 @@ public:
         buf_.hrule(content_.x, fy - 1, content_.w, Style{theme_.border, theme_.panel_bg});
         const char *default_hint = "\u2191\u2193 move   \u2190\u2192/space edit   tab section   esc close";
         if (footer.empty())
-            buf_.text(content_.x, fy, default_hint, Style{theme_.dim, theme_.panel_bg});
+            buf_.text(content_.x, fy, default_hint, Style{theme_.dim, theme_.panel_bg}, content_.w);
         else
-            buf_.text(content_.x, fy, footer, Style{theme_.dim, theme_.panel_bg});
+            buf_.text(content_.x, fy, footer, Style{theme_.dim, theme_.panel_bg}, content_.w);
 
         // Focus wrap after we know the row count.
         if (row_count_ > 0) {
@@ -204,24 +204,48 @@ public:
     bool tab_bar(const std::vector<std::string> &sections, int *active) {
         const int r = begin_row();
         const bool foc = (r == focus_);
+        const int n = (int)sections.size();
         bool changed = false;
         if (foc) {
-            if (in_.key == Key::Left)  { *active = (*active - 1 + (int)sections.size()) % (int)sections.size(); changed = true; }
-            if (in_.key == Key::Right) { *active = (*active + 1) % (int)sections.size(); changed = true; }
+            if (in_.key == Key::Left)  { *active = (*active - 1 + n) % n; changed = true; }
+            if (in_.key == Key::Right) { *active = (*active + 1) % n; changed = true; }
         }
-        // Pill strip: the active tab is an accent pill with rounded half-block
-        // end-caps (▐label▌ tinted so the caps read as curves); the rest are dim
-        // labels. Robust in any monospace font (no Powerline dependency).
+        *active = n > 0 ? std::clamp(*active, 0, n - 1) : 0;
+
+        // Each tab needs (label + 2 caps/pad + 1 gap) cells. Compute widths so
+        // we can SCROLL the strip: if all tabs don't fit, shift the window so
+        // the active tab is always visible (with ‹/› overflow markers). This
+        // guarantees every tab is reachable on any window width.
+        auto tw = [&](int i) { return (int)Buffer::text_width(sections[(std::size_t)i]) + 3; };
+        int total = 0;
+        for (int i = 0; i < n; ++i) total += tw(i);
+        const int avail = content_.w - 2;
+
+        int start = 0;
+        if (total > avail) {
+            // Scroll so the active tab sits within [start, end). Grow the window
+            // backward from active until it fills, then adjust so active fits.
+            int used = 0;
+            start = *active;
+            for (int i = *active; i >= 0; --i) {
+                if (used + tw(i) > avail) break;
+                used += tw(i); start = i;
+            }
+            // If room remains, extend forward too (keeps the strip full-looking).
+        }
+
         int x = content_.x + 1;
         const int maxx = content_.right() - 1;
-        for (int i = 0; i < (int)sections.size(); ++i) {
+        // Left overflow marker.
+        if (start > 0) { buf_.put(content_.x, cursor_y_, U'‹', Style{theme_.dim, theme_.panel_bg}); }
+        int last_drawn = start - 1;
+        for (int i = start; i < n; ++i) {
             const bool on = (i == *active);
             const std::string &name = sections[(std::size_t)i];
             const int label_w = (int)Buffer::text_width(name);
-            const int need = label_w + (on ? 2 : 2); // 1-col pad each side
-            if (x + need + 1 > maxx) break; // don't overflow the frame
+            const int need = label_w + 2; // 1-col pad/cap each side
+            if (x + need + 1 > maxx) break; // strip full
             if (on) {
-                // Left cap: right-half-block in accent over panel bg = a curve.
                 buf_.put(x, cursor_y_, U'▐', Style{theme_.accent, theme_.panel_bg});
                 buf_.fill(Rect{x + 1, cursor_y_, label_w, 1}, Style{theme_.accent_fg, theme_.accent});
                 buf_.text(x + 1, cursor_y_, name,
@@ -232,7 +256,11 @@ public:
                           Style{foc ? theme_.fg : theme_.dim, theme_.panel_bg});
             }
             x += need + 1; // gap between tabs
+            last_drawn = i;
         }
+        // Right overflow marker.
+        if (last_drawn < n - 1)
+            buf_.put(content_.right() - 1, cursor_y_, U'›', Style{theme_.dim, theme_.panel_bg});
         end_row();
         buf_.hrule(content_.x, cursor_y_, content_.w, Style{theme_.border, theme_.panel_bg});
         cursor_y_ += 1;

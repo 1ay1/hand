@@ -264,12 +264,21 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
     if (dd_open_ >= 0) panel_h += 9;
     panel_h = std::clamp(panel_h, 12, buf.height() - 2);
 
+    // Width must fit the WHOLE tab strip so no tab is clipped off. Each tab
+    // occupies (label + 2 caps/pad + 1 gap) cells (see Ctx::tab_bar); add the
+    // frame + inner margins. Clamp to the screen; if the terminal is too narrow
+    // the tab_bar will scroll, but on any normal window all 8 tabs show.
+    int tabs_w = 1; // leading margin
+    for (const auto &t : kSections)
+        tabs_w += static_cast<int>(t.size()) + 3;
+    const int panel_w = std::clamp(std::max(66, tabs_w + 5), 40, buf.width() - 2);
+
     // Overlay translucency comes from the config (Window tab): the scrim dims
     // the terminal lightly, the panel card stays near-opaque and readable.
     const auto a8 = [](float f) {
         return static_cast<std::uint8_t>(std::clamp(f, 0.0f, 1.0f) * 255.0f + 0.5f);
     };
-    ui.begin_panel("hand · settings", 66, panel_h, a8(s_.overlay_scrim_opacity),
+    ui.begin_panel("hand · settings", panel_w, panel_h, a8(s_.overlay_scrim_opacity),
                    a8(s_.overlay_panel_opacity));
 
     // Section tabs (focus row 0). ←/→ switch when the tab row is focused; each
