@@ -108,6 +108,7 @@ struct HandConfig {
         c.selection_bg = colors.selection_bg;
         // Blink OFF => steady cursor (period 0); else the configured half-period.
         c.cursor_blink_ms = cursor.blink ? cursor.blink_ms : 0;
+        c.cursor_shape = static_cast<int>(cursor.shape);
         c.wheel_lines = scroll.wheel_lines;
         c.scroll_on_output = scroll.scroll_on_output;
         c.scroll_on_keystroke = scroll.scroll_on_keystroke;
