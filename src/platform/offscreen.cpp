@@ -13,8 +13,13 @@
 #include <cstdio>
 #include <memory>
 
-#include <epoxy/egl.h>
-#include <epoxy/gl.h>
+// Fully-native GL: sokol GLCORE owns the GL entry points (and gives us the
+// <GL/gl.h> prototypes via the helper); real EGL headers create the headless
+// context. eglext.h provides EGL_PLATFORM_SURFACELESS_MESA. No epoxy.
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+
+#include "hand/platform/sokol_gl.hpp"
 
 namespace hand::platform {
 
@@ -50,16 +55,17 @@ public:
             return fail("offscreen: no matching EGL config");
         }
 
-        // Match the on-screen backends: request 4.4 core, fall back to 3.3.
+        // Match the on-screen backends: request 4.4 core, fall back to 4.1
+        // (the glsl410 shader floor; a 3.3 context would fail sg_make_pipeline).
         const EGLint ctx44[] = {EGL_CONTEXT_MAJOR_VERSION, 4, EGL_CONTEXT_MINOR_VERSION, 4,
                                 EGL_CONTEXT_OPENGL_PROFILE_MASK,
                                 EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT, EGL_NONE};
-        const EGLint ctx33[] = {EGL_CONTEXT_MAJOR_VERSION, 3, EGL_CONTEXT_MINOR_VERSION, 3,
+        const EGLint ctx41[] = {EGL_CONTEXT_MAJOR_VERSION, 4, EGL_CONTEXT_MINOR_VERSION, 1,
                                 EGL_CONTEXT_OPENGL_PROFILE_MASK,
                                 EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT, EGL_NONE};
         s->ctx_ = eglCreateContext(dpy, cfg, EGL_NO_CONTEXT, ctx44);
         if (s->ctx_ == EGL_NO_CONTEXT) {
-            s->ctx_ = eglCreateContext(dpy, cfg, EGL_NO_CONTEXT, ctx33);
+            s->ctx_ = eglCreateContext(dpy, cfg, EGL_NO_CONTEXT, ctx41);
         }
         if (s->ctx_ == EGL_NO_CONTEXT) {
             return fail("offscreen: eglCreateContext failed");
@@ -78,11 +84,16 @@ public:
         if (!eglMakeCurrent(dpy, s->surf_, s->surf_, s->ctx_)) {
             return fail("offscreen: eglMakeCurrent failed");
         }
+        // Set sokol up while the context is current — toe::run builds the
+        // Renderer (sg_make_pipeline) before the first begin_frame.
+        sokolgl::setup();
+        s->sokol_ready_ = true;
         return s;
     }
 
     ~OffscreenSurface() {
         if (dpy_ != EGL_NO_DISPLAY) {
+            if (sokol_ready_) sg_shutdown();
             eglMakeCurrent(dpy_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
             if (surf_ != EGL_NO_SURFACE) eglDestroySurface(dpy_, surf_);
             if (ctx_ != EGL_NO_CONTEXT) eglDestroyContext(dpy_, ctx_);
@@ -94,8 +105,10 @@ public:
         if (surf_ != EGL_NO_SURFACE) eglSwapBuffers(dpy_, surf_);
         else glFlush();
     }
-    void begin_frame(toe::PixelSize, std::uint8_t, std::uint8_t, std::uint8_t) {}
-    void end_frame() {}
+    void begin_frame(toe::PixelSize px, std::uint8_t r, std::uint8_t g, std::uint8_t b) {
+        sokolgl::begin_frame(px, r, g, b);
+    }
+    void end_frame() { sokolgl::end_frame(); }
     void swap_damaged(toe::DamageRect) { swap(); }
     [[nodiscard]] PixelSize pixel_size() const { return size_; }
     void set_title(std::string_view) {}
@@ -122,6 +135,7 @@ private:
     EGLDisplay dpy_ = EGL_NO_DISPLAY;
     EGLContext ctx_ = EGL_NO_CONTEXT;
     EGLSurface surf_ = EGL_NO_SURFACE;
+    bool sokol_ready_ = false; // sokol_gfx set up in open() while ctx is current
 };
 
 } // namespace hand::platform

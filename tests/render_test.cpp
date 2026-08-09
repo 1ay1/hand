@@ -13,10 +13,9 @@
 #include <string_view>
 #include <vector>
 
-#include <epoxy/gl.h>
-
 #include "toe/gfx/font.hpp"
 #include "toe/gfx/renderer.hpp"
+#include "hand/platform/sokol_gl.hpp"
 #include "hand/platform/testing.hpp"
 #include "toe/term/screen.hpp"
 #include "toe/vt/parser.hpp"
@@ -30,6 +29,10 @@ int main() {
         std::fprintf(stderr, "offscreen context unavailable\n");
         return 77; // skip when no display / EGL
     }
+
+    // toe's renderer is 100% sokol_gfx: draw() issues sg_* calls into whatever
+    // pass the host has begun. Set sokol up now that a GL context is current.
+    hand::platform::sokolgl::setup();
 
     constexpr int W = 400, H = 120;
 
@@ -88,7 +91,11 @@ int main() {
                     screen.apply(a, out);
                 });
 
+    // Render one frame into our texture FBO: begin a sokol pass targeting it
+    // (clearing to the terminal background 23,23,28), draw, then end+commit.
+    hand::platform::sokolgl::begin_frame_fbo(fbo, PixelSize{W, H}, 23, 23, 28);
     renderer->draw(screen, PixelSize{W, H}, /*cursor_on=*/false);
+    hand::platform::sokolgl::end_frame();
     glFinish();
 
     // Read back.

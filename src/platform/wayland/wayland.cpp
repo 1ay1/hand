@@ -27,10 +27,14 @@
 #include "text-input-unstable-v3-client-protocol.h"
 #endif
 
-// epoxy must be included before (or instead of) the system EGL/GL headers; it
-// re-exports the EGL and GL symbols itself.
-#include <epoxy/egl.h>
-#include <epoxy/gl.h>
+// Fully-native GL: sokol GLCORE owns the GL entry points (it includes
+// <GL/gl.h> with GL_GLEXT_PROTOTYPES and links the real libGL). The host only
+// needs EGL to create the context + window surface, so we use the real EGL
+// headers directly — no epoxy shim anywhere in the stack.
+#include <EGL/egl.h>
+
+#include "hand/platform/sokol_gl.hpp"
+#include "hand/platform/settings_host.hpp"
 
 #include <sys/mman.h>
 #include <sys/timerfd.h>
@@ -49,11 +53,12 @@ public:
     ~WaylandSurface();
 
     void swap();
-    // sokol swapchain frame hooks. TODO(sokol-linux): wire sokol GLCORE here;
-    // for now these are stubs so the Metal-first migration keeps the Linux
-    // backends satisfying the concept.
-    void begin_frame(toe::PixelSize, std::uint8_t, std::uint8_t, std::uint8_t) {}
-    void end_frame() {}
+    // sokol GLCORE swapchain frame hooks. begin_frame builds the default GL
+    // swapchain, begins the pass (clearing to the given colour); end_frame
+    // ends the pass and commits. sokol is set up lazily on the first frame
+    // (the EGL context is guaranteed current by then).
+    void begin_frame(toe::PixelSize px, std::uint8_t r, std::uint8_t g, std::uint8_t b);
+    void end_frame();
     void swap_damaged(DamageRect d); // present, damaging only the changed region
     [[nodiscard]] PixelSize pixel_size() const { return size_; }
     [[nodiscard]] int event_fd() const { return wl_display_get_fd(display_); }
@@ -67,12 +72,13 @@ public:
     void set_clipboard(std::string_view utf8);
     [[nodiscard]] std::string get_clipboard();
     void open_url(std::string_view uri) { hand::open_url_xdg(uri); }
-    // OverlayApp stubs: the in-terminal settings panel is macOS-first for now;
-    // these keep the Linux backends satisfying the concept, inert.
-    [[nodiscard]] bool overlay_active() const { return false; }
-    bool overlay_event(const toe::win::Event &) { return false; }
-    void overlay_render(toe::Terminal &, toe::PixelSize) {}
-    void bind_terminal(toe::Terminal &, toe::PixelSize) {}
+    // OverlayApp: the in-terminal settings panel. toe::run_loop calls these to
+    // capture input while the panel is open and composite it after the terminal
+    // renders. Toggle keybind: Ctrl+Shift+, (see kb_key).
+    [[nodiscard]] bool overlay_active() const { return settings_.active(); }
+    bool overlay_event(const toe::win::Event &ev) { return settings_.handle(ev); }
+    void overlay_render(toe::Terminal &term, toe::PixelSize px) { settings_.render(term, px); }
+    void bind_terminal(toe::Terminal &, toe::PixelSize) { settings_.bind(); }
     void poll_events(const toe::EventSink &sink);
     [[nodiscard]] bool should_close() const { return closed_; }
     [[nodiscard]] toe::Readiness wait_readable(int pty_fd, toe::WaitDeadline d) {
@@ -209,6 +215,13 @@ private:
     EGLContext egl_context_ = EGL_NO_CONTEXT;
     EGLSurface egl_surface_ = EGL_NO_SURFACE;
     EGLConfig egl_config_ = nullptr;
+
+    // sokol_gfx is set up once, lazily, on the first begin_frame (guarantees a
+    // current GL context). Torn down in the destructor.
+    bool sokol_ready_ = false;
+
+    // In-terminal settings panel (Ctrl+Shift+, toggles it).
+    hand::platform::SettingsHost settings_{};
 
     // xkb.
     xkb_context *xkb_ctx_ = nullptr;
@@ -422,6 +435,15 @@ void WaylandSurface::emit_key(uint32_t key, KeyEvent::Kind kind) {
                                             XKB_STATE_MODS_EFFECTIVE) > 0;
     mods.shift = xkb_state_mod_name_is_active(xkb_state_, XKB_MOD_NAME_SHIFT,
                                               XKB_STATE_MODS_EFFECTIVE) > 0;
+
+    // Ctrl+Shift+,  toggles the in-terminal settings panel (the Linux analogue
+    // of macOS ⌘,). Intercept on press before any terminal routing; while the
+    // panel is open its own key handling (via overlay_event) takes over.
+    if (kind == KeyEvent::Kind::press && mods.ctrl && mods.shift &&
+        (sym == XKB_KEY_comma || sym == XKB_KEY_less)) {
+        settings_.toggle();
+        return;
+    }
 
     // Dead keys / Compose sequences: feed the keysym to the compose state on a
     // real press. While composing, emit an inline Preedit; on completion, emit
@@ -665,25 +687,29 @@ Result<void> WaylandSurface::init_egl() {
     }
 
     // Prefer a 4.4 core context (enables persistent-mapped buffers for the
-    // fastest streaming path); fall back to 3.3 if the driver won't grant it.
+    // fastest streaming path); fall back to 4.1 if the driver won't grant it.
+    // 4.1 is the FLOOR: sokol's shaders are compiled as glsl410 (separate
+    // sampler objects need GL 4.1 / ARB_separate_shader_objects), so a 3.3
+    // context would fail sg_make_pipeline. Every desktop GL driver from the
+    // last decade grants ≥4.1 core.
     const EGLint ctx44[] = {
         EGL_CONTEXT_MAJOR_VERSION, 4,
         EGL_CONTEXT_MINOR_VERSION, 4,
         EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
         EGL_NONE,
     };
-    const EGLint ctx33[] = {
-        EGL_CONTEXT_MAJOR_VERSION, 3,
-        EGL_CONTEXT_MINOR_VERSION, 3,
+    const EGLint ctx41[] = {
+        EGL_CONTEXT_MAJOR_VERSION, 4,
+        EGL_CONTEXT_MINOR_VERSION, 1,
         EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
         EGL_NONE,
     };
     egl_context_ = eglCreateContext(egl_display_, egl_config_, EGL_NO_CONTEXT, ctx44);
     if (egl_context_ == EGL_NO_CONTEXT) {
-        egl_context_ = eglCreateContext(egl_display_, egl_config_, EGL_NO_CONTEXT, ctx33);
+        egl_context_ = eglCreateContext(egl_display_, egl_config_, EGL_NO_CONTEXT, ctx41);
     }
     if (egl_context_ == EGL_NO_CONTEXT) {
-        return fail("egl: eglCreateContext (GL 3.3 core) failed");
+        return fail("egl: eglCreateContext (GL 4.1 core) failed");
     }
 
     egl_window_ = wl_egl_window_create(surface_, size_.w, size_.h);
@@ -707,11 +733,19 @@ Result<void> WaylandSurface::init_egl() {
     // the window flagged "not responding". We present as soon as the frame is
     // ready and rely on the loop's own timing, like foot/kitty do.
     eglSwapInterval(egl_display_, 0);
+
+    // Set sokol up NOW, while the context is current — toe::run builds the
+    // Renderer (sg_make_pipeline) before the first begin_frame, so lazy setup
+    // would make pipeline creation fail. One context, set up once here.
+    sokolgl::setup();
+    sokol_ready_ = true;
     return {};
 }
 
 WaylandSurface::~WaylandSurface() {
     if (egl_display_ != EGL_NO_DISPLAY) {
+        // Tear sokol down while the context is still current, then release it.
+        if (sokol_ready_) sg_shutdown();
         eglMakeCurrent(egl_display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
         if (egl_surface_ != EGL_NO_SURFACE) eglDestroySurface(egl_display_, egl_surface_);
         if (egl_context_ != EGL_NO_CONTEXT) eglDestroyContext(egl_display_, egl_context_);
@@ -743,6 +777,13 @@ WaylandSurface::~WaylandSurface() {
     if (registry_) wl_registry_destroy(registry_);
     if (display_) wl_display_disconnect(display_);
 }
+
+void WaylandSurface::begin_frame(toe::PixelSize px, std::uint8_t r, std::uint8_t g,
+                                std::uint8_t b) {
+    sokolgl::begin_frame(px, r, g, b);
+}
+
+void WaylandSurface::end_frame() { sokolgl::end_frame(); }
 
 void WaylandSurface::swap() { swap_damaged(DamageRect::full(size_)); }
 

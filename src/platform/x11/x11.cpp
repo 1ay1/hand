@@ -16,8 +16,14 @@
 #include <cstring>
 #include <string>
 
-#include <epoxy/egl.h>
-#include <epoxy/gl.h>
+// Fully-native GL: sokol GLCORE owns the GL entry points and links the real
+// libGL; the host only uses EGL to create the context. Real EGL header, no
+// epoxy shim.
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+
+#include "hand/platform/sokol_gl.hpp"
+#include "hand/platform/settings_host.hpp"
 
 #include <X11/Xlib.h>
 #include <X11/Xlib-xcb.h>
@@ -39,8 +45,10 @@ public:
     ~X11Surface();
 
     void swap();
-    void begin_frame(toe::PixelSize, std::uint8_t, std::uint8_t, std::uint8_t) {}
-    void end_frame() {}
+    // sokol GLCORE swapchain frame hooks (see sokol_gl.hpp). sokol is set up
+    // lazily on the first frame; the EGL context is current by then.
+    void begin_frame(toe::PixelSize px, std::uint8_t r, std::uint8_t g, std::uint8_t b);
+    void end_frame();
     void swap_damaged(toe::DamageRect) { swap(); }
     [[nodiscard]] PixelSize pixel_size() const { return size_; }
     [[nodiscard]] int event_fd() const { return xcb_get_file_descriptor(xcb_); }
@@ -55,10 +63,11 @@ public:
     void set_clipboard(std::string_view utf8);
     [[nodiscard]] std::string get_clipboard();
     void open_url(std::string_view uri) { hand::open_url_xdg(uri); }
-    [[nodiscard]] bool overlay_active() const { return false; }
-    bool overlay_event(const toe::win::Event &) { return false; }
-    void overlay_render(toe::Terminal &, toe::PixelSize) {}
-    void bind_terminal(toe::Terminal &, toe::PixelSize) {}
+    // OverlayApp: the in-terminal settings panel (Ctrl+Shift+, toggles it).
+    [[nodiscard]] bool overlay_active() const { return settings_.active(); }
+    bool overlay_event(const toe::win::Event &ev) { return settings_.handle(ev); }
+    void overlay_render(toe::Terminal &term, toe::PixelSize px) { settings_.render(term, px); }
+    void bind_terminal(toe::Terminal &, toe::PixelSize) { settings_.bind(); }
     void poll_events(const toe::EventSink &sink);
     [[nodiscard]] bool should_close() const { return closed_; }
     [[nodiscard]] toe::Readiness wait_readable(int pty_fd, toe::WaitDeadline d) {
@@ -98,10 +107,16 @@ private:
     EGLSurface egl_surface_ = EGL_NO_SURFACE;
     EGLConfig egl_config_ = nullptr;
 
+    // sokol_gfx set up once, lazily, on the first begin_frame.
+    bool sokol_ready_ = false;
+
     xkb_context *xkb_ctx_ = nullptr;
     xkb_keymap *xkb_keymap_ = nullptr;
     xkb_state *xkb_state_ = nullptr;
     int32_t xkb_device_ = -1;
+
+    // In-terminal settings panel (Ctrl+Shift+, toggles it).
+    hand::platform::SettingsHost settings_{};
 
     PixelSize size_{960, 600};
     bool closed_ = false;
@@ -246,25 +261,26 @@ Result<void> X11Surface::init_egl() {
     }
 
     // Prefer a 4.4 core context (enables persistent-mapped buffers for the
-    // fastest streaming path); fall back to 3.3 if the driver won't grant it.
+    // fastest streaming path); fall back to 4.1 if the driver won't grant it.
+    // 4.1 is the FLOOR (glsl410 shaders need separate sampler objects).
     const EGLint ctx44[] = {
         EGL_CONTEXT_MAJOR_VERSION, 4,
         EGL_CONTEXT_MINOR_VERSION, 4,
         EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
         EGL_NONE,
     };
-    const EGLint ctx33[] = {
-        EGL_CONTEXT_MAJOR_VERSION, 3,
-        EGL_CONTEXT_MINOR_VERSION, 3,
+    const EGLint ctx41[] = {
+        EGL_CONTEXT_MAJOR_VERSION, 4,
+        EGL_CONTEXT_MINOR_VERSION, 1,
         EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
         EGL_NONE,
     };
     egl_context_ = eglCreateContext(egl_display_, egl_config_, EGL_NO_CONTEXT, ctx44);
     if (egl_context_ == EGL_NO_CONTEXT) {
-        egl_context_ = eglCreateContext(egl_display_, egl_config_, EGL_NO_CONTEXT, ctx33);
+        egl_context_ = eglCreateContext(egl_display_, egl_config_, EGL_NO_CONTEXT, ctx41);
     }
     if (egl_context_ == EGL_NO_CONTEXT) {
-        return fail("egl(x11): eglCreateContext (GL 3.3 core) failed");
+        return fail("egl(x11): eglCreateContext (GL 4.1 core) failed");
     }
     return {};
 }
@@ -282,6 +298,10 @@ Result<void> X11Surface::create_egl_surface() {
         return fail("egl(x11): eglMakeCurrent failed");
     }
     eglSwapInterval(egl_display_, 1);
+    // Set sokol up now, while the context is current: toe::run builds the
+    // Renderer (sg_make_pipeline) before the first begin_frame.
+    sokolgl::setup();
+    sokol_ready_ = true;
     return {};
 }
 
@@ -321,6 +341,14 @@ void X11Surface::handle_key(xcb_keycode_t code, KeyEvent::Kind kind,
                                             XKB_STATE_MODS_EFFECTIVE) > 0;
     mods.shift = xkb_state_mod_name_is_active(xkb_state_, XKB_MOD_NAME_SHIFT,
                                               XKB_STATE_MODS_EFFECTIVE) > 0;
+
+    // Ctrl+Shift+,  toggles the in-terminal settings panel (Linux analogue of
+    // macOS ⌘,). Intercept on press before terminal routing.
+    if (kind == KeyEvent::Kind::press && mods.ctrl && mods.shift &&
+        (sym == XKB_KEY_comma || sym == XKB_KEY_less)) {
+        settings_.toggle();
+        return;
+    }
 
     auto special = [&](SpecialKey sk) {
         KeyEvent ev;
@@ -555,8 +583,15 @@ void X11Surface::poll_events(const std::function<void(const Event &)> &sink) {
 
 void X11Surface::swap() { eglSwapBuffers(egl_display_, egl_surface_); }
 
+void X11Surface::begin_frame(toe::PixelSize px, std::uint8_t r, std::uint8_t g, std::uint8_t b) {
+    sokolgl::begin_frame(px, r, g, b);
+}
+
+void X11Surface::end_frame() { sokolgl::end_frame(); }
+
 X11Surface::~X11Surface() {
     if (egl_display_ != EGL_NO_DISPLAY) {
+        if (sokol_ready_) sg_shutdown();
         eglMakeCurrent(egl_display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
         if (egl_surface_ != EGL_NO_SURFACE) eglDestroySurface(egl_display_, egl_surface_);
         if (egl_context_ != EGL_NO_CONTEXT) eglDestroyContext(egl_display_, egl_context_);

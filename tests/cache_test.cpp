@@ -10,9 +10,9 @@
 #include <string>
 #include <filesystem>
 #include <vector>
-#include <epoxy/gl.h>
 #include "toe/gfx/font.hpp"
 #include "toe/gfx/renderer.hpp"
+#include "hand/platform/sokol_gl.hpp"
 #include "hand/platform/testing.hpp"
 #include "toe/term/screen.hpp"
 #include "toe/vt/parser.hpp"
@@ -20,11 +20,14 @@ using namespace toe;
 
 static std::vector<unsigned char> render_to_pixels(gfx::Renderer& r, term::Screen& s,
                                                     int W, int H, GLuint fbo) {
-    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-    glViewport(0,0,W,H);
+    // toe's renderer is 100% sokol: wrap draw() in a sokol pass targeting our
+    // texture FBO (cleared to the terminal background), then read pixels back.
+    hand::platform::sokolgl::begin_frame_fbo(fbo, PixelSize{W, H}, 23, 23, 28);
     r.draw(s, PixelSize{W,H});
+    hand::platform::sokolgl::end_frame();
     glFinish();
     std::vector<unsigned char> px(static_cast<size_t>(W)*H*4);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glReadPixels(0,0,W,H,GL_RGBA,GL_UNSIGNED_BYTE,px.data());
     return px;
 }
@@ -33,6 +36,7 @@ int main() {
     constexpr int W=640,H=384;
     if(!hand::platform::make_offscreen_context_current(PixelSize{64,64})){
         std::fprintf(stderr,"skip: no offscreen context\n"); return 77; }
+    hand::platform::sokolgl::setup(); // GL context current → set sokol up
     GLuint tex=0,fbo=0; glGenTextures(1,&tex); glBindTexture(GL_TEXTURE_2D,tex);
     glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,W,H,0,GL_RGBA,GL_UNSIGNED_BYTE,nullptr);
     glGenFramebuffers(1,&fbo); glBindFramebuffer(GL_FRAMEBUFFER,fbo);

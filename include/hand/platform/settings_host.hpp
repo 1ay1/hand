@@ -1,0 +1,97 @@
+// SPDX-License-Identifier: LGPL-2.0-or-later
+//
+// SettingsHost — the platform-neutral glue that makes the in-terminal settings
+// panel work on any backend, factored out of the Cocoa backend so Wayland and
+// X11 share exactly one copy of the logic.
+//
+// A backend embeds a SettingsHost, binds it once at open, calls toggle() from
+// its own toggle keybind, and forwards the three OverlayApp<> hooks to it:
+//
+//     bool overlay_active() const           -> host_.active()
+//     bool overlay_event(const Event&)      -> host_.handle(ev)
+//     void overlay_render(Terminal&, px)    -> host_.render(term, px)
+//
+// toe::run_loop drives those automatically (see the OverlayApp concept): when
+// the panel is active it captures input first and composites after the terminal
+// renders, via Session::render_overlay.
+
+#ifndef HAND_PLATFORM_SETTINGS_HOST_HPP
+#define HAND_PLATFORM_SETTINGS_HOST_HPP
+
+#include <string>
+
+#include "hand/glyph/buffer.hpp"
+#include "hand/platform/fonts.hpp"
+#include "hand/settings_panel.hpp"
+#include "toe/app.hpp"      // toe::win::Event
+#include "toe/terminal.hpp"
+
+namespace hand::platform {
+
+class SettingsHost {
+public:
+    // Seed the panel from the process-wide config source (main() installs it via
+    // set_settings_source before the window opens).
+    void bind() { panel_.bind(settings_source_config(), settings_source_path()); }
+
+    [[nodiscard]] bool active() const noexcept { return panel_.active(); }
+
+    // Flip the panel open/closed (call from the backend's toggle keybind).
+    void toggle() { panel_.toggle(); }
+
+    // Feed one window event; true if the panel consumed it (must not reach the
+    // terminal). Only meaningful while active().
+    [[nodiscard]] bool handle(const toe::win::Event &ev) { return panel_.handle(ev); }
+
+    // Render the panel over the terminal this frame. Sizes the overlay buffer to
+    // the grid, live-applies edits (font size/family, colours) to the running
+    // session, and composites via the engine's overlay pass. Requires a current
+    // GL context (the run loop calls it right after session.render()).
+    void render(toe::Terminal &term, toe::PixelSize px) {
+        auto *session = term.poll().running;
+        if (!session) return;
+        const toe::Extent cell = session->cell_size();
+        if (cell.cols <= 0 || cell.rows <= 0) return;
+
+        const int cols = std::max(1, px.w / cell.cols);
+        const int rows = std::max(1, px.h / cell.rows);
+        if (buf_.width() != cols || buf_.height() != rows) buf_.resize(cols, rows);
+
+        bool changed = false, save = false;
+        panel_.render(buf_, changed, save);
+
+        // Live-apply edits so you SEE them change. On Linux pixels are pixels
+        // (no backing-scale factor as on Retina), so font size maps 1:1.
+        if (changed) {
+            const hand::Settings &s = panel_.state();
+            session->set_font_pixel_size(s.font_size, px);
+            std::string file = resolve_font_file(s.font_family);
+            if (!file.empty()) session->set_font(file, px);
+            session->set_default_colors(parse_hex(s.fg), parse_hex(s.bg));
+        }
+        (void)save; // persistence handled inside panel_.render()
+
+        auto rc = toe::gfx::RenderContext::adopt_current();
+        session->render_overlay(rc, buf_.data(), buf_.width(), buf_.height(), px);
+    }
+
+private:
+    static toe::Rgb parse_hex(const std::string &h) {
+        if (h.size() != 7 || h[0] != '#') return toe::rgb(200, 200, 200);
+        auto d = [](char c) -> int {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+            if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+            return 0;
+        };
+        auto v = [&](int i) { return static_cast<std::uint8_t>(d(h[i]) * 16 + d(h[i + 1])); };
+        return toe::rgb(v(1), v(3), v(5));
+    }
+
+    hand::SettingsPanel panel_{};
+    glyph::Buffer buf_{};
+};
+
+} // namespace hand::platform
+
+#endif // HAND_PLATFORM_SETTINGS_HOST_HPP

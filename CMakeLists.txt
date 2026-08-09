@@ -112,11 +112,13 @@ else()
   # Linux: Wayland + X11 + offscreen(EGL). THIS is where every window-system
   # dependency lives.
   # ---------------------------------------------------------------------------
-  pkg_check_modules(EPOXY   REQUIRED IMPORTED_TARGET epoxy)
   pkg_check_modules(EGL     REQUIRED IMPORTED_TARGET egl)
   pkg_check_modules(WAYLAND REQUIRED IMPORTED_TARGET wayland-client wayland-egl wayland-cursor)
   pkg_check_modules(XKB     REQUIRED IMPORTED_TARGET xkbcommon)
   pkg_check_modules(X11     REQUIRED IMPORTED_TARGET x11 x11-xcb xcb xkbcommon-x11)
+  # Fully-native GL: sokol GLCORE calls the real libGL entry points directly, so
+  # we link OpenGL::GL. No epoxy — sokol owns GL end-to-end.
+  find_package(OpenGL REQUIRED)
 
   # Generate the xdg-shell protocol glue from wayland-protocols.
   find_program(WAYLAND_SCANNER wayland-scanner REQUIRED)
@@ -159,6 +161,8 @@ else()
     src/platform/wayland/wayland.cpp
     src/platform/x11/x11.cpp
     src/platform/offscreen.cpp
+    src/platform/fonts_posix.cpp
+    src/settings_panel.cpp
     "${GEN}/xdg-shell-client-protocol.h"
     "${GEN}/xdg-shell-protocol.c"
     ${_ti_sources})
@@ -174,7 +178,7 @@ else()
 
   target_link_libraries(hand-platform
     PUBLIC  toe::toe vibe
-    PRIVATE PkgConfig::EGL PkgConfig::WAYLAND PkgConfig::XKB PkgConfig::X11 PkgConfig::EPOXY)
+    PRIVATE PkgConfig::EGL PkgConfig::WAYLAND PkgConfig::XKB PkgConfig::X11 OpenGL::GL)
 
   target_compile_features(hand-platform PUBLIC cxx_std_23)
   target_compile_options(hand-platform PRIVATE -Wall -Wextra)
@@ -189,8 +193,9 @@ add_executable(hand
 target_include_directories(hand PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(hand PRIVATE hand::platform toe::toe vibe)
 if(NOT APPLE)
-  # epoxy is only needed by the Linux GL/EGL backends.
-  target_link_libraries(hand PRIVATE PkgConfig::EPOXY)
+  # sokol GLCORE links the real libGL for the Linux GL/EGL backends.
+  find_package(OpenGL REQUIRED)
+  target_link_libraries(hand PRIVATE OpenGL::GL)
 endif()
 target_compile_options(hand PRIVATE -Wall -Wextra -Wpedantic)
 
@@ -233,12 +238,12 @@ if(HAND_BUILD_TESTS AND NOT APPLE)
   enable_testing()
   add_executable(render_test tests/render_test.cpp)
   target_include_directories(render_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
-  target_link_libraries(render_test PRIVATE hand::platform toe::toe PkgConfig::EPOXY)
+  target_link_libraries(render_test PRIVATE hand::platform toe::toe OpenGL::GL)
   add_test(NAME render COMMAND render_test)
 
   add_executable(cache_test tests/cache_test.cpp)
   target_include_directories(cache_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
-  target_link_libraries(cache_test PRIVATE hand::platform toe::toe PkgConfig::EPOXY)
+  target_link_libraries(cache_test PRIVATE hand::platform toe::toe OpenGL::GL)
   add_test(NAME cache COMMAND cache_test)
 
   set_tests_properties(render cache PROPERTIES ENVIRONMENT "TOE_HEADLESS=1")
