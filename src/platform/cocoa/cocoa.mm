@@ -51,6 +51,7 @@
 // (no impl) to drive the swapchain pass with the Metal device + drawable.
 #define SOKOL_METAL
 #include "sokol/sokol_gfx.h"
+#include "sokol/sokol_log.h"
 
 // ───────────────────────── Objective-C view/window ─────────────────────────
 //
@@ -693,6 +694,7 @@ Result<std::unique_ptr<CocoaSurface>> CocoaSurface::open(std::string_view title,
         // right after open()) then makes its pipeline/buffers against it.
         sg_desc sd = {};
         sd.environment.metal.device = (__bridge const void *)s->device_;
+        sd.logger.func = slog_func; // surface sokol validation messages
         sg_setup(&sd);
         if (!sg_isvalid()) return fail("cocoa: sokol_gfx setup failed");
 
