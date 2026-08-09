@@ -134,12 +134,14 @@ public:
         buf_.fill(panel_, Style{theme_.fg, theme_.panel_bg});
         buf_.frame(panel_, Style{theme_.border, theme_.panel_bg}, BoxStyle::Rounded);
 
-        // Coloured title BAND across the top interior row: fills row y+1 with a
-        // tint and centres the bold title on it. Reads like a real window
-        // titlebar rather than text hanging in the border.
+        // Coloured title BAND across the top interior row: a tint with the bold
+        // title, an accent ◆ mark on the left, and ‹esc› on the right. A hairline
+        // rule under it separates the header from the content like a real
+        // titlebar.
         const int band_y = panel_.y + 1;
         const Rgb tbg = theme_.title_bg();
         buf_.fill(Rect{panel_.x + 1, band_y, panel_.w - 2, 1}, Style{theme_.accent, tbg});
+        buf_.put(panel_.x + 2, band_y, U'◆', Style{theme_.accent, tbg, Attr::Bold});
         std::string t = std::string(title);
         const int tw = Buffer::text_width(t);
         const int tx = panel_.x + (panel_w_ - tw) / 2;
@@ -148,10 +150,12 @@ public:
         const char *hint = "esc";
         buf_.text(panel_.right() - 2 - Buffer::text_width(hint), band_y, hint,
                   Style{Theme::mix(theme_.accent, tbg, 0.35f), tbg});
+        // Hairline under the title band.
+        buf_.hrule(panel_.x + 1, band_y + 1, panel_.w - 2, Style{theme_.border, theme_.panel_bg});
 
         content_ = panel_.inset(1);
         content_.x += 1; content_.w -= 2; // horizontal breathing room
-        cursor_y_ = band_y + 2;           // leave a blank line under the band
+        cursor_y_ = band_y + 3;           // header band + rule + a blank line
         row_index_ = 0;
         activated_ = -1;
         consumed_ = false;
@@ -205,26 +209,29 @@ public:
             if (in_.key == Key::Left)  { *active = (*active - 1 + (int)sections.size()) % (int)sections.size(); changed = true; }
             if (in_.key == Key::Right) { *active = (*active + 1) % (int)sections.size(); changed = true; }
         }
-        // Pill strip: the active tab is a filled accent pill (padded), the rest
-        // are dim labels. Padded background reads as a rounded pill and never
-        // depends on Powerline glyphs being in the pane font.
+        // Pill strip: the active tab is an accent pill with rounded half-block
+        // end-caps (▐label▌ tinted so the caps read as curves); the rest are dim
+        // labels. Robust in any monospace font (no Powerline dependency).
         int x = content_.x + 1;
         const int maxx = content_.right() - 1;
         for (int i = 0; i < (int)sections.size(); ++i) {
             const bool on = (i == *active);
             const std::string &name = sections[(std::size_t)i];
             const int label_w = (int)Buffer::text_width(name);
-            const int need = label_w + (on ? 2 : 0); // active pill has 1-col pad
+            const int need = label_w + (on ? 2 : 2); // 1-col pad each side
             if (x + need + 1 > maxx) break; // don't overflow the frame
             if (on) {
-                buf_.fill(Rect{x, cursor_y_, need, 1}, Style{theme_.accent_fg, theme_.accent});
+                // Left cap: right-half-block in accent over panel bg = a curve.
+                buf_.put(x, cursor_y_, U'▐', Style{theme_.accent, theme_.panel_bg});
+                buf_.fill(Rect{x + 1, cursor_y_, label_w, 1}, Style{theme_.accent_fg, theme_.accent});
                 buf_.text(x + 1, cursor_y_, name,
                           Style{theme_.accent_fg, theme_.accent, Attr::Bold});
+                buf_.put(x + 1 + label_w, cursor_y_, U'▌', Style{theme_.accent, theme_.panel_bg});
             } else {
-                buf_.text(x, cursor_y_, name,
+                buf_.text(x + 1, cursor_y_, name,
                           Style{foc ? theme_.fg : theme_.dim, theme_.panel_bg});
             }
-            x += need + 2; // gap between tabs
+            x += need + 1; // gap between tabs
         }
         end_row();
         buf_.hrule(content_.x, cursor_y_, content_.w, Style{theme_.border, theme_.panel_bg});

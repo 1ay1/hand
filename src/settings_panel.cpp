@@ -253,13 +253,23 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
 
     glyph::Ctx ui(buf, in, &focus_, ui_theme());
 
-    // Wider panel to fit the tab bar + two-column rows comfortably. Overlay
-    // translucency comes from the config (Window tab): the scrim dims the
-    // terminal lightly, the panel card stays near-opaque and readable.
+    // Rows each section shows (drives the auto-fitted panel height so there's no
+    // vast empty space under a short tab like Theme). Index matches kSections.
+    static const int kSectionRows[] = {1, 7, 6, 4, 4, 4, 6, 3};
+    const int rows = kSectionRows[std::clamp(section_, 0, nsec - 1)];
+    // header band(1)+rule(1)+gap(1) + tab row(1)+rule(1) + content + gap +
+    // footer rule(1)+text(1) + frame(2). A roomy but tight card.
+    int panel_h = 3 + 2 + rows + 1 + 2 + 2 + 1;
+    // A dropdown open in this section needs extra room for the popup below it.
+    if (dd_open_ >= 0) panel_h += 9;
+    panel_h = std::clamp(panel_h, 12, buf.height() - 2);
+
+    // Overlay translucency comes from the config (Window tab): the scrim dims
+    // the terminal lightly, the panel card stays near-opaque and readable.
     const auto a8 = [](float f) {
         return static_cast<std::uint8_t>(std::clamp(f, 0.0f, 1.0f) * 255.0f + 0.5f);
     };
-    ui.begin_panel("hand · settings", 66, 26, a8(s_.overlay_scrim_opacity),
+    ui.begin_panel("hand · settings", 66, panel_h, a8(s_.overlay_scrim_opacity),
                    a8(s_.overlay_panel_opacity));
 
     // Section tabs (focus row 0). ←/→ switch when the tab row is focused; each
