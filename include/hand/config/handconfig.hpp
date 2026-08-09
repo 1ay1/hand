@@ -62,6 +62,7 @@ struct CursorConfig {
     CursorShape shape = CursorShape::Block;
     bool blink = true;
     int blink_ms = 530;          // blink half-period
+    bool animate = true;         // smoothly glide the caret to its new cell
 };
 
 struct ScrollConfig {

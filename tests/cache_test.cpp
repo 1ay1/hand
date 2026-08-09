@@ -52,6 +52,10 @@ int main() {
     if(!a1||!a2){ std::fprintf(stderr,"no font\n"); return 1; }
     auto warm = gfx::Renderer::create(std::move(*a1));
     auto fresh_maker = std::move(*a2);
+    // The animated caret depends on wall-clock elapsed time, which would make
+    // draw() non-deterministic and break the byte-identical cache assertion.
+    // Snap-mode (no glide) is deterministic, which is what this test needs.
+    warm->set_cursor_animation(false);
 
     term::Screen s{Extent{40,20}}; // small grid
     vt::Parser parser;
@@ -85,6 +89,7 @@ int main() {
 
     // Fresh renderer, same final screen, cold cache.
     auto fresh = gfx::Renderer::create(std::move(fresh_maker));
+    fresh->set_cursor_animation(false);
     auto fresh_px = render_to_pixels(*fresh, s, W, H, fbo);
 
     if (warm_px.size()!=fresh_px.size() || std::memcmp(warm_px.data(),fresh_px.data(),warm_px.size())!=0) {
