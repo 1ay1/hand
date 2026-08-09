@@ -662,6 +662,15 @@ Result<std::unique_ptr<CocoaSurface>> CocoaSurface::open(std::string_view title,
         s->metal_layer_.pixelFormat = MTLPixelFormatBGRA8Unorm;
         s->metal_layer_.framebufferOnly = YES;
         s->metal_layer_.opaque = YES;
+        // Throughput: the run loop already caps presents to ~30Hz (kFloodPresentMs)
+        // and drains the PTY on THIS thread. With displaySyncEnabled=YES (the
+        // default) nextDrawable blocks on vblank, so every capped present stalls
+        // the drain up to a full refresh (~16ms) — that's a ~40% flood-throughput
+        // loss vs the old GL flushBuffer, which never blocked the CPU. Turn vsync
+        // off and triple-buffer so nextDrawable returns immediately; tearing is a
+        // non-issue because the loop, not the display, sets the present rate.
+        s->metal_layer_.displaySyncEnabled = NO;
+        s->metal_layer_.maximumDrawableCount = 3;
 
         s->delegate_ = [[HandWindowDelegate alloc] init];
         s->delegate_->inbox_ = &s->inbox_;
