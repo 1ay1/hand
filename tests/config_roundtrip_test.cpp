@@ -31,6 +31,17 @@ int main(){
   ck(r.scrollback==50000,"scrollback"); ck(r.scroll_mult==7,"scroll_mult"); ck(r.scroll_on_output,"scroll_on_output");
   ck(r.audible_bell,"audible_bell"); ck(r.confirm_close,"confirm_close");
   ck(r.padding==12,"padding"); ck(r.opacity>0.84f&&r.opacity<0.86f,"opacity"); ck(!r.decorations,"decorations");
+
+  // And it must actually reach the ENGINE, not just persist: the once-dead
+  // behavior knobs now project into toe::Config so the EventRouter/drain honor
+  // them. (A field that persists but doesn't project is still a dead knob.)
+  auto tc = d.to_toe();
+  ck(tc.scroll_on_output, "scroll_on_output -> toe::Config");
+  ck(tc.wheel_lines==r.scroll_mult, "wheel_lines -> toe::Config");
+  ck(tc.selection_bg.r==0x11 && tc.selection_bg.g==0x22 && tc.selection_bg.b==0x33,
+     "selection colour -> toe::Config");
+  ck(tc.cursor_blink_ms==700, "blink_ms -> toe::Config (blink on)");
+
   std::printf(fails? "%d FIELD(S) FAILED ROUND-TRIP\n":"ALL FIELDS ROUND-TRIP CLEAN\n", fails);
   return fails?1:0;
 }

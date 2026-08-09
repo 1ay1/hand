@@ -30,6 +30,9 @@
 #include "toe/app.hpp"      // toe::win::Event
 #include "toe/terminal.hpp"
 
+#include <fcntl.h>   // open() for the audible bell (/dev/tty)
+#include <unistd.h>  // write()/close()
+
 namespace hand::platform {
 
 class SettingsHost {
@@ -48,6 +51,27 @@ public:
     // The inotify fd for the config watch (-1 if none). The backend folds this
     // into its epoll wait via TerminalWait::watch_config.
     [[nodiscard]] int config_fd() const noexcept { return watch_.fd(); }
+
+    // Install the BEL handler on the session from the current config. Audible:
+    // write \a to the controlling terminal (/dev/tty) if hand was launched from
+    // one — harmless no-op otherwise. Visual: flag a brief flash the renderer
+    // shows. Re-called on reload so the toggles stay live.
+    void install_bell(toe::Session &session) {
+        const HandConfig &c = panel_.config();
+        const bool audible = c.behavior.audible_bell;
+        const bool visual = c.behavior.visual_bell;
+        toe::Session *sp = &session;
+        session.set_on_bell([audible, visual, sp] {
+            if (audible) {
+                if (int fd = ::open("/dev/tty", O_WRONLY | O_NONBLOCK | O_CLOEXEC); fd >= 0) {
+                    const char bel = '\a';
+                    (void)::write(fd, &bel, 1);
+                    ::close(fd);
+                }
+            }
+            if (visual) sp->flash_visual_bell();
+        });
+    }
 
     // Any overlay pane open? (settings OR help). The run loop uses this to
     // capture input and repaint.
@@ -126,6 +150,7 @@ public:
         HandConfig fresh = load_hand_config(settings_source_path());
         panel_.reload(fresh);        // re-seed cfg_ + Settings from disk
         apply(*session, panel_.state(), px);
+        install_bell(*session);      // bell toggles may have changed
     }
 
 private:
@@ -140,6 +165,8 @@ private:
         session.set_selection_color(parse_hex(s.selection));
         session.set_cursor_animation(s.animate_cursor, s.animate_ms, s.animate_trail);
         session.set_cursor_blink_ms(s.blink_cursor ? s.blink_ms : 0);
+        session.set_behavior({s.scroll_mult, s.scroll_on_output, s.scroll_on_keystroke,
+                              s.copy_on_select});
     }
 
     // Logical point size -> pixels @96dpi, times the HiDPI scale (GDK_SCALE).

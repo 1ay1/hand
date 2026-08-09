@@ -70,6 +70,7 @@ public:
     void bind_terminal(toe::Terminal &term, toe::PixelSize px) {
         (void)px; // reload reads the live size_ (window may have resized)
         settings_.bind();
+        if (auto *s = term.poll().running) settings_.install_bell(*s);
         // Fold the config-file watcher into the same epoll wait (reactor.hpp).
         wait_.watch_config(settings_.config_fd(),
                            [this, &term] { settings_.on_config_fd_ready(term, size_); });
