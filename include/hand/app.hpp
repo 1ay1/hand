@@ -91,22 +91,24 @@ private:
     Impl *impl_ = nullptr; // owned; type complete only in the backend's TU
 };
 
-// The three concrete surface types, forward-declared (defined in their TUs, in
+// The concrete surface types, forward-declared (defined in their TUs, in
 // hand::platform). Each names a distinct App instantiation.
 namespace platform {
 class WaylandSurface;
 class X11Surface;
 class CocoaSurface;
+class Win32Surface;
 class OffscreenSurface;
 } // namespace platform
 
 using WaylandApp = BackendApp<platform::WaylandSurface>;
 using X11App = BackendApp<platform::X11Surface>;
 using CocoaApp = BackendApp<platform::CocoaSurface>;
+using Win32App = BackendApp<platform::Win32Surface>;
 using OffscreenApp = BackendApp<platform::OffscreenSurface>;
 
 // Which backend to force, or automatic (environment-driven) selection.
-enum class Backend { automatic, wayland, x11, cocoa, offscreen };
+enum class Backend { automatic, wayland, x11, cocoa, win32, offscreen };
 
 // The ONE runtime decision. Picks a backend from the environment (unless forced)
 // and enters that backend's fully-monomorphic `toe::run<...>`. This is the line
@@ -122,6 +124,7 @@ enum class Backend { automatic, wayland, x11, cocoa, offscreen };
 [[nodiscard]] int run_wayland(const toe::Config &cfg, const toe::WindowConfig &win);
 [[nodiscard]] int run_x11(const toe::Config &cfg, const toe::WindowConfig &win);
 [[nodiscard]] int run_cocoa(const toe::Config &cfg, const toe::WindowConfig &win);
+[[nodiscard]] int run_win32(const toe::Config &cfg, const toe::WindowConfig &win);
 [[nodiscard]] int run_offscreen(const toe::Config &cfg, const toe::WindowConfig &win);
 
 } // namespace hand

@@ -37,6 +37,17 @@ struct SpawnCommand {
     // Runs in the CHILD after fork(), before exec(): setenv/chdir/setsid/
     // drop-privs. Must be async-signal-safe. Optional.
     std::function<void()> pre_exec{};
+
+    // The initial grid, in CELLS. Zero means "unknown, use a placeholder".
+    //
+    // On POSIX this is cosmetic — the winsize is set again the instant toe
+    // creates the Terminal, and nothing has been drawn yet. On Windows it is
+    // NOT cosmetic: ConPTY repaints its whole viewport on every resize, so a
+    // pseudoconsole born at the wrong size makes the child paint once at that
+    // size and again after toe corrects it, leaving a duplicated block of
+    // output on screen. Passing the real geometry up front avoids the reflow.
+    int cols = 0;
+    int rows = 0;
 };
 
 // forkpty() the command and hand back an adopt-able master fd + child pid.

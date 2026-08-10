@@ -32,8 +32,18 @@
 #include "toe/app.hpp"      // toe::win::Event
 #include "toe/terminal.hpp"
 
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h> // MessageBeep for the audible bell
+#else
 #include <fcntl.h>   // open() for the audible bell (/dev/tty)
 #include <unistd.h>  // write()/close()
+#endif
 
 namespace hand::platform {
 
@@ -59,6 +69,13 @@ public:
     // The inotify fd for the config watch (-1 if none). The backend folds this
     // into its epoll wait via TerminalWait::watch_config.
     [[nodiscard]] int config_fd() const noexcept { return watch_.fd(); }
+#if defined(_WIN32)
+    // Windows has no fd: the backend folds this waitable EVENT into its
+    // MsgWaitForMultipleObjectsEx instead. Null when no watch is live.
+    [[nodiscard]] void *config_event() const noexcept {
+        return watch_.active() ? watch_.event_handle() : nullptr;
+    }
+#endif
 
     // Install the BEL handler on the session from the current config. Audible:
     // write \a to the controlling terminal (/dev/tty) if hand was launched from
@@ -71,11 +88,17 @@ public:
         toe::Session *sp = &session;
         session.set_on_bell([audible, visual, sp] {
             if (audible) {
+#if defined(_WIN32)
+                // Windows has no controlling tty to forward \a to; the system
+                // default sound IS the platform's bell.
+                ::MessageBeep(MB_OK);
+#else
                 if (int fd = ::open("/dev/tty", O_WRONLY | O_NONBLOCK | O_CLOEXEC); fd >= 0) {
                     const char bel = '\a';
                     (void)::write(fd, &bel, 1);
                     ::close(fd);
                 }
+#endif
             }
             if (visual) sp->flash_visual_bell();
         });

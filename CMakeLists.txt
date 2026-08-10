@@ -74,9 +74,41 @@ target_include_directories(vibe PUBLIC "${vibe_SOURCE_DIR}")
 # instantiated once per backend on its concrete surface, so the hot path is
 # monomorphic — no vtable.
 # ===========================================================================
-find_package(PkgConfig REQUIRED)
+if(NOT WIN32)
+  find_package(PkgConfig REQUIRED)
+endif()
 
-if(APPLE)
+if(WIN32)
+  # ---------------------------------------------------------------------------
+  # Windows: Win32 + D3D11 (via sokol_gfx). Fully native — no GL, no ANGLE, no
+  # translation layer. Process creation is ConPTY (conpty.cpp); fonts come from
+  # DirectWrite; readiness is MsgWaitForMultipleObjectsEx (win_reactor.hpp).
+  # ---------------------------------------------------------------------------
+  add_library(hand-platform STATIC
+    src/platform/backend.cpp
+    src/platform/win/conpty.cpp
+    src/platform/win/win32.cpp
+    src/platform/win/fonts_win.cpp
+    src/settings_panel.cpp
+    src/help_panel.cpp
+    src/theme/themes.cpp)
+  add_library(hand::platform ALIAS hand-platform)
+
+  target_include_directories(hand-platform
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+
+  # d3d11/dxgi: the GPU path. dwrite: font discovery. shell32: open_url.
+  target_link_libraries(hand-platform
+    PUBLIC  toe::toe vibe
+    PRIVATE d3d11 dxgi dwrite shell32 user32 gdi32)
+
+  # Target Windows 10 1809+ (ConPTY needs it) and keep the min-version headers
+  # consistent across every TU.
+  target_compile_definitions(hand-platform PUBLIC _WIN32_WINNT=0x0A00 WINVER=0x0A00)
+
+  target_compile_features(hand-platform PUBLIC cxx_std_23)
+  target_compile_options(hand-platform PRIVATE -Wall -Wextra)
+elseif(APPLE)
   # ---------------------------------------------------------------------------
   # macOS: Cocoa + Metal (via sokol_gfx). No OpenGL, no epoxy. forkpty lives in
   # posix_pty.
@@ -196,10 +228,15 @@ add_executable(hand
   src/config/config.cpp)
 target_include_directories(hand PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(hand PRIVATE hand::platform toe::toe vibe)
-if(NOT APPLE)
+if(NOT APPLE AND NOT WIN32)
   # sokol GLCORE links the real libGL for the Linux GL/EGL backends.
   find_package(OpenGL REQUIRED)
   target_link_libraries(hand PRIVATE OpenGL::GL)
+endif()
+if(WIN32)
+  # Subsystem:windows — launching the terminal must not pop a console window
+  # behind it (the whole point is that hand IS the console).
+  target_link_options(hand PRIVATE -mwindows)
 endif()
 target_compile_options(hand PRIVATE -Wall -Wextra -Wpedantic)
 
@@ -240,9 +277,10 @@ if(HAND_BUILD_TESTS)
   enable_testing()
 
   # --- GL renderer tests (Linux only) --------------------------------------
-  # These need the EGL offscreen backend for a headless GL context, which macOS
-  # doesn't provide (no EGL). The logic tests below run everywhere.
-  if(NOT APPLE)
+  # These need the EGL offscreen backend for a headless GL context, which
+  # neither macOS (no EGL) nor Windows (D3D11, no offscreen GL backend)
+  # provides. The logic tests below run everywhere.
+  if(NOT APPLE AND NOT WIN32)
     add_executable(render_test tests/render_test.cpp)
     target_include_directories(render_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
     target_link_libraries(render_test PRIVATE hand::platform toe::toe OpenGL::GL)

@@ -84,7 +84,10 @@ std::unique_ptr<OwnedTheme> parse_theme_file(const std::filesystem::path &path) 
     std::unique_ptr<VibeParser, void (*)(VibeParser *)> parser(vibe_parser_new(),
                                                                vibe_parser_free);
     if (!parser) return nullptr;
-    VibeValue *root = vibe_parse_file(parser.get(), path.c_str());
+    // path::c_str() is wchar_t* on Windows; vibe's C API takes UTF-8 char*, so
+    // go through string() (which narrows) rather than c_str().
+    const std::string path_utf8 = path.string();
+    VibeValue *root = vibe_parse_file(parser.get(), path_utf8.c_str());
     if (!root) return nullptr;
     std::unique_ptr<VibeValue, void (*)(VibeValue *)> owned(root, vibe_value_free);
 
@@ -126,11 +129,24 @@ std::unique_ptr<OwnedTheme> parse_theme_file(const std::filesystem::path &path) 
 
 } // namespace
 
+// The user THEME directory. Built-in themes are compiled in (themes.gen.hpp is
+// a constexpr table), so this is purely for optional user-authored *.vibe
+// overrides and is allowed not to exist.
+//
+// This MUST resolve the same way find_config() does in config/config.cpp
+// (XDG_CONFIG_HOME, then HOME) — the settings panel saves themes here and
+// reads the config from there, so a divergence would write one place and read
+// another. On Windows, MSYS2/Git-Bash style environments set HOME; a bare cmd
+// session falls back to USERPROFILE below.
 std::string user_themes_dir() {
     if (const char *xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg)
         return std::string(xdg) + "/hand/themes";
     if (const char *home = std::getenv("HOME"); home && *home)
         return std::string(home) + "/.config/hand/themes";
+#if defined(_WIN32)
+    if (const char *up = std::getenv("USERPROFILE"); up && *up)
+        return std::string(up) + "/.config/hand/themes";
+#endif
     return {};
 }
 

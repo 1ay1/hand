@@ -38,6 +38,16 @@
 #include <cstring>
 #include <string>
 
+#if defined(_WIN32)
+#define HAND_CONFIG_WATCH_WIN32 1
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -50,6 +60,7 @@
 #define HAND_CONFIG_WATCH_INOTIFY 1
 #include <sys/inotify.h>
 #endif
+#endif // _WIN32
 
 namespace hand {
 
@@ -65,12 +76,37 @@ public:
     bool start(const std::string &path) {
         close_fd();
         if (path.empty()) return false;
+#if HAND_CONFIG_WATCH_WIN32
+        // Windows paths use either separator; split on whichever comes last.
+        const auto slash = path.find_last_of("/\\");
+#else
         const auto slash = path.find_last_of('/');
+#endif
         dir_ = (slash == std::string::npos) ? std::string{"."} : path.substr(0, slash);
         base_ = (slash == std::string::npos) ? path : path.substr(slash + 1);
         if (dir_.empty()) dir_ = "/";
 
-#if HAND_CONFIG_WATCH_INOTIFY
+#if HAND_CONFIG_WATCH_WIN32
+        // ReadDirectoryChangesW is the event-driven Windows equivalent of
+        // inotify: the kernel signals our OVERLAPPED event when the directory
+        // changes, so the watch folds into the same WaitForMultipleObjects the
+        // PTY and window use — no polling, no watcher thread.
+        {
+            const int n = ::MultiByteToWideChar(CP_UTF8, 0, dir_.data(),
+                                                static_cast<int>(dir_.size()), nullptr, 0);
+            std::wstring wdir(static_cast<std::size_t>(n), L'\0');
+            ::MultiByteToWideChar(CP_UTF8, 0, dir_.data(), static_cast<int>(dir_.size()),
+                                  wdir.data(), n);
+            dir_handle_ = ::CreateFileW(
+                wdir.c_str(), FILE_LIST_DIRECTORY,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, nullptr);
+        }
+        if (dir_handle_ == INVALID_HANDLE_VALUE) { dir_handle_ = nullptr; return false; }
+        ov_.hEvent = ::CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (!ov_.hEvent) { close_fd(); return false; }
+        return post_read();
+#elif HAND_CONFIG_WATCH_INOTIFY
         fd_ = ::inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
         if (fd_ < 0) return false;
         // CLOSE_WRITE covers in-place saves; MOVED_TO covers atomic-rename saves
@@ -114,7 +150,14 @@ public:
     }
 
     [[nodiscard]] int fd() const noexcept { return fd_; }
+#if HAND_CONFIG_WATCH_WIN32
+    // Windows has no fd to fold into a wait; the backend waits on this EVENT
+    // instead (signalled by the kernel when the directory changes).
+    [[nodiscard]] void *event_handle() const noexcept { return ov_.hEvent; }
+    [[nodiscard]] bool active() const noexcept { return dir_handle_ != nullptr; }
+#else
     [[nodiscard]] bool active() const noexcept { return fd_ >= 0; }
+#endif
 
     // Record that WE just wrote the config, so the resulting inotify event is
     // ignored (we already have those values live). Keep the window short.
@@ -124,9 +167,41 @@ public:
     // relevant change to our config file was seen — the caller then reloads.
     // Always drains fully so the fd goes quiet (level-triggered epoll).
     [[nodiscard]] bool drained() {
+#if HAND_CONFIG_WATCH_WIN32
+        if (!dir_handle_) return false;
+        bool hit = false;
+        // Harvest the completed overlapped read (non-blocking), then re-arm.
+        DWORD got = 0;
+        while (::GetOverlappedResult(dir_handle_, &ov_, &got, FALSE)) {
+            // got == 0 means the kernel's buffer overflowed and it could not
+            // report which files changed. Treat that as a hit: the caller just
+            // re-reads the config, and a spurious reload is a cheap no-op.
+            if (got == 0) {
+                hit = true;
+            } else {
+                DWORD off = 0;
+                for (;;) {
+                    auto *fni = reinterpret_cast<FILE_NOTIFY_INFORMATION *>(buf_ + off);
+                    const int wlen = static_cast<int>(fni->FileNameLength / sizeof(wchar_t));
+                    const int n = ::WideCharToMultiByte(CP_UTF8, 0, fni->FileName, wlen, nullptr,
+                                                        0, nullptr, nullptr);
+                    std::string name(static_cast<std::size_t>(n), '\0');
+                    ::WideCharToMultiByte(CP_UTF8, 0, fni->FileName, wlen, name.data(), n,
+                                          nullptr, nullptr);
+                    if (name == base_) hit = true;
+                    if (fni->NextEntryOffset == 0) break;
+                    off += fni->NextEntryOffset;
+                }
+            }
+            ::ResetEvent(ov_.hEvent);
+            if (!post_read()) break;
+            // Loop again in case more changes completed synchronously.
+            if (::WaitForSingleObject(ov_.hEvent, 0) != WAIT_OBJECT_0) break;
+        }
+        if (!hit) return false;
+#elif HAND_CONFIG_WATCH_INOTIFY
         if (fd_ < 0) return false;
         bool hit = false;
-#if HAND_CONFIG_WATCH_INOTIFY
         alignas(inotify_event) char buf[4096];
         for (;;) {
             const ssize_t n = ::read(fd_, buf, sizeof buf);
@@ -139,6 +214,8 @@ public:
             }
         }
 #else // kqueue: drain all queued vnode events non-blocking.
+        if (fd_ < 0) return false;
+        bool hit = false;
         // The dir vnode doesn't tell us WHICH file changed, so any write to the
         // watched directory is a candidate. We coalesce every pending event and
         // report one hit; the caller re-reads the config file, so a spurious
@@ -177,13 +254,39 @@ private:
                 .count());
     }
     void close_fd() {
+#if HAND_CONFIG_WATCH_WIN32
+        if (dir_handle_) {
+            ::CancelIoEx(dir_handle_, &ov_);
+            DWORD got = 0;
+            ::GetOverlappedResult(dir_handle_, &ov_, &got, TRUE);
+            ::CloseHandle(dir_handle_);
+            dir_handle_ = nullptr;
+        }
+        if (ov_.hEvent) { ::CloseHandle(ov_.hEvent); ov_.hEvent = nullptr; }
+        return;
+#else
 #if HAND_CONFIG_WATCH_KQUEUE
         if (file_fd_ >= 0) { ::close(file_fd_); file_fd_ = -1; }
         if (dir_fd_ >= 0) { ::close(dir_fd_); dir_fd_ = -1; }
 #endif
         if (fd_ >= 0) { ::close(fd_); fd_ = -1; }
         wd_ = -1;
+#endif
     }
+
+#if HAND_CONFIG_WATCH_WIN32
+    // (Re-)arm the asynchronous directory read. Returns false if the watch died.
+    bool post_read() {
+        if (!dir_handle_) return false;
+        DWORD got = 0;
+        const BOOL ok = ::ReadDirectoryChangesW(
+            dir_handle_, buf_, sizeof buf_, FALSE,
+            FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE |
+                FILE_NOTIFY_CHANGE_SIZE | FILE_NOTIFY_CHANGE_CREATION,
+            &got, &ov_, nullptr);
+        return ok || ::GetLastError() == ERROR_IO_PENDING;
+    }
+#endif
 
 #if HAND_CONFIG_WATCH_KQUEUE
     // Re-open the config file fd and re-register its vnode filter. Called after
@@ -203,6 +306,12 @@ private:
 
     int fd_ = -1;
     int wd_ = -1;
+#if HAND_CONFIG_WATCH_WIN32
+    HANDLE dir_handle_ = nullptr; // the watched directory, opened OVERLAPPED
+    OVERLAPPED ov_{};             // in-flight ReadDirectoryChangesW state
+    // DWORD-aligned: FILE_NOTIFY_INFORMATION is read out of this in place.
+    alignas(DWORD) char buf_[4096]{};
+#endif
 #if HAND_CONFIG_WATCH_KQUEUE
     int dir_fd_ = -1;    // parent-directory fd (catches create/rename saves)
     int file_fd_ = -1;   // config-file fd (catches in-place writes)

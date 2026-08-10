@@ -8,6 +8,8 @@
 #include "hand/config/config.hpp"
 #include "hand/settings_panel.hpp"
 #include <cstdio>
+#include <filesystem>
+#include <string>
 int main(){
   // Start from defaults, mutate a Settings across every section, fold into a
   // HandConfig, save, reload, and confirm the values survived.
@@ -23,8 +25,12 @@ int main(){
   s.overlay_panel_opacity = 0.80f; s.overlay_scrim_opacity = 0.10f;
   s.shell = "/bin/zsh"; s.term_env = "xterm-kitty";
   s.into(c);
-  hand::save_hand_config(c, "/tmp/rt.vibe");
-  auto d = hand::load_hand_config("/tmp/rt.vibe");
+  // A real temp path: "/tmp" is not meaningful to the native Windows file
+  // APIs, so ask the OS where temp actually is.
+  const std::string rt =
+      (std::filesystem::temp_directory_path() / "rt.vibe").string();
+  hand::save_hand_config(c, rt);
+  auto d = hand::load_hand_config(rt);
   auto r = hand::Settings::from(d);
   int fails=0;
   auto ck=[&](bool ok,const char*n){ if(!ok){std::printf("FAIL %s\n",n);++fails;} };

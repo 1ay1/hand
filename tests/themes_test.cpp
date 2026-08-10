@@ -69,8 +69,12 @@ int main() {
     const hand::NamedTheme *tn = hand::find_theme("tokyonight");
     ck(tn && c.colors.background == tn->bg, "apply_theme sets bg");
 
-    hand::save_hand_config(c, "/tmp/theme_rt.vibe");
-    auto d = hand::load_hand_config("/tmp/theme_rt.vibe");
+    // A real temp dir: "/tmp" is not a valid path for the native Windows file
+    // APIs, and fopen() there returns NULL (which then crashes on fputs).
+    const std::filesystem::path tmp = std::filesystem::temp_directory_path();
+    const std::string theme_rt = (tmp / "theme_rt.vibe").string();
+    hand::save_hand_config(c, theme_rt);
+    auto d = hand::load_hand_config(theme_rt);
     ck(d.theme_name == "tokyonight", "theme name survives round-trip");
     ck(d.colors.palette.size() == 16, "palette survives round-trip");
 
@@ -81,11 +85,14 @@ int main() {
 
     // --- named palette colours in config -----------------------------------
     {
-        FILE *f = std::fopen("/tmp/named_colors.vibe", "w");
+        const std::string named = (tmp / "named_colors.vibe").string();
+        FILE *f = std::fopen(named.c_str(), "w");
+        ck(f != nullptr, "temp config file opens");
+        if (!f) return 1;
         std::fputs("theme catppuccin-mocha\n"
                    "colors { red \"#ff0000\" bright_blue \"#0000ff\" }\n", f);
         std::fclose(f);
-        auto nc = hand::load_hand_config("/tmp/named_colors.vibe");
+        auto nc = hand::load_hand_config(named);
         ck(nc.colors.palette.size() == 16, "named colours build a 16-slot palette");
         ck(nc.colors.palette[1].r == 0xff && nc.colors.palette[1].g == 0,
            "colors.red -> slot 1");
@@ -100,9 +107,21 @@ int main() {
     // --- user theme files --------------------------------------------------
     {
         // Point the loader at a temp themes dir and drop one theme in it.
-        setenv("XDG_CONFIG_HOME", "/tmp/hand_theme_test_cfg", 1);
-        std::filesystem::create_directories("/tmp/hand_theme_test_cfg/hand/themes");
-        FILE *f = std::fopen("/tmp/hand_theme_test_cfg/hand/themes/probe.vibe", "w");
+        // _putenv_s is the Windows spelling of setenv; the temp root comes from
+        // the OS rather than a hardcoded /tmp.
+        const std::filesystem::path cfg_root =
+            std::filesystem::temp_directory_path() / "hand_theme_test_cfg";
+        const std::string cfg_root_s = cfg_root.string();
+#if defined(_WIN32)
+        _putenv_s("XDG_CONFIG_HOME", cfg_root_s.c_str());
+#else
+        setenv("XDG_CONFIG_HOME", cfg_root_s.c_str(), 1);
+#endif
+        const std::filesystem::path themes_dir = cfg_root / "hand" / "themes";
+        std::filesystem::create_directories(themes_dir);
+        FILE *f = std::fopen((themes_dir / "probe.vibe").string().c_str(), "w");
+        ck(f != nullptr, "temp theme file opens");
+        if (!f) return 1;
         std::fputs("name \"Probe Theme\"\nbackground \"#101010\"\n"
                    "foreground \"#e0e0e0\"\naccent \"#00ffcc\"\n"
                    "green \"#00ff00\"\n", f);

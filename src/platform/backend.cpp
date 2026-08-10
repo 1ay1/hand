@@ -16,8 +16,21 @@
 #include "hand/platform/posix_pty.hpp"
 #include "hand/platform/fonts.hpp"
 
+#include "toe/gfx/font.hpp" // FontAtlas::probe_cell_size
+
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h> // GetDpiForSystem
+#endif
 
 namespace hand {
 
@@ -27,7 +40,10 @@ namespace {
 [[nodiscard]] Backend choose(Backend force) {
     if (force != Backend::automatic) return force;
     if (const char *h = std::getenv("TOE_HEADLESS"); h && *h) return Backend::offscreen;
-#if defined(__APPLE__)
+#if defined(_WIN32)
+    // Windows has exactly one native window system.
+    return Backend::win32;
+#elif defined(__APPLE__)
     // macOS has exactly one native window system.
     return Backend::cocoa;
 #else
@@ -41,19 +57,36 @@ namespace {
 
 int run(const toe::Config &cfg_in, const toe::WindowConfig &win, Backend force,
         const std::vector<std::string> &child_argv) {
-    // Process creation is the HOST's job: forkpty the child here and hand toe an
-    // adopt-able master fd. The engine never forks (see posix_pty.hpp).
+    // Process creation is the HOST's job: the engine never forks (see
+    // posix_pty.hpp). NOTE the ordering — the child is spawned near the END of
+    // this function, AFTER font/DPI resolution, because the initial pty grid is
+    // derived from the cell size and a pty born at the wrong size makes ConPTY
+    // repaint (see SpawnCommand::cols).
     toe::Config cfg = cfg_in;
-    SpawnCommand sc;
-    sc.argv = child_argv; // empty -> $SHELL (posix_pty resolves it)
-    auto fd = spawn_pty(sc);
-    if (!fd) {
-        std::fprintf(stderr, "hand: %s\n", fd.error().message.c_str());
-        return 1;
+#if defined(_WIN32)
+    // Font is host policy on Windows too. The config size is a LOGICAL POINT
+    // size; convert to pixels using the ACTUAL system DPI rather than assuming
+    // 96, so the grid is correctly sized on scaled displays (the common laptop
+    // case at 125%/150%). GetDpiForSystem is the per-monitor-aware query.
+    {
+        const double dpi = static_cast<double>(::GetDpiForSystem());
+        const double px = static_cast<double>(cfg.font_pixel_size) * (dpi / 72.0);
+        cfg.font_pixel_size = static_cast<int>(px + 0.5);
     }
-    cfg.source = *fd;
-
-#if defined(__APPLE__)
+    // Resolve a concrete font file here (host policy) via DirectWrite, so the
+    // engine needs no Windows font branch.
+    if (cfg.font_file.empty()) {
+        std::string f = resolve_font_file(cfg.font_family);
+        if (!f.empty()) cfg.font_file = std::move(f);
+    }
+    {
+        FontStyleFiles sf = resolve_font_styles(cfg.font_family, cfg.font_file);
+        if (cfg.font_file_bold.empty()) cfg.font_file_bold = std::move(sf.bold);
+        if (cfg.font_file_italic.empty()) cfg.font_file_italic = std::move(sf.italic);
+        if (cfg.font_file_bold_italic.empty())
+            cfg.font_file_bold_italic = std::move(sf.bold_italic);
+    }
+#elif defined(__APPLE__)
     // Font is host policy on macOS. Interpret the size as a LOGICAL point size;
     // run_cocoa multiplies it by the display's backing scale factor. Note toe
     // sizes by ascent+descent (stbtt_ScaleForPixelHeight), and SF Mono's
@@ -102,8 +135,49 @@ int run(const toe::Config &cfg_in, const toe::WindowConfig &win, Backend force,
     }
 #endif
 
+    // --- spawn the child, at the RIGHT grid size ----------------------------
+    // Done here, after font/DPI resolution, so we can predict the cell geometry
+    // toe will choose. Getting this right matters on Windows: ConPTY repaints
+    // its whole viewport whenever the pseudoconsole is resized, so a pty created
+    // at a placeholder 80x24 and corrected a moment later makes the shell print
+    // its banner (and every command's output) twice.
+    //
+    // We ask toe for the cell size of the resolved font — the same computation
+    // the renderer performs — rather than guessing, so the grid matches what
+    // Session::resize() will independently arrive at and the first resize is a
+    // no-op.
+    SpawnCommand sc;
+    sc.argv = child_argv; // empty -> $SHELL / %COMSPEC% (the spawner resolves it)
+    // sc.term keeps its default (xterm-256color); TERM is host policy and is not
+    // carried in toe::Config.
+    {
+        // Mirrors toe::gfx::Renderer::cells_for(): reserve the padding on every
+        // edge, then integer-divide by the cell. Same inputs, same result, so
+        // the grid toe computes once the window exists matches this one and the
+        // first Session::resize() is a no-op.
+        const toe::PixelSize cell =
+            toe::gfx::FontAtlas::probe_cell_size(cfg.font_file, cfg.font_pixel_size);
+        if (cell.w > 0 && cell.h > 0) {
+            const int w = std::max(0, win.size.w - 2 * cfg.padding);
+            const int h = std::max(0, win.size.h - 2 * cfg.padding);
+            sc.cols = std::max(1, w / cell.w);
+            sc.rows = std::max(1, h / cell.h);
+        }
+    }
+
+    auto fd = spawn_pty(sc);
+    if (!fd) {
+        std::fprintf(stderr, "hand: %s\n", fd.error().message.c_str());
+        return 1;
+    }
+    cfg.source = *fd;
+
     switch (choose(force)) {
-#if defined(__APPLE__)
+#if defined(_WIN32)
+    case Backend::win32:
+    default:
+        return run_win32(cfg, win);
+#elif defined(__APPLE__)
     case Backend::cocoa:
     default:
         return run_cocoa(cfg, win);

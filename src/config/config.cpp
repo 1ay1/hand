@@ -85,6 +85,13 @@ std::optional<std::string> find_config(std::span<char *> args) {
         return std::string{xdg} + "/hand/config.vibe";
     if (const char *home = std::getenv("HOME"); home && *home)
         return std::string{home} + "/.config/hand/config.vibe";
+#if defined(_WIN32)
+    // A bare cmd.exe session sets no HOME (only MSYS2/Git-Bash style shells do),
+    // so fall back to the profile root. Kept in lockstep with user_themes_dir()
+    // in theme/themes.cpp — the settings panel writes both.
+    if (const char *up = std::getenv("USERPROFILE"); up && *up)
+        return std::string{up} + "/.config/hand/config.vibe";
+#endif
     return std::nullopt;
 }
 
