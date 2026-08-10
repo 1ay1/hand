@@ -133,3 +133,53 @@ open the settings pane; select and copy; confirm output isn't duplicated.
 To see exactly what the child sent, set `HAND_PTY_DUMP=<path>` and decode the
 capture — that single trick localises most "the terminal looks wrong" bugs to
 either the PTY layer or the renderer.
+
+---
+
+## Measuring performance
+
+Two numbers matter, and they are measured differently.
+
+**Throughput** (parse + screen model, no GPU) — `tests/throughput_bench.cpp`:
+
+```sh
+cmake --build build --target throughput_bench
+./build/tests/throughput_bench
+```
+
+It reports **best-of-7**. This is not fussiness: run-to-run spread on a laptop
+is easily 10% (turbo, thermals, E-core placement), which is larger than most
+real optimisations — a single sample will happily "confirm" a change that did
+nothing. Two optimisations were rejected here precisely because best-of-N showed
+their apparent wins were noise.
+
+**Input-to-photon latency** — the number that decides how instant the terminal
+feels. It cannot be measured on the CPU side: it spans the PTY round trip, the
+parse, the GPU frame and the compositor. `hand` measures it itself:
+
+```sh
+# Linux/macOS: the HUD prints to stderr a few times a second.
+HAND_LATENCY_HUD=1 ./hand
+
+# Windows: a GUI-subsystem build has no console, so name a FILE instead.
+set HAND_LATENCY_HUD=%TEMP%\lat.log
+hand.exe
+```
+
+Then drive real keystrokes through the OS input path (Windows):
+
+```sh
+latency_driver.exe 300 30      # 300 keys, 30 ms apart
+```
+
+Measured on a 60 Hz laptop panel: **avg ~4-7 ms, p99 ~30 ms**.
+
+That p99 is not a bug to chase: 30 ms is exactly **two vsync intervals at
+60 Hz**, i.e. the DWM compositor's floor for a windowed app. The useful signal
+is the *average*, and whether p99 sits near a multiple of the refresh interval
+(compositor) or near one of the loop's own constants such as `kFloodPresentMs`
+(our bug). Check the refresh rate before concluding anything:
+
+```sh
+powershell -c "(Get-CimInstance Win32_VideoController).CurrentRefreshRate"
+```
