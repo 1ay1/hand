@@ -96,6 +96,7 @@ if(WIN32)
     src/settings_panel.cpp
     src/help_panel.cpp
     src/workspace.cpp
+    src/gui/update.cpp
     src/theme/themes.cpp)
   add_library(hand::platform ALIAS hand-platform)
 
@@ -126,6 +127,7 @@ elseif(APPLE)
     src/settings_panel.cpp
     src/help_panel.cpp
     src/workspace.cpp
+    src/gui/update.cpp
     src/theme/themes.cpp)
   add_library(hand::platform ALIAS hand-platform)
 
@@ -205,6 +207,7 @@ else()
     src/settings_panel.cpp
     src/help_panel.cpp
     src/workspace.cpp
+    src/gui/update.cpp
     src/theme/themes.cpp
     "${GEN}/xdg-shell-client-protocol.h"
     "${GEN}/xdg-shell-protocol.c"
@@ -367,6 +370,13 @@ if(HAND_BUILD_TESTS)
   find_package(Threads REQUIRED)
   target_link_libraries(mailbox_test PRIVATE Threads::Threads)
   add_test(NAME mailbox COMMAND mailbox_test)
+
+  # The GUI Elm reducer: pure gui_update(GuiModel, GuiMsg) -> GuiCmds. Whole GUI
+  # control flow (tab lifecycle/focus/routing/quit) proven with no threads/GL.
+  add_executable(gui_update_test tests/gui_update_test.cpp src/gui/update.cpp)
+  target_include_directories(gui_update_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+  target_link_libraries(gui_update_test PRIVATE toe::toe)
+  add_test(NAME gui_update COMMAND gui_update_test)
 
   # Config watcher: pure filesystem-watch logic (inotify on Linux, kqueue on
   # macOS/BSD), no GL / no deps. Guards live config hot-reload on every OS.
