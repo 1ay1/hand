@@ -87,4 +87,5 @@ behavior {
     visual_bell  true
     copy_on_select false          # auto-copy a drag selection
     confirm_close false           # ask before closing a running child
+    # word_separators ",'"         # extra chars joined into a word on double-click
 }

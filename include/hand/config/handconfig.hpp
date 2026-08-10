@@ -95,6 +95,7 @@ struct BehaviorConfig {
     bool visual_bell = true;      // flash on BEL
     bool copy_on_select = false;  // auto-copy a selection to the clipboard
     bool confirm_close = false;   // ask before closing with a running child
+    std::string word_separators{}; // extra word-joining chars for double-click select
 };
 
 // The complete config. Loaded from VIBE, edited by the settings panel, saved
@@ -151,6 +152,7 @@ struct HandConfig {
         c.scroll_on_output = scroll.scroll_on_output;
         c.scroll_on_keystroke = scroll.scroll_on_keystroke;
         c.copy_on_select = behavior.copy_on_select;
+        c.word_separators = behavior.word_separators;
         c.padding = window.padding;
         c.opacity = window.opacity;
         c.cursor_anim.enabled = cursor.animate;

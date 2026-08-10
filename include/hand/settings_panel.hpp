@@ -78,6 +78,7 @@ struct Settings {
     bool visual_bell = true;
     bool copy_on_select = false;
     bool confirm_close = false;
+    std::string word_separators{}; // extra word-joining chars for double-click
 
     // Window
     std::string title = "hand";

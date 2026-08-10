@@ -219,6 +219,7 @@ private:
         session.set_cursor_blink_ms(s.blink_cursor ? s.blink_ms : 0);
         session.set_behavior({s.scroll_mult, s.scroll_on_output, s.scroll_on_keystroke,
                               s.copy_on_select});
+        session.set_word_separators(s.word_separators);
         session.set_cursor_shape(s.cursor_style);
         session.set_ligatures(s.ligatures, px);
         session.set_padding(s.padding, px);

@@ -85,6 +85,7 @@ Settings Settings::from(const HandConfig &c) {
     s.visual_bell = c.behavior.visual_bell;
     s.copy_on_select = c.behavior.copy_on_select;
     s.confirm_close = c.behavior.confirm_close;
+    s.word_separators = c.behavior.word_separators;
     // Window
     s.title = c.window.title;
     s.padding = c.window.padding;
@@ -136,6 +137,7 @@ void Settings::into(HandConfig &c) const {
     c.behavior.visual_bell = visual_bell;
     c.behavior.copy_on_select = copy_on_select;
     c.behavior.confirm_close = confirm_close;
+    c.behavior.word_separators = word_separators;
     // Window
     c.window.title = title;
     c.window.padding = padding;

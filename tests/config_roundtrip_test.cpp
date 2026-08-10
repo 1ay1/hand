@@ -24,6 +24,7 @@ int main(){
   s.title = "myterm"; s.padding = 12; s.opacity = 0.85f; s.decorations = false;
   s.overlay_panel_opacity = 0.80f; s.overlay_scrim_opacity = 0.10f;
   s.shell = "/bin/zsh"; s.term_env = "xterm-kitty";
+  s.word_separators = ",'@";
   s.into(c);
   // A real temp path: "/tmp" is not meaningful to the native Windows file
   // APIs, so ask the OS where temp actually is.
@@ -43,6 +44,7 @@ int main(){
   ck(r.font_bold=="/f/B.ttf","font_bold"); ck(r.font_italic=="/f/I.ttf","font_italic");
   ck(r.font_bold_italic=="/f/BI.ttf","font_bold_italic");
   ck(r.title=="myterm","title"); ck(r.shell=="/bin/zsh","shell"); ck(r.term_env=="xterm-kitty","term");
+  ck(r.word_separators==",'@","word_separators");
   ck(r.overlay_panel_opacity>0.79f&&r.overlay_panel_opacity<0.81f,"overlay_panel_opacity");
   ck(r.overlay_scrim_opacity>0.09f&&r.overlay_scrim_opacity<0.11f,"overlay_scrim_opacity");
 
@@ -55,6 +57,7 @@ int main(){
   ck(tc.selection_bg.r==0x11 && tc.selection_bg.g==0x22 && tc.selection_bg.b==0x33,
      "selection colour -> toe::Config");
   ck(tc.cursor_blink_ms==700, "blink_ms -> toe::Config (blink on)");
+  ck(tc.word_separators==",'@", "word_separators -> toe::Config");
   ck(tc.font_file_bold=="/f/B.ttf", "font_bold -> toe::Config");
   ck(tc.font_file_italic=="/f/I.ttf", "font_italic -> toe::Config");
   ck(tc.font_file_bold_italic=="/f/BI.ttf", "font_bold_italic -> toe::Config");

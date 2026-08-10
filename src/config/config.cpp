@@ -201,6 +201,7 @@ HandConfig load_hand_config(std::string_view path) {
     B("behavior.visual_bell", cfg.behavior.visual_bell);
     B("behavior.copy_on_select", cfg.behavior.copy_on_select);
     B("behavior.confirm_close", cfg.behavior.confirm_close);
+    S("behavior.word_separators", cfg.behavior.word_separators);
 
     return cfg;
 }
@@ -274,6 +275,8 @@ bool save_hand_config(const HandConfig &cfg, std::string_view path) {
     vibe_object_set_bool(beh, "visual_bell", cfg.behavior.visual_bell);
     vibe_object_set_bool(beh, "copy_on_select", cfg.behavior.copy_on_select);
     vibe_object_set_bool(beh, "confirm_close", cfg.behavior.confirm_close);
+    if (!cfg.behavior.word_separators.empty())
+        vibe_object_set_string(beh, "word_separators", cfg.behavior.word_separators.c_str());
 
     // Ensure parent dir exists, then emit.
     std::string p(path);
