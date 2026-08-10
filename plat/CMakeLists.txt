@@ -52,3 +52,18 @@ add_test(NAME plat_pc_1
          COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}
                  --target plat_pc_1 --config $<CONFIG>)
 set_tests_properties(plat_pc_1 PROPERTIES WILL_FAIL TRUE)
+
+# The type-erasure seam: wrap a concrete mock, drive it through the erased API,
+# verify the linear Frame lifecycle survives + the Clipboard refinement is a
+# runtime query. Negative case: wrapping a non-Platform must not compile.
+add_executable(any_platform_test tests/any_platform_test.cpp)
+target_link_libraries(any_platform_test PRIVATE plat::plat)
+add_test(NAME plat_any_platform COMMAND any_platform_test)
+
+add_executable(plat_ap_1 EXCLUDE_FROM_ALL tests/any_platform_test.cpp)
+target_link_libraries(plat_ap_1 PRIVATE plat::plat)
+target_compile_definitions(plat_ap_1 PRIVATE PLAT_AP_CASE=1)
+add_test(NAME plat_ap_1
+         COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}
+                 --target plat_ap_1 --config $<CONFIG>)
+set_tests_properties(plat_ap_1 PROPERTIES WILL_FAIL TRUE)
