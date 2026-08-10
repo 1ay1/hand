@@ -6,6 +6,7 @@
 // the platform-neutral Event sum type.
 
 #include "hand/app.hpp"
+#include "hand/gui/run_tabbed.hpp"
 #include "hand/platform/posix_url.hpp"
 #include "hand/platform/surface.hpp"
 #include "hand/reactor.hpp"
@@ -1203,6 +1204,13 @@ toe::Result<WaylandApp> WaylandApp::open(const toe::WindowConfig &win) {
 // hand::run can fall back to X11/offscreen.
 int run_wayland(const toe::Config &cfg, const toe::WindowConfig &win) {
     return toe::run<WaylandApp>(cfg, win);
+}
+
+// Tabbed entry: the multi-terminal Elm/actor loop (Activity Tabs) on Wayland.
+int run_wayland_tabbed(const toe::Config &cfg, const toe::WindowConfig &win) {
+    auto app = WaylandApp::open(win);
+    if (!app) return -1;
+    return run_tabbed(*app, cfg);
 }
 
 } // namespace hand

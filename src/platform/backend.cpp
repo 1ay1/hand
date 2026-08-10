@@ -183,7 +183,8 @@ int run(const toe::Config &cfg_in, const toe::WindowConfig &win, Backend force,
         return run_cocoa(cfg, win);
 #else
     case Backend::wayland: {
-        const int rc = run_wayland(cfg, win);
+        const char *tabs = std::getenv("HAND_TABS");
+        const int rc = (tabs && *tabs) ? run_wayland_tabbed(cfg, win) : run_wayland(cfg, win);
         if (rc >= 0) return rc; // else fall back
         [[fallthrough]];
     }

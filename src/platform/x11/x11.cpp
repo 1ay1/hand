@@ -42,7 +42,8 @@ namespace hand::platform {
 
 class X11Surface final {
 public:
-    static Result<std::unique_ptr<X11Surface>> open(std::string_view title, PixelSize initial);
+    static Result<std::unique_ptr<X11Surface>> open(std::string_view title, PixelSize initial,
+                                                     bool decorations);
 
     ~X11Surface();
 
@@ -128,7 +129,7 @@ public:
 private:
     X11Surface() = default;
     hand::TerminalWait wait_{}; // window fd set in init() once xcb_ is connected
-    Result<void> init(std::string_view title, PixelSize initial);
+    Result<void> init(std::string_view title, PixelSize initial, bool decorations);
     Result<void> init_egl();
     Result<void> create_egl_surface();
     Result<void> init_xkb();
@@ -185,15 +186,16 @@ xcb_atom_t intern_atom(xcb_connection_t *c, const char *name) {
     return atom;
 }
 
-Result<std::unique_ptr<X11Surface>> X11Surface::open(std::string_view title, PixelSize initial) {
+Result<std::unique_ptr<X11Surface>> X11Surface::open(std::string_view title, PixelSize initial,
+                                                    bool decorations) {
     auto s = std::unique_ptr<X11Surface>(new X11Surface());
-    if (auto r = s->init(title, initial); !r) {
+    if (auto r = s->init(title, initial, decorations); !r) {
         return std::unexpected(r.error());
     }
     return s;
 }
 
-Result<void> X11Surface::init(std::string_view title, PixelSize initial) {
+Result<void> X11Surface::init(std::string_view title, PixelSize initial, bool decorations) {
     size_ = initial;
 
     display_ = XOpenDisplay(nullptr);
@@ -270,6 +272,22 @@ Result<void> X11Surface::init(std::string_view title, PixelSize initial) {
     a_utf8_ = XInternAtom(display_, "UTF8_STRING", False);
     a_targets_ = XInternAtom(display_, "TARGETS", False);
     a_prop_ = XInternAtom(display_, "TOE_CLIP", False);
+
+    // Client-side decorations: when the host draws its own chrome (Activity
+    // Tabs), strip the WM titlebar via the de-facto _MOTIF_WM_HINTS protocol
+    // (decorations flag = 0). Must be set before mapping the window.
+    if (!decorations) {
+        struct MotifHints {
+            unsigned long flags, functions, decorations;
+            long input_mode;
+            unsigned long status;
+        } hints{};
+        hints.flags = 2;       // MWM_HINTS_DECORATIONS
+        hints.decorations = 0; // none
+        const Atom motif = XInternAtom(display_, "_MOTIF_WM_HINTS", False);
+        XChangeProperty(display_, win, motif, motif, 32, PropModeReplace,
+                        reinterpret_cast<const unsigned char *>(&hints), 5);
+    }
 
     XMapWindow(display_, win);
     // Detectable auto-repeat: the server sends only KeyPress on repeat (no
@@ -735,7 +753,7 @@ namespace hand {
 // here where X11Surface is complete.
 template <>
 toe::Result<X11App> X11App::open(const toe::WindowConfig &win) {
-    auto s = platform::X11Surface::open(win.title, win.size);
+    auto s = platform::X11Surface::open(win.title, win.size, win.decorations);
     if (!s) return toe::fail(s.error().message);
     return X11App{s->release()};
 }
