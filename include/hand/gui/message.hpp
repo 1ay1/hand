@@ -25,6 +25,8 @@
 #include <variant>
 #include <vector>
 
+#include "toe/input.hpp" // toe::KeyEvent
+
 namespace hand {
 
 // A stable per-tab identity assigned by the GUI when it spawns a tab actor.
@@ -64,14 +66,16 @@ struct NextTab     {};
 struct PrevTab     {};
 struct FocusTabAt  { std::size_t index; };
 
-// Input destined for the focused terminal (opaque bytes / a key the GUI didn't
-// consume). The runtime forwards these to the focused tab actor.
-struct ForwardBytes { std::string bytes; };
+// Input destined for the focused terminal. Text is committed UTF-8; a key is a
+// full KeyEvent the focused tab's Session encodes (send_key does the VT/kitty
+// encoding, app-cursor mode, etc. — so the GUI stays encoding-agnostic).
+struct ForwardText { std::string utf8; };
+struct ForwardKey  { toe::KeyEvent key; };
 
 using GuiMsg =
     std::variant<TabOutput, TabTitleChanged, TabDirChanged, TabCommand, TabExited, WinResized,
                  WinFocus, WinCloseReq, Tick, NewTab, CloseTab, NextTab, PrevTab, FocusTabAt,
-                 ForwardBytes>;
+                 ForwardText, ForwardKey>;
 
 // ===========================================================================
 // GuiCmd — effects as DATA. The impure runtime interprets these. Closed sum.
@@ -79,12 +83,14 @@ using GuiMsg =
 
 struct SpawnTab   { std::string cwd; };      // start a new tab actor (in cwd)
 struct KillTab    { TabId id; };             // stop a tab actor + join its thread
-struct SendToTab  { TabId id; std::string bytes; }; // deliver input to a tab
+struct SendToTab  { TabId id; std::string bytes; }; // deliver text input to a tab
+struct SendKeyToTab { TabId id; toe::KeyEvent key; }; // deliver a key to a tab
 struct Present     {};                        // draw a frame (active tab + chrome)
 struct SetWindowTitle { std::string title; }; // reflect focused tab's title
 struct Quit        {};                        // last tab closed / window closed
 
-using GuiCmd = std::variant<SpawnTab, KillTab, SendToTab, Present, SetWindowTitle, Quit>;
+using GuiCmd = std::variant<SpawnTab, KillTab, SendToTab, SendKeyToTab, Present, SetWindowTitle,
+                            Quit>;
 
 using GuiCmds = std::vector<GuiCmd>;
 

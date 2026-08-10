@@ -49,11 +49,11 @@ int main() {
         ck(has<Present>(cmds), "PrevTab repaints");
     }
 
-    // ForwardBytes routes input to the FOCUSED tab as SendToTab.
+    // ForwardText routes input to the FOCUSED tab as SendToTab.
     {
-        auto cmds = gui_update(m, ForwardBytes{"ls\n"});
+        auto cmds = gui_update(m, ForwardText{"ls\n"});
         const auto *s = get<SendToTab>(cmds);
-        ck(s != nullptr, "ForwardBytes emits SendToTab");
+        ck(s != nullptr, "ForwardText emits SendToTab");
         ck(s && s->id == m.tabs().focus().id, "input routed to the focused tab");
         ck(s && s->bytes == "ls\n", "input bytes carried through");
     }

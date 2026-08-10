@@ -188,7 +188,10 @@ int run(const toe::Config &cfg_in, const toe::WindowConfig &win, Backend force,
         [[fallthrough]];
     }
     case Backend::x11: {
-        const int rc = run_x11(cfg, win);
+        // HAND_TABS=1 selects the multi-terminal Activity-Tabs loop (Elm/actor
+        // GUI); default is the tuned single-terminal loop.
+        const char *tabs = std::getenv("HAND_TABS");
+        const int rc = (tabs && *tabs) ? run_x11_tabbed(cfg, win) : run_x11(cfg, win);
         if (rc >= 0) return rc;
         [[fallthrough]];
     }

@@ -94,6 +94,9 @@ private:
                 } else if constexpr (std::is_same_v<T, SendToTab>) {
                     if (auto it = actors_.find(e.id); it != actors_.end())
                         it->second->send(TabInput{std::move(e.bytes)});
+                } else if constexpr (std::is_same_v<T, SendKeyToTab>) {
+                    if (auto it = actors_.find(e.id); it != actors_.end())
+                        it->second->send(TabKey{e.key});
                 } else if constexpr (std::is_same_v<T, KillTab>) {
                     if (auto it = actors_.find(e.id); it != actors_.end()) {
                         it->second->stop(); // joins the thread

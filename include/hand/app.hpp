@@ -123,6 +123,8 @@ enum class Backend { automatic, wayland, x11, cocoa, win32, offscreen };
 // exit code, or <0 if the window couldn't be opened (so run() can fall back).
 [[nodiscard]] int run_wayland(const toe::Config &cfg, const toe::WindowConfig &win);
 [[nodiscard]] int run_x11(const toe::Config &cfg, const toe::WindowConfig &win);
+// Multi-terminal (Activity Tabs) entry for X11 — the Elm/actor GUI loop.
+[[nodiscard]] int run_x11_tabbed(const toe::Config &cfg, const toe::WindowConfig &win);
 [[nodiscard]] int run_cocoa(const toe::Config &cfg, const toe::WindowConfig &win);
 [[nodiscard]] int run_win32(const toe::Config &cfg, const toe::WindowConfig &win);
 [[nodiscard]] int run_offscreen(const toe::Config &cfg, const toe::WindowConfig &win);

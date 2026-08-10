@@ -129,8 +129,10 @@ GuiCmds gui_update(GuiModel &m, GuiMsg msg) {
                 m.tabs().focus_index(e.index);
                 m.refresh(m.tabs().focus(), true);
                 cmds.push_back(Present{});
-            } else if constexpr (std::is_same_v<T, ForwardBytes>) {
-                cmds.push_back(SendToTab{m.tabs().focus().id, std::move(e.bytes)});
+            } else if constexpr (std::is_same_v<T, ForwardText>) {
+                cmds.push_back(SendToTab{m.tabs().focus().id, std::move(e.utf8)});
+            } else if constexpr (std::is_same_v<T, ForwardKey>) {
+                cmds.push_back(SendKeyToTab{m.tabs().focus().id, e.key});
             }
         },
         std::move(msg));

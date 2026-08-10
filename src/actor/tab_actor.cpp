@@ -27,6 +27,9 @@ void TabActor::run() {
                     if constexpr (std::is_same_v<T, TabInput>) {
                         std::lock_guard lk(render_lock_);
                         if (auto *s = term_.poll().running) s->send_text(cmd.bytes);
+                    } else if constexpr (std::is_same_v<T, TabKey>) {
+                        std::lock_guard lk(render_lock_);
+                        if (auto *s = term_.poll().running) s->send_key(cmd.key);
                     } else if constexpr (std::is_same_v<T, TabResize>) {
                         std::lock_guard lk(render_lock_);
                         if (auto *s = term_.poll().running)

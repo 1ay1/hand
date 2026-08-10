@@ -83,9 +83,47 @@ public:
         ws.for_each_tab([&](const Tab &tab, bool is_focus, std::size_t i) {
             if (x + 4 > avail) return; // out of room; drop overflow tabs
             const int tw = std::min(per, avail - x);
-            draw_tab(buf, y, x, tw, tab, is_focus, frame);
+            draw_tab(buf, y, x, tw, tab.model, is_focus, frame);
             hits_.push_back({{ChromeHit::Kind::ActivateTab, i}, x, x + tw - 1});
             // Close hit is the last cell of the tab (the × slot).
+            hits_.push_back({{ChromeHit::Kind::CloseTab, i}, x + tw - 2, x + tw - 1});
+            x += tw;
+        });
+    }
+
+    // Render the chrome from a GUI model whose tabs expose for_each_ordered
+    // yielding entries with a `.model` TabModel. Templated to avoid a header
+    // dependency on gui/model.hpp (keeps chrome_bar reusable).
+    template <class Model>
+    void render_model(glyph::Buffer &buf, const Model &m, std::uint32_t frame) {
+        hits_.clear();
+        const int w = buf.width();
+        if (w <= 0 || buf.height() <= 0) return;
+        const int y = 0;
+        const glyph::Style base{.fg = rgb(150, 150, 165), .bg = rgb(24, 24, 32)};
+        buf.fill({0, y, w, 1}, base);
+
+        const int ctrl_w = 9;
+        const int ctrl_x = w - ctrl_w;
+        draw_window_controls(buf, y, ctrl_x);
+
+        const int plus_x = ctrl_x - 3;
+        if (plus_x > 2) {
+            buf.put(plus_x + 1, y, U'+', base);
+            hits_.push_back({{ChromeHit::Kind::NewTab, 0}, plus_x, plus_x + 3});
+        }
+
+        const int avail = (plus_x > 0 ? plus_x : w) - 1;
+        const std::size_t n = m.tabs().size();
+        if (n == 0) return;
+        const int per = std::max(8, std::min(28, avail / static_cast<int>(n)));
+
+        int x = 0;
+        m.tabs().for_each_ordered([&](const auto &entry, bool is_focus, std::size_t i) {
+            if (x + 4 > avail) return;
+            const int tw = std::min(per, avail - x);
+            draw_tab(buf, y, x, tw, entry.model, is_focus, frame);
+            hits_.push_back({{ChromeHit::Kind::ActivateTab, i}, x, x + tw - 1});
             hits_.push_back({{ChromeHit::Kind::CloseTab, i}, x + tw - 2, x + tw - 1});
             x += tw;
         });
@@ -124,10 +162,10 @@ private:
         hits_.push_back({{ChromeHit::Kind::WinClose, 0}, x, x + 2});
     }
 
-    void draw_tab(glyph::Buffer &buf, int y, int x, int tw, const Tab &tab, bool is_focus,
+    void draw_tab(glyph::Buffer &buf, int y, int x, int tw, const TabModel &tm, bool is_focus,
                   std::uint32_t frame) {
         // Colours: focused tab reads brighter; a done-attention tab pulses.
-        const TabAttention att = tab.model.attention();
+        const TabAttention att = tm.attention();
         const bool pulse_on = (frame / 8) % 2 == 0; // ~slow blink
         Rgb bg = is_focus ? rgb(44, 44, 58) : rgb(24, 24, 32);
         Rgb fg = is_focus ? rgb(235, 235, 240) : rgb(150, 150, 165);
@@ -139,21 +177,21 @@ private:
         int cx = x + 1;
         // Status glyph (spinner / ✓ / ✗ / ●), coloured by status.
         Rgb gcol = fg;
-        switch (tab.model.status()) {
+        switch (tm.status()) {
         case TabStatus::Ok: gcol = rgb(120, 210, 130); break;
         case TabStatus::Failed: gcol = rgb(230, 120, 120); break;
         case TabStatus::Running: gcol = rgb(220, 200, 120); break;
         default: break;
         }
-        buf.put(cx, y, tab.model.glyph(frame), glyph::Style{.fg = gcol, .bg = bg});
+        buf.put(cx, y, tm.glyph(frame), glyph::Style{.fg = gcol, .bg = bg});
         cx += 2;
 
         // Label, clipped to leave room for the unseen dot + close ×.
         const int label_w = tw - (cx - x) - 3;
-        if (label_w > 0) cx += buf.text(cx, y, tab.model.label(), st, label_w);
+        if (label_w > 0) cx += buf.text(cx, y, tm.label(), st, label_w);
 
         // Unseen-output dot just before the close ×.
-        if (tab.model.unseen() && !is_focus) {
+        if (tm.unseen() && !is_focus) {
             buf.put(x + tw - 3, y, U'\u2022', glyph::Style{.fg = rgb(120, 170, 230), .bg = bg});
         }
         // Close × in the last cell (only shown on the focused tab or on hover;

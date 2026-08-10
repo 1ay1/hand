@@ -7,6 +7,7 @@
 // the exact same interface.
 
 #include "hand/app.hpp"
+#include "hand/gui/run_tabbed.hpp"
 #include "hand/platform/posix_url.hpp"
 #include "hand/platform/surface.hpp"
 #include "hand/reactor.hpp"
@@ -718,6 +719,15 @@ toe::Result<X11App> X11App::open(const toe::WindowConfig &win) {
 // type leaks. Returns <0 if the window couldn't open, so hand::run can fall back.
 int run_x11(const toe::Config &cfg, const toe::WindowConfig &win) {
     return toe::run<X11App>(cfg, win);
+}
+
+// Tabbed entry: the multi-terminal Elm/actor loop (Activity Tabs). Opens the
+// same X11App, then drives GuiRuntime + TabbedView instead of the single-
+// terminal toe::run. Selected by hand::run when tabbed mode is on.
+int run_x11_tabbed(const toe::Config &cfg, const toe::WindowConfig &win) {
+    auto app = X11App::open(win);
+    if (!app) return -1;
+    return run_tabbed(*app, cfg);
 }
 
 } // namespace hand
