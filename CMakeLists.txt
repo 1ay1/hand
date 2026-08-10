@@ -360,6 +360,14 @@ if(HAND_BUILD_TESTS)
   target_include_directories(zipper_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
   add_test(NAME zipper COMMAND zipper_test)
 
+  # Cross-thread Mailbox: many senders / one receiver, exactly-once delivery of
+  # move-only messages. The sole thread-boundary surface for the actor model.
+  add_executable(mailbox_test tests/mailbox_test.cpp)
+  target_include_directories(mailbox_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+  find_package(Threads REQUIRED)
+  target_link_libraries(mailbox_test PRIVATE Threads::Threads)
+  add_test(NAME mailbox COMMAND mailbox_test)
+
   # Config watcher: pure filesystem-watch logic (inotify on Linux, kqueue on
   # macOS/BSD), no GL / no deps. Guards live config hot-reload on every OS.
   add_executable(config_watch_test tests/config_watch_test.cpp)
