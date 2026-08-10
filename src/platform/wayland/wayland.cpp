@@ -33,7 +33,6 @@
 // needs EGL to create the context + window surface, so we use the real EGL
 // headers directly — no epoxy shim anywhere in the stack.
 #include <EGL/egl.h>
-#include <EGL/eglext.h>
 
 #include "hand/platform/sokol_gl.hpp"
 #include "hand/platform/settings_host.hpp"
@@ -246,13 +245,6 @@ private:
     EGLContext egl_context_ = EGL_NO_CONTEXT;
     EGLSurface egl_surface_ = EGL_NO_SURFACE;
     EGLConfig egl_config_ = nullptr;
-    // Partial-damage correctness: EGL_EXT_buffer_age lets us learn how many
-    // presents old the buffer we just got back is, so swap_damaged() can damage
-    // the union of that many recent frames instead of guessing. Without it we
-    // fall back to full-surface damage (correct, slightly less efficient).
-    static constexpr int kMaxBufferAge = 4;
-    bool have_buffer_age_ = false;
-    DamageRect damage_hist_[kMaxBufferAge]{}; // [0]=last frame, [1]=frame before...
 
     // sokol_gfx is set up once, lazily, on the first begin_frame (guarantees a
     // current GL context). Torn down in the destructor.
@@ -794,14 +786,6 @@ Result<void> WaylandSurface::init_egl() {
     // ready and rely on the loop's own timing, like foot/kitty do.
     eglSwapInterval(egl_display_, 0);
 
-    // Detect EGL_EXT_buffer_age so swap_damaged() can do CORRECT partial damage
-    // (union of the last N frames). Without it we fall back to full-surface
-    // damage — always correct, just a touch less efficient for the compositor.
-    if (const char *exts = eglQueryString(egl_display_, EGL_EXTENSIONS)) {
-        have_buffer_age_ = std::string_view{exts}.find("EGL_EXT_buffer_age") !=
-                           std::string_view::npos;
-    }
-
     // Set sokol up NOW, while the context is current — toe::run builds the
     // Renderer (sg_make_pipeline) before the first begin_frame, so lazy setup
     // would make pipeline creation fail. One context, set up once here.
@@ -856,35 +840,14 @@ void WaylandSurface::end_frame() { sokolgl::end_frame(); }
 void WaylandSurface::swap() { swap_damaged(DamageRect::full(size_)); }
 
 void WaylandSurface::swap_damaged(DamageRect d) {
-    // Partial damage is a compositor hint: "only rect d of my buffer changed;
-    // reuse the rest." That is ONLY correct if the buffer we're swapping to
-    // already matches our previous frame outside d. With EGL double/triple
-    // buffering the buffer we get back is N frames old (N = buffer age), so we
-    // must damage the UNION of the last N frames' damage — otherwise rows that
-    // changed a frame or two ago but not this frame show stale (the "missing
-    // rows" bug). Query EGL_EXT_buffer_age; if unavailable, damage everything.
-    EGLint age = 0;
-    if (!have_buffer_age_ ||
-        !eglQuerySurface(egl_display_, egl_surface_, EGL_BUFFER_AGE_EXT, &age)) {
-        age = 0; // unknown -> treat as "everything is stale"
+    // Tell the compositor which buffer region changed so it recomposites only
+    // that rectangle (VTE-style partial damage) instead of the whole surface.
+    // eglSwapBuffers issues its own wl_surface.damage for the full area unless
+    // we mark buffer damage first via the EGL_KHR_swap_buffers_with_damage path;
+    // libwayland-egl forwards our wl_surface_damage_buffer with the swap.
+    if (surface_ && !d.empty()) {
+        wl_surface_damage_buffer(surface_, d.x, d.y, d.w, d.h);
     }
-    if (surface_) {
-        if (d.empty() || age <= 0 || age > kMaxBufferAge) {
-            // No usable age (or huge): the whole buffer may be stale -> full.
-            wl_surface_damage_buffer(surface_, 0, 0, size_.w, size_.h);
-        } else {
-            // Damage this frame's rect plus the previous (age-1) frames' rects,
-            // since the buffer we present last held the frame `age` presents ago.
-            DamageRect u = d;
-            for (int i = 0; i < age - 1 && i < kMaxBufferAge; ++i)
-                u.merge(damage_hist_[static_cast<std::size_t>(i)]);
-            wl_surface_damage_buffer(surface_, u.x, u.y, u.w, u.h);
-        }
-    }
-    // Shift the damage history (most-recent first) and record this frame.
-    for (int i = kMaxBufferAge - 1; i > 0; --i)
-        damage_hist_[static_cast<std::size_t>(i)] = damage_hist_[static_cast<std::size_t>(i - 1)];
-    damage_hist_[0] = d;
     eglSwapBuffers(egl_display_, egl_surface_);
 }
 
