@@ -37,3 +37,18 @@ foreach(case RANGE 1 5)
                    --target ${tgt} --config $<CONFIG>)
   set_tests_properties(${tgt} PROPERTIES WILL_FAIL TRUE)
 endforeach()
+
+# Platform capability concepts: a complete mock models Platform/Clipboard/Sys
+# (static_asserts); the negative case (a backend missing window_action) must
+# NOT compile.
+add_executable(platform_concept_test tests/platform_concept_test.cpp)
+target_link_libraries(platform_concept_test PRIVATE plat::plat)
+add_test(NAME plat_platform_concept COMMAND platform_concept_test)
+
+add_executable(plat_pc_1 EXCLUDE_FROM_ALL tests/platform_concept_test.cpp)
+target_link_libraries(plat_pc_1 PRIVATE plat::plat)
+target_compile_definitions(plat_pc_1 PRIVATE PLAT_PC_CASE=1)
+add_test(NAME plat_pc_1
+         COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}
+                 --target plat_pc_1 --config $<CONFIG>)
+set_tests_properties(plat_pc_1 PROPERTIES WILL_FAIL TRUE)
