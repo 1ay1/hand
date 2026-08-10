@@ -154,6 +154,9 @@ public:
     void emit_key(uint32_t key, KeyEvent::Kind kind = KeyEvent::Kind::press);
     void arm_repeat(uint32_t key);
     void disarm_repeat();
+    // Live keyboard modifiers from the xkb state — shared by key and POINTER
+    // events so Shift+click/drag forces a local selection inside mouse apps.
+    [[nodiscard]] Modifiers cur_mods() const;
 
     // data-device (clipboard) callbacks.
     static void dd_data_offer(void *data, wl_data_device *, wl_data_offer *offer);
@@ -588,6 +591,18 @@ void WaylandSurface::emit_key(uint32_t key, KeyEvent::Kind kind) {
     }
 }
 
+Modifiers WaylandSurface::cur_mods() const {
+    Modifiers m{};
+    if (!xkb_state_) return m;
+    m.ctrl = xkb_state_mod_name_is_active(xkb_state_, XKB_MOD_NAME_CTRL,
+                                          XKB_STATE_MODS_EFFECTIVE) > 0;
+    m.alt = xkb_state_mod_name_is_active(xkb_state_, XKB_MOD_NAME_ALT,
+                                         XKB_STATE_MODS_EFFECTIVE) > 0;
+    m.shift = xkb_state_mod_name_is_active(xkb_state_, XKB_MOD_NAME_SHIFT,
+                                           XKB_STATE_MODS_EFFECTIVE) > 0;
+    return m;
+}
+
 void WaylandSurface::arm_repeat(uint32_t key) {
     if (repeat_rate_ <= 0 || repeat_fd_ < 0) return;
     repeat_key_ = key;
@@ -995,7 +1010,8 @@ void WaylandSurface::ptr_motion(void *data, wl_pointer *, uint32_t, wl_fixed_t s
     self->ptr_x_ = wl_fixed_to_int(sx);
     self->ptr_y_ = wl_fixed_to_int(sy);
     if (self->sink_) {
-        (*self->sink_)(Event{MouseMove{self->ptr_x_, self->ptr_y_, self->ptr_down_}});
+        (*self->sink_)(
+            Event{MouseMove{self->ptr_x_, self->ptr_y_, self->ptr_down_, self->cur_mods()}});
     }
 }
 
@@ -1022,11 +1038,11 @@ void WaylandSurface::ptr_button(void *data, wl_pointer *, uint32_t serial, uint3
         self->last_click_x_ = self->ptr_x_;
         self->last_click_y_ = self->ptr_y_;
         self->ptr_down_ = true;
-        (*self->sink_)(
-            Event{MouseDown{btn, self->ptr_x_, self->ptr_y_, self->click_count_, Modifiers{}}});
+        (*self->sink_)(Event{
+            MouseDown{btn, self->ptr_x_, self->ptr_y_, self->click_count_, self->cur_mods()}});
     } else {
         self->ptr_down_ = false;
-        (*self->sink_)(Event{MouseUp{btn, self->ptr_x_, self->ptr_y_, Modifiers{}}});
+        (*self->sink_)(Event{MouseUp{btn, self->ptr_x_, self->ptr_y_, self->cur_mods()}});
     }
 }
 

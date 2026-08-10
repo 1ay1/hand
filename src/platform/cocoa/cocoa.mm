@@ -858,7 +858,7 @@ void CocoaSurface::poll_events(const toe::EventSink &sink) {
                         sink(toe::win::MouseUp{p.button, p.x, p.y, p.mods});
                         break;
                     case K::move:
-                        sink(toe::win::MouseMove{p.x, p.y, p.button_down});
+                        sink(toe::win::MouseMove{p.x, p.y, p.button_down, p.mods});
                         break;
                     case K::wheel: {
                         // dx/dy are already discrete line steps (banked in the

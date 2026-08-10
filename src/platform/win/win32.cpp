@@ -545,7 +545,8 @@ LRESULT Win32Surface::handle(UINT msg, WPARAM wp, LPARAM lp) {
     }
     case WM_MOUSEMOVE: {
         const bool held = (wp & (MK_LBUTTON | MK_MBUTTON | MK_RBUTTON)) != 0;
-        pending_.push_back(toe::win::MouseMove{GET_X_LPARAM(lp), GET_Y_LPARAM(lp), held});
+        pending_.push_back(
+            toe::win::MouseMove{GET_X_LPARAM(lp), GET_Y_LPARAM(lp), held, mods_now()});
         return 0;
     }
 

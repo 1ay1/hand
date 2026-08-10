@@ -582,7 +582,11 @@ void X11Surface::poll_events(const std::function<void(const Event &)> &sink) {
         }
         case XCB_MOTION_NOTIFY: {
             auto *m = reinterpret_cast<xcb_motion_notify_event_t *>(ev);
-            sink(Event{MouseMove{m->event_x, m->event_y, button_down_}});
+            Modifiers mods;
+            mods.ctrl = (m->state & XCB_MOD_MASK_CONTROL) != 0;
+            mods.shift = (m->state & XCB_MOD_MASK_SHIFT) != 0;
+            mods.alt = (m->state & XCB_MOD_MASK_1) != 0;
+            sink(Event{MouseMove{m->event_x, m->event_y, button_down_, mods}});
             break;
         }
         case XCB_SELECTION_REQUEST: {
