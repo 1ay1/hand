@@ -259,8 +259,12 @@ bool Win32Surface::create_swapchain() {
     sd.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
     sd.SampleDesc.Count = 1;
     sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    // Two buffers + FLIP_DISCARD: the DWM gets the surface directly, no blit.
-    sd.BufferCount = 2;
+    // THREE buffers with FLIP_DISCARD, not two. With only two, Present must
+    // wait for the display to release the front buffer before the CPU can start
+    // the next frame, so a keystroke arriving just after a present waits a full
+    // frame. A third buffer decouples them: the CPU always has a free surface to
+    // render into, which is what keeps input->photon latency low under load.
+    sd.BufferCount = 3;
     sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
     sd.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
     sd.Flags = tearing_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0u;
@@ -269,6 +273,20 @@ bool Win32Surface::create_swapchain() {
         factory->CreateSwapChainForHwnd(device_, hwnd_, &sd, nullptr, nullptr, &swap_);
     // We handle Alt+Enter ourselves; DXGI's default handler fights the terminal.
     factory->MakeWindowAssociation(hwnd_, DXGI_MWA_NO_ALT_ENTER);
+
+    // DXGI lets the driver queue up to 3 frames ahead by default. For a game
+    // that hides jitter; for a terminal it is pure added latency — a keystroke's
+    // echo can sit behind two already-queued frames. Ask for 1 so what we
+    // present is what the next vblank shows.
+    if (swap_) {
+        IDXGIDevice1 *dev1 = nullptr;
+        if (SUCCEEDED(device_->QueryInterface(__uuidof(IDXGIDevice1),
+                                              reinterpret_cast<void **>(&dev1))) &&
+            dev1) {
+            dev1->SetMaximumFrameLatency(1);
+            dev1->Release();
+        }
+    }
 
     factory->Release();
     adapter->Release();
