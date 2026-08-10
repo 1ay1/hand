@@ -12,6 +12,7 @@
 #include <array>
 #include <cstdio>
 #include <filesystem>
+#include <optional>
 #include <variant>
 
 namespace hand {
@@ -22,18 +23,14 @@ std::string hex(toe::Rgb c) {
     std::snprintf(b, sizeof b, "#%02x%02x%02x", c.r, c.g, c.b);
     return b;
 }
-toe::Rgb unhex(const std::string &h) {
-    if (h.size() != 7 || h[0] != '#') return toe::rgb(200, 200, 200);
-    auto d = [](char c) -> int {
-        if (c >= '0' && c <= '9') return c - '0';
-        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-        return 0;
-    };
-    auto v = [&](int i) { return std::uint8_t(d(h[i]) * 16 + d(h[i + 1])); };
-    return toe::rgb(v(1), v(3), v(5));
+// Parse "#rrggbb" into an Rgb, or std::nullopt if malformed. Delegates to the
+// canonical, fully-validating HexColor::parse so an invalid digit can never be
+// silently swallowed as 0 (the old hand-rolled decoder did exactly that, then
+// wrote the corrupted colour back to disk on the next save).
+std::optional<toe::Rgb> try_unhex(const std::string &h) {
+    if (auto c = HexColor::parse(h)) return c->rgb();
+    return std::nullopt;
 }
-
 // Decode the FIRST UTF-8 scalar of a byte string (settings text is one
 // codepoint per key event).
 char32_t decode_first_utf8(std::string_view s) {
@@ -119,13 +116,16 @@ void Settings::into(HandConfig &c) const {
     c.cursor.animate = animate_cursor;
     c.cursor.animate_ms = animate_ms;
     c.cursor.animate_trail = animate_trail;
-    // Colors
-    c.colors.foreground = unhex(fg);
-    c.colors.background = unhex(bg);
-    c.colors.cursor = unhex(cursor_color);
-    c.colors.selection_bg = unhex(selection);
+    // Colors — preserve the existing config colour when a field holds an
+    // invalid/empty hex string, rather than stamping in a placeholder that
+    // would then be persisted on the next save.
+    if (auto v = try_unhex(fg)) c.colors.foreground = *v;
+    if (auto v = try_unhex(bg)) c.colors.background = *v;
+    if (auto v = try_unhex(cursor_color)) c.colors.cursor = *v;
+    if (auto v = try_unhex(selection)) c.colors.selection_bg = *v;
     c.colors.palette.clear();
-    for (const auto &h : palette) c.colors.palette.push_back(unhex(h));
+    for (const auto &h : palette)
+        if (auto v = try_unhex(h)) c.colors.palette.push_back(*v);
     // Scroll
     c.scroll.scrollback_lines = scrollback;
     c.scroll.wheel_lines = scroll_mult;

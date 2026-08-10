@@ -207,10 +207,13 @@ public:
             const ssize_t n = ::read(fd_, buf, sizeof buf);
             if (n <= 0) break; // EAGAIN or error: nothing (more) to read
             ssize_t off = 0;
-            while (off < n) {
+            while (off + static_cast<ssize_t>(sizeof(inotify_event)) <= n) {
                 auto *ev = reinterpret_cast<inotify_event *>(buf + off);
+                const ssize_t rec =
+                    static_cast<ssize_t>(sizeof(inotify_event)) + static_cast<ssize_t>(ev->len);
+                if (off + rec > n) break; // truncated trailing record: don't over-read name
                 if (ev->len > 0 && base_ == ev->name) hit = true;
-                off += static_cast<ssize_t>(sizeof(inotify_event) + ev->len);
+                off += rec;
             }
         }
 #else // kqueue: drain all queued vnode events non-blocking.
