@@ -65,6 +65,10 @@ endif()
 add_library(vibe STATIC vendor/vibe_impl.c)
 target_include_directories(vibe PUBLIC "${vibe_SOURCE_DIR}")
 
+# plat — hand's type-theoretic platform abstraction (graphics/input/window/OS)
+# behind capability concepts. Header-only contract for now; backends land later.
+# Added after enable_testing() below so its tests register.
+
 # ===========================================================================
 # hand::platform — the native window/input/GL-context backends.
 #
@@ -278,6 +282,11 @@ endif()
 option(HAND_BUILD_TESTS "Build hand's tests" ON)
 if(HAND_BUILD_TESTS)
   enable_testing()
+
+  # plat: the platform abstraction (header-only contract + its type-theory
+  # tests, incl. compile-fail cases). Added here so its add_test() registers
+  # under the same enable_testing() scope.
+  add_subdirectory(plat)
 
   # --- GL renderer tests (Linux only) --------------------------------------
   # These need the EGL offscreen backend for a headless GL context, which
