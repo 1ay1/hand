@@ -12,6 +12,26 @@ target_include_directories(plat INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_compile_features(plat INTERFACE cxx_std_23)
 
 # ---------------------------------------------------------------------------
+# plat-gfx — the concrete sokol_gfx-backed Gpu (SokolGpu). Linux/GLCORE for now
+# (the sokol IMPL itself is compiled inside toe; this TU only uses the header).
+# ---------------------------------------------------------------------------
+if(NOT APPLE AND NOT WIN32)
+  add_library(plat-gfx STATIC src/sokol_gpu.cpp)
+  add_library(plat::gfx ALIAS plat-gfx)
+  target_link_libraries(plat-gfx PUBLIC plat::plat toe::toe)
+  target_include_directories(plat-gfx PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "$<TARGET_PROPERTY:toe::toe,INTERFACE_INCLUDE_DIRECTORIES>")
+  # SokolGpu's TU includes sokol_gfx.h (declarations); match toe's backend
+  # define + point at the vendored header. The IMPL lives in toe.
+  find_package(OpenGL REQUIRED)
+  target_compile_definitions(plat-gfx PRIVATE SOKOL_GLCORE)
+  target_include_directories(plat-gfx PRIVATE
+    "${TOE_DIR}/include/sokol")
+  target_link_libraries(plat-gfx PUBLIC OpenGL::GL)
+endif()
+
+# ---------------------------------------------------------------------------
 # Tests. This subdirectory is only add_subdirectory()'d by hand inside its
 # HAND_BUILD_TESTS/enable_testing() block, so tests register unconditionally.
 # ---------------------------------------------------------------------------
@@ -67,3 +87,17 @@ add_test(NAME plat_ap_1
          COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}
                  --target plat_ap_1 --config $<CONFIG>)
 set_tests_properties(plat_ap_1 PROPERTIES WILL_FAIL TRUE)
+
+# Real-hardware proof: SokolGpu renders a quad into an offscreen FBO through the
+# linear Frame API; pixels are read back and asserted. Linux/GL only (needs the
+# offscreen EGL context from hand::platform + the sokol IMPL from toe).
+if(NOT APPLE AND NOT WIN32)
+  add_executable(sokol_gpu_render_test tests/sokol_gpu_render_test.cpp)
+  target_include_directories(sokol_gpu_render_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_SOURCE_DIR}/include"
+    "${TOE_DIR}/include/sokol")
+  target_compile_definitions(sokol_gpu_render_test PRIVATE SOKOL_GLCORE)
+  target_link_libraries(sokol_gpu_render_test PRIVATE plat::gfx hand::platform OpenGL::GL)
+  add_test(NAME plat_sokol_gpu_render COMMAND sokol_gpu_render_test)
+endif()
