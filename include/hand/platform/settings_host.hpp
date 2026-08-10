@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 #include <cstdlib>
+#include <functional>
 
 #include "hand/glyph/buffer.hpp"
 #include "hand/platform/fonts.hpp"
@@ -38,6 +39,12 @@ namespace hand::platform {
 
 class SettingsHost {
 public:
+    // Install the HOST's point-size -> device-pixel converter. A backend whose
+    // launch-time DPI conversion differs from the default (macOS uses the
+    // NSScreen backing scale factor, not GDK_SCALE) sets this BEFORE bind() so
+    // live edits and the launch size agree. Optional; Linux uses the default.
+    void set_font_scaler(std::function<int(int)> fn) { font_scaler_ = std::move(fn); }
+
     // Seed the panel from the process-wide config source (main() installs it via
     // set_settings_source before the window opens). Also arms the inotify watch
     // on the config file so external edits hot-reload.
@@ -195,9 +202,14 @@ private:
         session.set_opacity(s.opacity);
     }
 
-    // Logical point size -> pixels @96dpi, times the HiDPI scale (GDK_SCALE).
-    // Mirrors backend.cpp so the settings slider matches the launch size.
-    static int scale_font_px(int pts) {
+    // Logical point size -> device pixels. The exact conversion is HOST policy
+    // and differs by platform, so a backend can install its own via
+    // set_font_scaler(); this MUST mirror the launch-time conversion in that
+    // backend so the settings slider lands on the same size the window opened
+    // with. Default (Linux/X11/Wayland): points -> px @96dpi (pt * 96/72) times
+    // GDK_SCALE. macOS installs one using the NSScreen backing scale factor.
+    int scale_font_px(int pts) const {
+        if (font_scaler_) return font_scaler_(pts);
         double dpi_scale = 1.0;
         if (const char *g = std::getenv("GDK_SCALE"); g && *g) {
             double v = std::atof(g);
@@ -220,8 +232,10 @@ private:
 
     hand::SettingsPanel panel_{};
     hand::HelpPanel help_{};
-    hand::ConfigWatch watch_{}; // inotify watch on the config file
+    hand::ConfigWatch watch_{}; // config-file watcher (inotify on Linux, kqueue on macOS/BSD)
     glyph::Buffer buf_{};
+    // Host-installed point-size -> device-pixel converter (see scale_font_px).
+    std::function<int(int)> font_scaler_{};
 };
 
 } // namespace hand::platform

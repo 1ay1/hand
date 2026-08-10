@@ -22,7 +22,7 @@
 #include "hand/app.hpp"
 #include "hand/platform/surface.hpp"
 #include "hand/platform/fonts.hpp"
-#include "hand/settings_panel.hpp"
+#include "hand/platform/settings_host.hpp"
 #include "hand/glyph/glyph.hpp"
 
 #include "toe/run.hpp" // toe::run<App>
@@ -515,9 +515,11 @@ public:
     [[nodiscard]] toe::Readiness wait_readable(int pty_fd, toe::WaitDeadline d);
 
     // --- OverlayApp: the in-terminal settings panel -------------------------
+    // SettingsHost owns the panel + live-apply + save + config hot-reload; the
+    // backend just forwards these three hooks (shared with Wayland/X11).
     [[nodiscard]] bool overlay_active() const { return settings_.active(); }
     bool overlay_event(const toe::win::Event &ev) { return settings_.handle(ev); }
-    void overlay_render(toe::Terminal &term, toe::PixelSize px);
+    void overlay_render(toe::Terminal &term, toe::PixelSize px) { settings_.render(term, px); }
     void toggle_settings();  // ⌘, opens/closes the panel
 
     // Install the live-resize render hook: the view calls this synchronously
@@ -541,8 +543,9 @@ private:
     CocoaInbox inbox_{};
     PixelSize size_{};
     std::uint64_t last_pump_ = 0; // mach ticks of the last event-queue scan
-    hand::SettingsPanel settings_{};
-    glyph::Buffer overlay_buf_{};
+    hand::platform::SettingsHost settings_{};
+    toe::Terminal *bound_term_ = nullptr;  // set in bind_terminal; for hot-reload
+    bool pending_config_reload_ = false;   // kqueue watcher fired; reload next poll
     std::function<void(int, int)> live_render_{}; // live-resize frame hook
     // Metal / sokol swapchain state.
     id<MTLDevice> device_ = nil;
@@ -621,8 +624,21 @@ Result<std::unique_ptr<CocoaSurface>> CocoaSurface::open(std::string_view title,
 
         auto s = std::unique_ptr<CocoaSurface>(new CocoaSurface());
         s->inbox_.default_font_px = g_default_font_px;
-        // Seed the settings panel from the loaded config + its path.
-        s->settings_.bind(hand::settings_source_config(), hand::settings_source_path());
+        // Install the macOS point-size -> device-pixel converter so the settings
+        // slider matches the launch size: toe renders in BACKING PIXELS, so we
+        // scale points by the display's backingScaleFactor (2x on Retina), the
+        // SAME conversion run_cocoa() applies at launch. This overrides the
+        // SettingsHost default (Linux's 96/72 * GDK_SCALE), which would be wrong
+        // on macOS. Reads the CURRENT screen each call so moving the window to a
+        // display with a different scale keeps live edits correct.
+        CocoaSurface *sp = s.get();
+        s->settings_.set_font_scaler([sp](int pts) {
+            CGFloat scale = 1.0;
+            if (NSScreen *scr = (sp->window_.screen ?: [NSScreen mainScreen]))
+                scale = scr.backingScaleFactor;
+            if (scale < 1.0) scale = 1.0;
+            return (int)((CGFloat)pts * scale); // round down, as run_cocoa does
+        });
 
         // Content size is in POINTS; the GL drawable is in backing pixels.
         const NSRect content = NSMakeRect(0, 0, std::max(1, (int)initial.w),
@@ -800,9 +816,17 @@ void CocoaSurface::poll_events(const toe::EventSink &sink) {
         inbox_.settings_toggle = false;
         toggle_settings();
     }
-    if (inbox_.settings_save) {
-        inbox_.settings_save = false;
-        if (settings_.active()) settings_.request_save();
+    // ⌘S no longer needs an explicit save request: SettingsHost persists edits
+    // automatically (debounced, and flushed on close). The flag is still
+    // consumed so a stray ⌘S is a harmless no-op rather than reaching the child.
+    inbox_.settings_save = false;
+
+    // External config edits (editor save) hot-reload via the kqueue watcher fd,
+    // folded into wait_readable's poll below. Here we just service any change
+    // the wait surfaced.
+    if (pending_config_reload_) {
+        pending_config_reload_ = false;
+        if (bound_term_) settings_.on_config_fd_ready(*bound_term_, size_);
     }
 
     if (inbox_.close_requested) {
@@ -872,13 +896,27 @@ toe::Readiness CocoaSurface::wait_readable(int pty_fd, toe::WaitDeadline d) {
         timeout_ms = (int)std::min<long>(ms, kCapMs);
     }
 
-    struct pollfd pfd {
-        pty_fd, POLLIN, 0
-    };
-    const int n = ::poll(&pfd, (pty_fd >= 0 ? 1 : 0), timeout_ms);
+    struct pollfd pfd[2];
+    nfds_t nfds = 0;
+    const int pty_slot = (pty_fd >= 0) ? (int)nfds : -1;
+    if (pty_fd >= 0) pfd[nfds++] = {pty_fd, POLLIN, 0};
+    const int cfg_fd = settings_.config_fd();
+    const int cfg_slot = (cfg_fd >= 0) ? (int)nfds : -1;
+    if (cfg_fd >= 0) pfd[nfds++] = {cfg_fd, POLLIN, 0};
+    const int n = ::poll(pfd, nfds, timeout_ms);
 
     toe::Readiness r{};
-    if (n > 0 && (pfd.revents & (POLLIN | POLLHUP | POLLERR))) r.pty = true;
+    if (n > 0) {
+        if (pty_slot >= 0 && (pfd[pty_slot].revents & (POLLIN | POLLHUP | POLLERR))) r.pty = true;
+        // The config watcher fd is readable: an editor may have saved the VIBE
+        // file. Flag a reload for poll_events (which calls on_config_fd_ready —
+        // that drains the watcher, suppresses our own writes, and hot-reloads)
+        // and wake the loop so it's serviced this frame. Same flow as Wayland/X11.
+        if (cfg_slot >= 0 && (pfd[cfg_slot].revents & POLLIN)) {
+            pending_config_reload_ = true;
+            r.window = true;
+        }
+    }
 
     // Re-drain Cocoa: an event may have arrived during the poll window. FORCE it
     // — we just blocked, so a keystroke that woke us must be seen immediately.
@@ -943,29 +981,15 @@ void CocoaSurface::toggle_settings() {
 }
 
 void CocoaSurface::bind_terminal(toe::Terminal &term, toe::PixelSize) {
-    // Push the loaded theme's ANSI palette + cursor colour to the live session
-    // (the panel was already bound from the config at window open; to_toe()
-    // only carries fg/bg into create). Parity with wayland/x11.
+    bound_term_ = &term;
+    // Seed the panel from the process-wide config source + arm the config-file
+    // watcher (kqueue on macOS), then push the theme's ANSI palette + cursor /
+    // selection colours and other startup state into the live session. Same
+    // flow as Wayland/X11 — all the logic now lives in SettingsHost.
+    settings_.bind();
     if (auto *s = term.poll().running) {
-        const hand::Settings &st = settings_.state();
-        auto hex = [](const std::string &h) {
-            auto v = [&](int i) {
-                auto d = [](char c) -> int {
-                    if (c >= '0' && c <= '9') return c - '0';
-                    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-                    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-                    return 0;
-                };
-                return static_cast<std::uint8_t>(d(h[i]) * 16 + d(h[i + 1]));
-            };
-            return (h.size() == 7 && h[0] == '#') ? toe::rgb(v(1), v(3), v(5)) : toe::rgb(0, 0, 0);
-        };
-        if (!st.palette.empty()) {
-            std::vector<toe::Rgb> pal;
-            for (const auto &h : st.palette) pal.push_back(hex(h));
-            s->set_palette(pal);
-        }
-        s->set_cursor_color(hex(st.cursor_color));
+        settings_.install_bell(*s);
+        settings_.apply_startup(*s, size_);
     }
     // Install the live-resize hook. During a window drag, AppKit owns the main
     // thread in a modal loop and our run loop is blocked; the view's reshape
@@ -987,69 +1011,6 @@ void CocoaSurface::bind_terminal(toe::Terminal &term, toe::PixelSize) {
         end_frame();
         swap();
     });
-}
-
-void CocoaSurface::overlay_render(toe::Terminal &term, toe::PixelSize px) {
-    auto *session = term.poll().running;
-    if (!session) return;
-    const toe::Extent cell = session->cell_size();
-    if (cell.cols <= 0 || cell.rows <= 0) return;
-
-    // Size the overlay buffer to the full terminal grid (in cells).
-    const int cols = std::max(1, px.w / cell.cols);
-    const int rows = std::max(1, px.h / cell.rows);
-    if (overlay_buf_.width() != cols || overlay_buf_.height() != rows)
-        overlay_buf_.resize(cols, rows);
-
-    bool changed = false, save = false;
-    settings_.render(overlay_buf_, changed, save);
-
-    // Live-apply edits to the running terminal so you SEE them as you change
-    // them: font size (DPI-scaled), font family, and default fg/bg colours all
-    // take effect immediately.
-    if (changed) {
-        const hand::Settings &s = settings_.state();
-        CGFloat scale = 1.0;
-        if (NSScreen *scr = window_.screen ?: [NSScreen mainScreen]) scale = scr.backingScaleFactor;
-        if (scale < 1.0) scale = 1.0;
-        session->set_font_pixel_size((int)((CGFloat)s.font_size * scale), px);
-        // Font family: resolve to a concrete file, then swap the atlas live.
-        std::string file = resolve_font_file(s.font_family);
-        if (!file.empty()) session->set_font(file, px);
-        // Default colours: parse the #rrggbb hex fields and apply.
-        auto hex = [](const std::string &h) -> toe::Rgb {
-            if (h.size() != 7 || h[0] != '#') return toe::rgb(200, 200, 200);
-            auto d = [](char c) -> int {
-                if (c >= '0' && c <= '9') return c - '0';
-                if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-                if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-                return 0;
-            };
-            auto v = [&](int i) { return (std::uint8_t)(d(h[i]) * 16 + d(h[i + 1])); };
-            return toe::rgb(v(1), v(3), v(5));
-        };
-        session->set_default_colors(hex(s.fg), hex(s.bg));
-        session->set_cursor_color(hex(s.cursor_color));
-        session->set_selection_color(hex(s.selection));
-        // The 16 ANSI palette — what makes a theme switch recolour on-screen
-        // text, not just future output.
-        if (!s.palette.empty()) {
-            std::vector<toe::Rgb> pal;
-            for (const auto &h : s.palette) pal.push_back(hex(h));
-            session->set_palette(pal);
-        }
-    }
-    // Save persists to the VIBE file (handled inside settings_.render) and the
-    // panel shows a "✓ Saved" confirmation — it stays open so you can keep
-    // tweaking. No forced close.
-    (void)save;
-
-    // Composite the panel over the terminal via the engine's overlay pass, as a
-    // frosted-glass layer. The per-cell alpha plane makes the scrim faint and
-    // the panel near-opaque (glyphs stay opaque).
-    auto rc = toe::gfx::RenderContext::adopt_current();
-    session->render_overlay(rc, overlay_buf_.data(), overlay_buf_.width(),
-                            overlay_buf_.height(), px, 0, 0, 1.0f, overlay_buf_.alpha_data());
 }
 
 } // namespace hand::platform

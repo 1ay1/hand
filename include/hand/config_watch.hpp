@@ -1,21 +1,27 @@
 // SPDX-License-Identifier: LGPL-2.0-or-later
 //
-// ConfigWatch — a tiny inotify-backed watcher that makes hand's config LIVE in
+// ConfigWatch — a tiny filesystem watcher that makes hand's config LIVE in
 // both directions: edit the VIBE file in your editor and the running terminal
 // picks it up, the same instant it would from the settings pane.
+//
+// Cross-platform by design: an inotify backend on Linux and a kqueue backend on
+// macOS/BSD, behind ONE public API (start / fd / active / note_self_write /
+// drained). Both expose a single pollable fd the backend folds into its wait.
 //
 // Design notes (the correctness that makes this clean rather than flaky):
 //
 //   * We watch the config's PARENT DIRECTORY, not the file inode. Editors save
 //     atomically (write temp, rename over the target); a watch on the inode dies
-//     the moment that rename happens. A directory watch for CLOSE_WRITE/MOVED_TO
-//     filtered to the filename survives every save style (in-place OR rename).
+//     the moment that rename happens. A directory watch — inotify
+//     CLOSE_WRITE/MOVED_TO filtered to the filename, or kqueue NOTE_WRITE on the
+//     dir fd — survives every save style (in-place OR rename).
 //
-//   * The watcher is just an fd. It is folded into the SAME epoll wait the
-//     terminal already blocks on (see TerminalWait::watch_config), so the loop
-//     stays 100% event-driven — zero polling, zero idle CPU, zero added latency.
-//     No thread, no lock: the reload runs on the loop thread between frames,
-//     preserving the engine's single-threaded invariant.
+//   * The watcher is just an fd. It is folded into the SAME poll/epoll/kqueue
+//     wait the terminal already blocks on (see TerminalWait::watch_config on
+//     Linux, the wait_readable fd list on macOS), so the loop stays 100%
+//     event-driven — zero polling, zero idle CPU, zero added latency. No thread,
+//     no lock: the reload runs on the loop thread between frames, preserving the
+//     engine's single-threaded invariant.
 //
 //   * Self-write suppression: when hand itself saves the file (settings pane),
 //     it calls note_self_write(); events within a short window after are
@@ -28,12 +34,22 @@
 #define HAND_CONFIG_WATCH_HPP
 
 #include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <string>
 
 #include <fcntl.h>
-#include <sys/inotify.h>
 #include <unistd.h>
+
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+#define HAND_CONFIG_WATCH_KQUEUE 1
+#include <sys/event.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#else
+#define HAND_CONFIG_WATCH_INOTIFY 1
+#include <sys/inotify.h>
+#endif
 
 namespace hand {
 
@@ -54,6 +70,7 @@ public:
         base_ = (slash == std::string::npos) ? path : path.substr(slash + 1);
         if (dir_.empty()) dir_ = "/";
 
+#if HAND_CONFIG_WATCH_INOTIFY
         fd_ = ::inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
         if (fd_ < 0) return false;
         // CLOSE_WRITE covers in-place saves; MOVED_TO covers atomic-rename saves
@@ -62,6 +79,38 @@ public:
                                   IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE);
         if (wd_ < 0) { close_fd(); return false; }
         return true;
+#else // kqueue (macOS / BSD)
+        // Two vnode watches, because a directory vnode and a file vnode fire on
+        // DIFFERENT events on macOS:
+        //   * The PARENT DIR fd fires NOTE_WRITE when a file is created, renamed
+        //     onto, or deleted inside it — this catches atomic-rename saves
+        //     (the temp-then-rename dance every serious editor does), which
+        //     replace the inode and would kill a file-only watch.
+        //   * The FILE fd fires NOTE_WRITE/NOTE_EXTEND on an in-place append or
+        //     truncate-rewrite — which does NOT touch the directory vnode.
+        // Watching only the dir misses in-place saves; watching only the file
+        // misses rename saves. We register both on one kqueue; the kqueue()
+        // handle is the single pollable fd the backend folds into its wait.
+        fd_ = ::kqueue();
+        if (fd_ < 0) return false;
+        ::fcntl(fd_, F_SETFD, FD_CLOEXEC);
+        dir_fd_ = ::open(dir_.c_str(), O_RDONLY | O_CLOEXEC);
+        if (dir_fd_ < 0) { close_fd(); return false; }
+        struct kevent kev[2];
+        int nk = 0;
+        EV_SET(&kev[nk++], dir_fd_, EVFILT_VNODE, EV_ADD | EV_CLEAR,
+               NOTE_WRITE | NOTE_RENAME | NOTE_DELETE, 0, nullptr);
+        // The file may not exist yet (first run) — that's fine; the dir watch
+        // catches its creation, after which drained() re-arms the file watch.
+        file_fd_ = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+        if (file_fd_ >= 0) {
+            EV_SET(&kev[nk++], file_fd_, EVFILT_VNODE, EV_ADD | EV_CLEAR,
+                   NOTE_WRITE | NOTE_EXTEND | NOTE_RENAME | NOTE_DELETE | NOTE_ATTRIB, 0, nullptr);
+        }
+        path_ = path;
+        if (::kevent(fd_, kev, nk, nullptr, 0, nullptr) < 0) { close_fd(); return false; }
+        return true;
+#endif
     }
 
     [[nodiscard]] int fd() const noexcept { return fd_; }
@@ -77,6 +126,7 @@ public:
     [[nodiscard]] bool drained() {
         if (fd_ < 0) return false;
         bool hit = false;
+#if HAND_CONFIG_WATCH_INOTIFY
         alignas(inotify_event) char buf[4096];
         for (;;) {
             const ssize_t n = ::read(fd_, buf, sizeof buf);
@@ -88,6 +138,29 @@ public:
                 off += static_cast<ssize_t>(sizeof(inotify_event) + ev->len);
             }
         }
+#else // kqueue: drain all queued vnode events non-blocking.
+        // The dir vnode doesn't tell us WHICH file changed, so any write to the
+        // watched directory is a candidate. We coalesce every pending event and
+        // report one hit; the caller re-reads the config file, so a spurious
+        // wake from a sibling file costs only a cheap no-op reload.
+        struct timespec zero{0, 0};
+        struct kevent ev;
+        bool dir_changed = false;
+        for (;;) {
+            const int n = ::kevent(fd_, nullptr, 0, &ev, 1, &zero);
+            if (n <= 0) break; // 0 = nothing left, <0 = error
+            if (ev.filter != EVFILT_VNODE) continue;
+            hit = true;
+            if (static_cast<int>(ev.ident) == dir_fd_) dir_changed = true;
+            // Our watched dir or file was renamed/deleted — the vnode watch is
+            // now stale; flag a re-arm on the current path so we keep working.
+            if (ev.fflags & (NOTE_RENAME | NOTE_DELETE)) rearm_ = true;
+        }
+        // An atomic-rename save swaps the config inode: the OLD file_fd_ now
+        // points at the deleted inode and never fires again. Any directory
+        // change is our cue to re-open the file and re-register its vnode.
+        if (dir_changed || rearm_) { rearm_ = false; rearm_watch(); }
+#endif
         if (!hit) return false;
         // Drop the change if it's the echo of our own recent save.
         if (self_write_ms_ != 0 && now_ms() - self_write_ms_ < kSelfWriteWindowMs) return false;
@@ -104,12 +177,38 @@ private:
                 .count());
     }
     void close_fd() {
+#if HAND_CONFIG_WATCH_KQUEUE
+        if (file_fd_ >= 0) { ::close(file_fd_); file_fd_ = -1; }
+        if (dir_fd_ >= 0) { ::close(dir_fd_); dir_fd_ = -1; }
+#endif
         if (fd_ >= 0) { ::close(fd_); fd_ = -1; }
         wd_ = -1;
     }
 
+#if HAND_CONFIG_WATCH_KQUEUE
+    // Re-open the config file fd and re-register its vnode filter. Called after
+    // an atomic-rename save swaps the inode (the old file_fd_ went stale) or the
+    // file was first created. The dir watch itself stays valid across this.
+    void rearm_watch() {
+        if (fd_ < 0 || path_.empty()) return;
+        if (file_fd_ >= 0) { ::close(file_fd_); file_fd_ = -1; }
+        file_fd_ = ::open(path_.c_str(), O_RDONLY | O_CLOEXEC);
+        if (file_fd_ < 0) return; // file gone for now; dir watch catches re-create
+        struct kevent kev;
+        EV_SET(&kev, file_fd_, EVFILT_VNODE, EV_ADD | EV_CLEAR,
+               NOTE_WRITE | NOTE_EXTEND | NOTE_RENAME | NOTE_DELETE | NOTE_ATTRIB, 0, nullptr);
+        (void)::kevent(fd_, &kev, 1, nullptr, 0, nullptr);
+    }
+#endif
+
     int fd_ = -1;
     int wd_ = -1;
+#if HAND_CONFIG_WATCH_KQUEUE
+    int dir_fd_ = -1;    // parent-directory fd (catches create/rename saves)
+    int file_fd_ = -1;   // config-file fd (catches in-place writes)
+    bool rearm_ = false; // set when a watched vnode was renamed/deleted
+    std::string path_;   // full config path, for re-opening after rename
+#endif
     std::string dir_, base_;
     std::uint64_t self_write_ms_ = 0;
 };

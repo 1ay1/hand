@@ -235,39 +235,47 @@ endif()
 # to exercise toe's GPU renderer, so they live here rather than in toe (which
 # no longer links any window system). They SKIP (exit 77) when EGL is absent.
 # ===========================================================================
-option(HAND_BUILD_TESTS "Build hand's GL renderer tests" ON)
-# The renderer tests need the EGL offscreen backend for a headless GL context,
-# which macOS doesn't provide (no EGL). Skip them on Apple.
-if(HAND_BUILD_TESTS AND NOT APPLE)
+option(HAND_BUILD_TESTS "Build hand's tests" ON)
+if(HAND_BUILD_TESTS)
   enable_testing()
-  add_executable(render_test tests/render_test.cpp)
-  target_include_directories(render_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
-  target_link_libraries(render_test PRIVATE hand::platform toe::toe OpenGL::GL)
-  add_test(NAME render COMMAND render_test)
 
-  add_executable(cache_test tests/cache_test.cpp)
-  target_include_directories(cache_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
-  target_link_libraries(cache_test PRIVATE hand::platform toe::toe OpenGL::GL)
-  add_test(NAME cache COMMAND cache_test)
+  # --- GL renderer tests (Linux only) --------------------------------------
+  # These need the EGL offscreen backend for a headless GL context, which macOS
+  # doesn't provide (no EGL). The logic tests below run everywhere.
+  if(NOT APPLE)
+    add_executable(render_test tests/render_test.cpp)
+    target_include_directories(render_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    target_link_libraries(render_test PRIVATE hand::platform toe::toe OpenGL::GL)
+    add_test(NAME render COMMAND render_test)
 
-  add_executable(atlas_grow_test tests/atlas_grow_test.cpp)
-  target_include_directories(atlas_grow_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
-  target_link_libraries(atlas_grow_test PRIVATE hand::platform toe::toe OpenGL::GL)
-  add_test(NAME atlas_grow COMMAND atlas_grow_test)
+    add_executable(cache_test tests/cache_test.cpp)
+    target_include_directories(cache_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    target_link_libraries(cache_test PRIVATE hand::platform toe::toe OpenGL::GL)
+    add_test(NAME cache COMMAND cache_test)
 
-  # Window opacity: verifies bg alpha reaches the framebuffer (regression guard
-  # for "opacity only works on the settings pane").
-  add_executable(opacity_test tests/opacity_test.cpp)
-  target_include_directories(opacity_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
-  target_link_libraries(opacity_test PRIVATE hand::platform toe::toe OpenGL::GL)
-  add_test(NAME opacity COMMAND opacity_test)
+    add_executable(atlas_grow_test tests/atlas_grow_test.cpp)
+    target_include_directories(atlas_grow_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    target_link_libraries(atlas_grow_test PRIVATE hand::platform toe::toe OpenGL::GL)
+    add_test(NAME atlas_grow COMMAND atlas_grow_test)
 
-  # Font rebuild leak: repeatedly rebuilding the Renderer (font/ligature change)
-  # must not leak GL shaders ("shader pool exhausted", sokol id 154).
-  add_executable(font_rebuild_test tests/font_rebuild_test.cpp)
-  target_include_directories(font_rebuild_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
-  target_link_libraries(font_rebuild_test PRIVATE hand::platform toe::toe OpenGL::GL)
-  add_test(NAME font_rebuild COMMAND font_rebuild_test)
+    # Window opacity: verifies bg alpha reaches the framebuffer (regression guard
+    # for "opacity only works on the settings pane").
+    add_executable(opacity_test tests/opacity_test.cpp)
+    target_include_directories(opacity_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    target_link_libraries(opacity_test PRIVATE hand::platform toe::toe OpenGL::GL)
+    add_test(NAME opacity COMMAND opacity_test)
+
+    # Font rebuild leak: repeatedly rebuilding the Renderer (font/ligature change)
+    # must not leak GL shaders ("shader pool exhausted", sokol id 154).
+    add_executable(font_rebuild_test tests/font_rebuild_test.cpp)
+    target_include_directories(font_rebuild_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    target_link_libraries(font_rebuild_test PRIVATE hand::platform toe::toe OpenGL::GL)
+    add_test(NAME font_rebuild COMMAND font_rebuild_test)
+
+    set_tests_properties(render cache atlas_grow opacity font_rebuild PROPERTIES ENVIRONMENT "TOE_HEADLESS=1")
+  endif()
+
+  # --- platform-neutral logic tests (all OSes, incl. macOS) ----------------
 
   # Config round-trip: no GL needed — pure config/settings logic. config.cpp
   # (the VIBE parse/save) lives in the hand exe, so compile it in directly.
@@ -290,17 +298,17 @@ if(HAND_BUILD_TESTS AND NOT APPLE)
   target_link_libraries(glyph_test PRIVATE toe)
   add_test(NAME glyph COMMAND glyph_test)
 
-  # Config watcher: pure inotify logic, no GL / no deps.
+  # Config watcher: pure filesystem-watch logic (inotify on Linux, kqueue on
+  # macOS/BSD), no GL / no deps. Guards live config hot-reload on every OS.
   add_executable(config_watch_test tests/config_watch_test.cpp)
   target_include_directories(config_watch_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
   add_test(NAME config_watch COMMAND config_watch_test)
 
-  # Smart font discovery (POSIX): fc-list + metric-based monospace detection.
-  # Environment-dependent; returns 77 (skip) on a font-less box.
+  # Smart font discovery: fc-list-style dir globbing on POSIX, Core Text on
+  # macOS (fonts_mac.cpp). Environment-dependent; returns 77 (skip) on a
+  # font-less box.
   add_executable(fonts_test tests/fonts_test.cpp)
   target_include_directories(fonts_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
   target_link_libraries(fonts_test PRIVATE hand::platform vibe)
   add_test(NAME fonts COMMAND fonts_test)
-
-  set_tests_properties(render cache atlas_grow opacity font_rebuild PROPERTIES ENVIRONMENT "TOE_HEADLESS=1")
 endif()
