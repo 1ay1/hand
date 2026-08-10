@@ -336,6 +336,12 @@ if(HAND_BUILD_TESTS)
   target_link_libraries(glyph_test PRIVATE toe)
   add_test(NAME glyph COMMAND glyph_test)
 
+  # Activity Tabs status brain: pure TabModel logic (auto-label, done-attention,
+  # unseen dot). Header-only, no GL / no engine — synthetic TabSignals in.
+  add_executable(tab_model_test tests/tab_model_test.cpp)
+  target_include_directories(tab_model_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+  add_test(NAME tab_model COMMAND tab_model_test)
+
   # Config watcher: pure filesystem-watch logic (inotify on Linux, kqueue on
   # macOS/BSD), no GL / no deps. Guards live config hot-reload on every OS.
   add_executable(config_watch_test tests/config_watch_test.cpp)
