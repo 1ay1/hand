@@ -15,7 +15,13 @@ void HelpPanel::render(glyph::Buffer &buf) {
     ui.heading("Panels");
     ui.kv_row("Ctrl+Shift+,", "Open settings");
     ui.kv_row("Ctrl+Shift+?", "Open this help");
+    ui.kv_row("Ctrl+Shift+F", "Search scrollback");
     ui.kv_row("Esc", "Close a panel");
+
+    ui.heading("Search (while the bar is open)");
+    ui.kv_row("Enter / Ctrl+G", "Next match");
+    ui.kv_row("Shift+Enter / Ctrl+P", "Previous match");
+    ui.kv_row("Esc", "Close search");
 
     ui.heading("Command blocks (OSC 133)");
     ui.kv_row("Ctrl+Shift+Up", "Jump to previous command");

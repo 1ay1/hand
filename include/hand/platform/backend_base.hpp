@@ -42,6 +42,7 @@
 
 #include "hand/platform/settings_host.hpp"
 #include "hand/platform/surface.hpp"
+#include "hand/search_bar.hpp"
 #include "toe/app.hpp"
 #include "toe/terminal.hpp"
 
@@ -55,6 +56,7 @@ enum class Chord {
     None,
     ToggleSettings, // Ctrl+Shift+,   (macOS: Cmd+,)
     ToggleHelp,     // Ctrl+Shift+?   (macOS: Cmd+?)
+    OpenSearch,     // Ctrl+Shift+F   (macOS: Cmd+F) — scrollback search
 };
 
 // `Derived` is the concrete surface (Win32Surface, X11Surface, ...). CRTP lets
@@ -63,12 +65,26 @@ enum class Chord {
 template <typename Derived>
 class BackendBase {
 public:
-    // --- overlay panes (settings + help) -----------------------------------
+    // --- overlay panes (settings + help + search) --------------------------
     // Identical on every platform: the panes are drawn by hand's own glyph UI
-    // into the terminal grid, so there is nothing OS-specific to do.
-    [[nodiscard]] bool overlay_active() const noexcept { return settings_.active(); }
-    bool overlay_event(const toe::win::Event &ev) { return settings_.handle(ev); }
-    void overlay_render(toe::Terminal &term, toe::PixelSize px) { settings_.render(term, px); }
+    // into the terminal grid, so there is nothing OS-specific to do. The search
+    // bar is a peer overlay; when it's open it takes input priority.
+    [[nodiscard]] bool overlay_active() const noexcept {
+        return settings_.active() || search_.active();
+    }
+    bool overlay_event(const toe::win::Event &ev) {
+        if (search_.active()) {
+            auto *s = term_ ? term_->poll().running : nullptr;
+            if (s && search_.handle(ev, *s)) return true;
+            // A non-consumed event while searching (e.g. wheel) falls through.
+            return false;
+        }
+        return settings_.handle(ev);
+    }
+    void overlay_render(toe::Terminal &term, toe::PixelSize px) {
+        settings_.render(term, px);
+        if (search_.active()) settings_.render_search(term, px, search_);
+    }
 
     // --- defaults a backend may override -----------------------------------
     // flush(): push buffered protocol traffic. Only Wayland has any (its
@@ -108,6 +124,14 @@ public:
         switch (c) {
         case Chord::ToggleSettings: settings_.toggle(); return true;
         case Chord::ToggleHelp: settings_.toggle_help(); return true;
+        case Chord::OpenSearch:
+            if (term_) {
+                if (auto *s = term_->poll().running) {
+                    if (search_.active()) search_.close(*s);
+                    else search_.open(*s);
+                }
+            }
+            return true;
         case Chord::None: break;
         }
         return false;
@@ -129,6 +153,7 @@ protected:
     [[nodiscard]] toe::Terminal *terminal() noexcept { return term_; }
 
     SettingsHost settings_{};
+    hand::SearchBar search_{};      // scrollback search overlay (Ctrl+Shift+F)
     toe::Terminal *term_ = nullptr; // bound in bind_terminal; for config reloads
 
 private:

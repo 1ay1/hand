@@ -27,6 +27,7 @@
 #include "hand/platform/fonts.hpp"
 #include "hand/settings_panel.hpp"
 #include "hand/help_panel.hpp"
+#include "hand/search_bar.hpp"
 #include "hand/config/config.hpp" // load_hand_config for hot-reload
 #include "hand/config_watch.hpp"  // inotify config watcher
 #include "toe/app.hpp"      // toe::win::Event
@@ -166,6 +167,28 @@ public:
         // the panel (debounced) — config is live end to end, no save step.
         if (changed) apply(*session, panel_.state(), px);
 
+        auto rc = toe::gfx::RenderContext::adopt_current();
+        session->render_overlay(rc, buf_.data(), buf_.width(), buf_.height(), px, 0, 0, 1.0f,
+                                buf_.alpha_data());
+    }
+
+    // Render the scrollback search bar over the terminal. Reuses the same
+    // overlay buffer + composite path as the panes, but draws only the one-line
+    // bar (leaving the rest transparent so matches stay visible underneath).
+    void render_search(toe::Terminal &term, toe::PixelSize px, const hand::SearchBar &bar) {
+        auto *session = term.poll().running;
+        if (!session) return;
+        const toe::Extent cell = session->cell_size();
+        if (cell.cols <= 0 || cell.rows <= 0) return;
+        const int cols = std::max(1, px.w / cell.cols);
+        const int rows = std::max(1, px.h / cell.rows);
+        if (buf_.width() != cols || buf_.height() != rows) buf_.resize(cols, rows);
+        // Everything transparent so the highlighted matches show through; only
+        // the bar row (drawn by bar.render) is opaque.
+        buf_.clear(glyph::Style{});
+        buf_.clear_alpha(0);
+        if (buf_.height() > 0) buf_.set_alpha({0, buf_.height() - 1, buf_.width(), 1}, 255);
+        bar.render(buf_);
         auto rc = toe::gfx::RenderContext::adopt_current();
         session->render_overlay(rc, buf_.data(), buf_.width(), buf_.height(), px, 0, 0, 1.0f,
                                 buf_.alpha_data());

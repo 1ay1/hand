@@ -91,11 +91,21 @@ public:
     // OverlayApp: the in-terminal settings panel. toe::run_loop calls these to
     // capture input while the panel is open and composite it after the terminal
     // renders. Toggle keybind: Ctrl+Shift+, (see kb_key).
-    [[nodiscard]] bool overlay_active() const { return settings_.active(); }
-    bool overlay_event(const toe::win::Event &ev) { return settings_.handle(ev); }
-    void overlay_render(toe::Terminal &term, toe::PixelSize px) { settings_.render(term, px); }
+    [[nodiscard]] bool overlay_active() const { return settings_.active() || search_.active(); }
+    bool overlay_event(const toe::win::Event &ev) {
+        if (search_.active()) {
+            if (auto *s = term_ ? term_->poll().running : nullptr) return search_.handle(ev, *s);
+            return false;
+        }
+        return settings_.handle(ev);
+    }
+    void overlay_render(toe::Terminal &term, toe::PixelSize px) {
+        settings_.render(term, px);
+        if (search_.active()) settings_.render_search(term, px, search_);
+    }
     void bind_terminal(toe::Terminal &term, toe::PixelSize px) {
         (void)px; // reload reads the live size_ (window may have resized)
+        term_ = &term;
         settings_.bind();
         if (auto *s = term.poll().running) {
             settings_.install_bell(*s);
@@ -255,6 +265,8 @@ private:
 
     // In-terminal settings panel (Ctrl+Shift+, toggles it).
     hand::platform::SettingsHost settings_{};
+    hand::SearchBar search_{};      // scrollback search bar (Ctrl+Shift+F)
+    toe::Terminal *term_ = nullptr; // bound in bind_terminal (for search)
 
     // xkb.
     xkb_context *xkb_ctx_ = nullptr;
@@ -481,6 +493,16 @@ void WaylandSurface::emit_key(uint32_t key, KeyEvent::Kind kind) {
     // question keysym (or slash while shift is held).
     if (mods.ctrl && mods.shift && (sym == XKB_KEY_question || sym == XKB_KEY_slash)) {
         if (kind == KeyEvent::Kind::press) settings_.toggle_help();
+        return;
+    }
+    // Ctrl+Shift+F  opens/closes the scrollback search bar.
+    if (mods.ctrl && mods.shift && (sym == XKB_KEY_f || sym == XKB_KEY_F)) {
+        if (kind == KeyEvent::Kind::press) {
+            if (auto *s = term_ ? term_->poll().running : nullptr) {
+                if (search_.active()) search_.close(*s);
+                else search_.open(*s);
+            }
+        }
         return;
     }
 

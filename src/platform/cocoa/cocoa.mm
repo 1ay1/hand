@@ -104,6 +104,7 @@ struct CocoaInbox {
     bool saw_event = false; // any native event since the last wait (window-ready)
     bool settings_toggle = false; // ⌘, requested opening/closing the settings panel
     bool settings_save = false;   // ⌘S requested saving the settings panel
+    bool search_toggle = false;   // ⌘F requested opening/closing the search bar
     // The font size the app launched with, so Cmd-0 can reset to it.
     int default_font_px = 0;
     // Fractional scroll accumulators: trackpad deltas are sub-"line"; we bank
@@ -341,6 +342,10 @@ std::optional<toe::SpecialKey> special_of_keycode(unsigned short kc) {
         inbox_->settings_toggle = true;
         inbox_->saw_event = true;
         return YES;
+    case 'f': // Open/close the scrollback search bar (⌘F)
+        inbox_->search_toggle = true;
+        inbox_->saw_event = true;
+        return YES;
     case 's': // Save the settings panel (⌘S) — only meaningful while it's open
         inbox_->settings_save = true;
         inbox_->saw_event = true;
@@ -517,10 +522,21 @@ public:
     // --- OverlayApp: the in-terminal settings panel -------------------------
     // SettingsHost owns the panel + live-apply + save + config hot-reload; the
     // backend just forwards these three hooks (shared with Wayland/X11).
-    [[nodiscard]] bool overlay_active() const { return settings_.active(); }
-    bool overlay_event(const toe::win::Event &ev) { return settings_.handle(ev); }
-    void overlay_render(toe::Terminal &term, toe::PixelSize px) { settings_.render(term, px); }
+    [[nodiscard]] bool overlay_active() const { return settings_.active() || search_.active(); }
+    bool overlay_event(const toe::win::Event &ev) {
+        if (search_.active()) {
+            if (auto *s = bound_term_ ? bound_term_->poll().running : nullptr)
+                return search_.handle(ev, *s);
+            return false;
+        }
+        return settings_.handle(ev);
+    }
+    void overlay_render(toe::Terminal &term, toe::PixelSize px) {
+        settings_.render(term, px);
+        if (search_.active()) settings_.render_search(term, px, search_);
+    }
     void toggle_settings();  // ⌘, opens/closes the panel
+    void toggle_search();    // ⌘F opens/closes the scrollback search bar
 
     // Install the live-resize render hook: the view calls this synchronously
     // from reshape during a drag to reflow + redraw mid-resize.
@@ -544,6 +560,7 @@ private:
     PixelSize size_{};
     std::uint64_t last_pump_ = 0; // mach ticks of the last event-queue scan
     hand::platform::SettingsHost settings_{};
+    hand::SearchBar search_{};             // scrollback search bar (⌘F)
     toe::Terminal *bound_term_ = nullptr;  // set in bind_terminal; for hot-reload
     bool pending_config_reload_ = false;   // kqueue watcher fired; reload next poll
     std::function<void(int, int)> live_render_{}; // live-resize frame hook
@@ -816,6 +833,10 @@ void CocoaSurface::poll_events(const toe::EventSink &sink) {
         inbox_.settings_toggle = false;
         toggle_settings();
     }
+    if (inbox_.search_toggle) {
+        inbox_.search_toggle = false;
+        toggle_search();
+    }
     // ⌘S no longer needs an explicit save request: SettingsHost persists edits
     // automatically (debounced, and flushed on close). The flag is still
     // consumed so a stray ⌘S is a harmless no-op rather than reaching the child.
@@ -977,6 +998,14 @@ void CocoaSurface::open_url(std::string_view u) {
 
 void CocoaSurface::toggle_settings() {
     settings_.toggle();
+    inbox_.saw_event = true; // force a repaint
+}
+
+void CocoaSurface::toggle_search() {
+    if (auto *s = bound_term_ ? bound_term_->poll().running : nullptr) {
+        if (search_.active()) search_.close(*s);
+        else search_.open(*s);
+    }
     inbox_.saw_event = true; // force a repaint
 }
 
