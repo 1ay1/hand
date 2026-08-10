@@ -311,14 +311,22 @@ public:
             consumed_ = true;
         }
         paint_label(label, foc);
-        const char *on = "  ●  ", *off = "  ○  ";
-        Style sw = *value ? Style{theme_.accent_fg, theme_.accent}
-                          : Style{theme_.dim, foc ? theme_.focus_bg : theme_.panel_bg};
-        const std::string txt = *value ? " on " : " off";
+        // A real switch, not a bullet plus the word "on". The track is a fixed
+        // 4-cell pill with the knob at one end, so ON/OFF is readable at a
+        // glance from SHAPE (knob position) rather than requiring the label to
+        // be read — and the two states occupy identical width, so a column of
+        // toggles doesn't jitter.
+        const Rgb rowbg = foc ? theme_.focus_bg : theme_.panel_bg;
         const int vx = value_x();
-        buf_.text(vx, cursor_y_, *value ? on : off, sw);
-        buf_.text(vx + 5, cursor_y_, txt,
-                  Style{*value ? theme_.ok : theme_.dim, foc ? theme_.focus_bg : theme_.panel_bg});
+        if (*value) {
+            buf_.text(vx, cursor_y_, "\u2501\u2501", Style{theme_.accent, rowbg});
+            buf_.put(vx + 2, cursor_y_, U'\u25CF', Style{theme_.accent, rowbg});
+            buf_.text(vx + 4, cursor_y_, "on", Style{theme_.fg, rowbg, Attr::Bold});
+        } else {
+            buf_.put(vx, cursor_y_, U'\u25CF', Style{theme_.dim, rowbg});
+            buf_.text(vx + 1, cursor_y_, "\u2501\u2501", Style{theme_.border, rowbg});
+            buf_.text(vx + 4, cursor_y_, "off", Style{theme_.dim, rowbg});
+        }
         end_row();
         return changed;
     }

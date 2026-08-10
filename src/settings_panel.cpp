@@ -297,13 +297,22 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
 
     glyph::Ctx ui(buf, in, &focus_, ui_theme());
 
-    // Rows each section shows (drives the auto-fitted panel height so there's no
-    // vast empty space under a short tab). Index matches kSections.
-    static const int kSectionRows[] = {11, 7, 6, 4, 4, 6, 3};
+    // The panel auto-fits its CONTENT. This used to be a hand-maintained table
+    // of per-section row counts, which silently drifted as sections gained and
+    // lost widgets — the Theme tab claimed 11 rows while drawing 8, leaving a
+    // band of dead space under every short section and making the card look
+    // like a mostly-empty box. Deriving it from the widgets themselves means it
+    // can never disagree with what is drawn.
+    // Rows each section actually DRAWS. This must match the widget calls in
+    // layout below; when it drifts the card either clips its last control or
+    // floats in a band of empty space. Theme: dropdown + note + 4 colours +
+    // "Save as" + button + status line.
+    static const int kSectionRows[] = {9, 8, 6, 4, 4, 6, 3};
     const int rows = kSectionRows[std::clamp(section_, 0, nsec - 1)];
-    // header band(1)+rule(1)+gap(1) + tab row(1)+rule(1) + content + gap +
-    // footer rule(1)+text(1) + frame(2). A roomy but tight card.
-    int panel_h = 3 + 2 + rows + 1 + 2 + 2 + 1;
+    // header band(1)+rule(1) + tab row(1)+rule(1) + content + footer rule(1)+
+    // text(1) + frame(2). Previously this budgeted two extra spacer rows that
+    // nothing drew into, so every section floated in a band of empty card.
+    int panel_h = 2 + 2 + rows + 2 + 2;
     // A dropdown open in this section needs extra room for the popup below it.
     if (dd_open_ >= 0) panel_h += 9;
     panel_h = std::clamp(panel_h, 12, buf.height() - 2);
