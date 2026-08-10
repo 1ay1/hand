@@ -52,7 +52,7 @@
 #include <dxgi1_5.h>
 
 #include "hand/platform/sokol_d3d11.hpp"
-#include "hand/platform/settings_host.hpp"
+#include "hand/platform/backend_base.hpp"
 
 namespace hand::platform {
 
@@ -124,7 +124,7 @@ constexpr const wchar_t *kWindowClass = L"hand.terminal.window";
 
 } // namespace
 
-class Win32Surface final {
+class Win32Surface final : public BackendBase<Win32Surface> {
 public:
     static Result<std::unique_ptr<Win32Surface>> open(std::string_view title, PixelSize initial);
 
@@ -132,7 +132,9 @@ public:
     Win32Surface(const Win32Surface &) = delete;
     Win32Surface &operator=(const Win32Surface &) = delete;
 
-    // --- the toe::App contract ---------------------------------------------
+    // --- the platform-specific half of toe::App ----------------------------
+    // Everything else (overlay panes, chords, bind_terminal, flush,
+    // swap_damaged, event_fd/repeat_fd) comes from BackendBase.
     void begin_frame(toe::PixelSize px, std::uint8_t r, std::uint8_t g, std::uint8_t b,
                      float a = 1.0f) {
         sokold3d::begin_frame(px, r, g, b, a);
@@ -140,26 +142,17 @@ public:
     void end_frame() { sokold3d::end_frame(); }
 
     void swap();
-    void swap_damaged(toe::DamageRect) { swap(); }
-    // D3D11 Present already flushes the command queue; there is no separate
-    // connection to push, so flush() is a no-op (unlike Wayland's wl_display).
-    void flush() {}
 
     [[nodiscard]] PixelSize pixel_size() const { return size_; }
-    // No fd on Windows: readiness comes from the WinReactor's handle wait, so
-    // the fd accessors report "nothing to poll" and the loop relies on
-    // wait_readable() alone.
-    [[nodiscard]] int event_fd() const { return -1; }
-    [[nodiscard]] int repeat_fd() const { return -1; }
 
     void poll_events(const toe::EventSink &sink);
     [[nodiscard]] bool should_close() const { return closed_; }
 
     [[nodiscard]] toe::Readiness wait_readable(int pty_fd, toe::WaitDeadline d) {
         const toe::Readiness r = reactor_.wait(pty_fd, d);
-        // A config-watch wake is not a PTY/window event: handle it here and
-        // report a spurious wake, exactly as the Linux backend does.
-        if (reactor_.config_ready() && term_) settings_.on_config_fd_ready(*term_, size_);
+        // A config-watch wake is not a PTY/window event: service it and report
+        // a spurious wake, exactly as the Linux backend does.
+        if (reactor_.config_ready()) reload_config_if_watched();
         return r;
     }
 
@@ -169,23 +162,11 @@ public:
     [[nodiscard]] std::string get_clipboard();
     void open_url(std::string_view uri);
 
-    [[nodiscard]] bool overlay_active() const { return settings_.active(); }
-    bool overlay_event(const toe::win::Event &ev) { return settings_.handle(ev); }
-    void overlay_render(toe::Terminal &term, toe::PixelSize px) { settings_.render(term, px); }
-
+    // Win32 also has to hand the config watcher's EVENT to its reactor, so it
+    // extends (rather than replaces) the base implementation.
     void bind_terminal(toe::Terminal &term, toe::PixelSize px) {
-        (void)px; // reload reads the live size_ (window may have resized)
-        settings_.bind();
-        if (auto *s = term.poll().running) {
-            settings_.install_bell(*s);
-            // Push the loaded theme's ANSI palette + cursor colour live.
-            settings_.apply_startup(*s, size_);
-        }
-        // Fold the config-file watcher into the SAME wait as the PTY and the
-        // window (win_reactor.hpp), so a live config edit wakes us with no
-        // polling — the Windows counterpart of the epoll config fd on Linux.
-        term_ = &term;
-        reactor_.set_config_event(settings_.config_event());
+        BackendBase::bind_terminal(term, px);
+        reactor_.set_config_event(settings().config_event());
     }
 
 private:
@@ -214,8 +195,6 @@ private:
     bool sokol_ready_ = false;
 
     WinReactor reactor_{};
-    SettingsHost settings_{};
-    toe::Terminal *term_ = nullptr; // bound in bind_terminal, for config reloads
 
     // Click-count tracking for double/triple-click selection.
     DWORD last_click_ms_ = 0;
@@ -452,18 +431,15 @@ LRESULT Win32Surface::handle(UINT msg, WPARAM wp, LPARAM lp) {
     case WM_SYSKEYDOWN: {
         const Modifiers m = mods_now();
 
-        // Ctrl+Shift+,  toggles the in-terminal settings panel (the Windows /
-        // Linux analogue of macOS ⌘,). Intercepted BEFORE terminal routing so
-        // it never reaches the child. VK_OEM_COMMA is ',' on the US layout;
-        // on other layouts the OEM code still maps to the physical comma key.
-        if (m.ctrl && m.shift && wp == VK_OEM_COMMA) {
-            settings_.toggle();
-            return 0;
-        }
-        // Ctrl+Shift+?  opens the keybinding help pane ('?' is Shift+/).
-        if (m.ctrl && m.shift && (wp == VK_OEM_2 /* '/?' */)) {
-            settings_.toggle_help();
-            return 0;
+        // hand's reserved chords. The MAPPING (which physical keys) is
+        // platform-specific and lives here; what each chord DOES is shared, in
+        // BackendBase::handle_chord — so the bindings can't drift per platform.
+        // VK_OEM_COMMA/VK_OEM_2 are the physical ',' and '/?' keys.
+        if (m.ctrl && m.shift) {
+            const Chord c = (wp == VK_OEM_COMMA) ? Chord::ToggleSettings
+                            : (wp == VK_OEM_2)   ? Chord::ToggleHelp
+                                                 : Chord::None;
+            if (handle_chord(c)) return 0;
         }
 
         toe::SpecialKey sk{};
