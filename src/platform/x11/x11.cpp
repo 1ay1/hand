@@ -83,6 +83,7 @@ public:
         term_ = &term;
         settings_.bind();
         if (auto *s = term.poll().running) {
+            launch_font_px_ = s->font_pixel_size();
             settings_.install_bell(*s);
             // Push the loaded theme's ANSI palette + cursor colour live.
             settings_.apply_startup(*s, size_);
@@ -142,6 +143,7 @@ private:
     hand::platform::SettingsHost settings_{};
     hand::SearchBar search_{};             // scrollback search bar (Ctrl+Shift+F)
     toe::Terminal *term_ = nullptr;        // bound in bind_terminal (for search)
+    int launch_font_px_ = 0;               // font size at launch (Ctrl+0 reset)
 
     PixelSize size_{960, 600};
     bool closed_ = false;
@@ -416,6 +418,22 @@ void X11Surface::handle_key(xcb_keycode_t code, KeyEvent::Kind kind,
             }
         }
         return;
+    }
+    // Ctrl +/- / Ctrl+0  font zoom (the universal keyboard gesture). '=' is the
+    // unshifted '+' key; the numpad variants are handled too.
+    if (mods.ctrl && kind == KeyEvent::Kind::press) {
+        if (sym == XKB_KEY_plus || sym == XKB_KEY_equal || sym == XKB_KEY_KP_Add) {
+            sink(Event{toe::win::FontZoom{+1, -1}});
+            return;
+        }
+        if (sym == XKB_KEY_minus || sym == XKB_KEY_KP_Subtract) {
+            sink(Event{toe::win::FontZoom{-1, -1}});
+            return;
+        }
+        if (sym == XKB_KEY_0 || sym == XKB_KEY_KP_0) {
+            sink(Event{toe::win::FontZoom{0, launch_font_px_}});
+            return;
+        }
     }
 
     auto special = [&](SpecialKey sk) {

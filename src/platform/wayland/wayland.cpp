@@ -108,6 +108,7 @@ public:
         term_ = &term;
         settings_.bind();
         if (auto *s = term.poll().running) {
+            launch_font_px_ = s->font_pixel_size();
             settings_.install_bell(*s);
             // Push the loaded theme's ANSI palette + cursor colour to the live
             // session (to_toe() only carries fg/bg into create).
@@ -267,6 +268,7 @@ private:
     hand::platform::SettingsHost settings_{};
     hand::SearchBar search_{};      // scrollback search bar (Ctrl+Shift+F)
     toe::Terminal *term_ = nullptr; // bound in bind_terminal (for search)
+    int launch_font_px_ = 0;        // font size at launch (Ctrl+0 reset)
 
     // xkb.
     xkb_context *xkb_ctx_ = nullptr;
@@ -504,6 +506,21 @@ void WaylandSurface::emit_key(uint32_t key, KeyEvent::Kind kind) {
             }
         }
         return;
+    }
+    // Ctrl +/- / Ctrl+0  font zoom. '=' is the unshifted '+' key.
+    if (mods.ctrl && kind == KeyEvent::Kind::press && sink_) {
+        if (sym == XKB_KEY_plus || sym == XKB_KEY_equal || sym == XKB_KEY_KP_Add) {
+            (*sink_)(Event{toe::win::FontZoom{+1, -1}});
+            return;
+        }
+        if (sym == XKB_KEY_minus || sym == XKB_KEY_KP_Subtract) {
+            (*sink_)(Event{toe::win::FontZoom{-1, -1}});
+            return;
+        }
+        if (sym == XKB_KEY_0 || sym == XKB_KEY_KP_0) {
+            (*sink_)(Event{toe::win::FontZoom{0, launch_font_px_}});
+            return;
+        }
     }
 
     // Dead keys / Compose sequences: feed the keysym to the compose state on a
