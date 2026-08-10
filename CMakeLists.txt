@@ -91,6 +91,7 @@ if(WIN32)
     src/platform/win/fonts_win.cpp
     src/settings_panel.cpp
     src/help_panel.cpp
+    src/workspace.cpp
     src/theme/themes.cpp)
   add_library(hand::platform ALIAS hand-platform)
 
@@ -120,6 +121,7 @@ elseif(APPLE)
     src/platform/cocoa/cocoa.mm
     src/settings_panel.cpp
     src/help_panel.cpp
+    src/workspace.cpp
     src/theme/themes.cpp)
   add_library(hand::platform ALIAS hand-platform)
 
@@ -198,6 +200,7 @@ else()
     src/platform/fonts_posix.cpp
     src/settings_panel.cpp
     src/help_panel.cpp
+    src/workspace.cpp
     src/theme/themes.cpp
     "${GEN}/xdg-shell-client-protocol.h"
     "${GEN}/xdg-shell-protocol.c"
@@ -341,6 +344,12 @@ if(HAND_BUILD_TESTS)
   add_executable(tab_model_test tests/tab_model_test.cpp)
   target_include_directories(tab_model_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
   add_test(NAME tab_model COMMAND tab_model_test)
+
+  # Tab container: Zipper<T> as pure algebra (non-empty + valid-focus invariants
+  # under insert/close/navigate). Move-only element, no engine.
+  add_executable(zipper_test tests/zipper_test.cpp)
+  target_include_directories(zipper_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+  add_test(NAME zipper COMMAND zipper_test)
 
   # Config watcher: pure filesystem-watch logic (inotify on Linux, kqueue on
   # macOS/BSD), no GL / no deps. Guards live config hot-reload on every OS.
