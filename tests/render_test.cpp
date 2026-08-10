@@ -193,6 +193,52 @@ int main() {
         }
     }
 
+    // ---- Selection highlight + rounded OUTER corners ----------------------
+    // Select a block over the top-left cells and re-render. The region interior
+    // must be filled with the selection colour, while the region's outer corner
+    // is rounded away (the extreme corner pixel reads background, not selection).
+    {
+        const auto sel = toe::rgb(60, 90, 160);
+        renderer->set_selection_color(sel);
+        // Select a BLANK region (rows 3..4, cols 10..15) so the interior is pure
+        // selection background with no glyphs to confuse the pixel sampling.
+        const std::int64_t base = screen.total_rows() - grid.rows; // abs of viewport row 0
+        const int r0 = 3, c0 = 10, c1 = 15;
+        screen.selection_begin(term::Screen::AbsPos{base + r0, c0},
+                               term::Screen::SelectMode::block);
+        screen.selection_extend(term::Screen::AbsPos{base + r0 + 1, c1});
+
+        hand::platform::sokolgl::begin_frame_fbo(fbo, PixelSize{W, H}, 23, 23, 28);
+        renderer->draw(screen, PixelSize{W, H}, /*cursor_on=*/false);
+        hand::platform::sokolgl::end_frame();
+        glFinish();
+        glReadPixels(0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+
+        auto is_sel = [&](int x, int y) {
+            auto c = at(x, y);
+            return std::abs(int(c[0]) - int(sel.r)) < 45 &&
+                   std::abs(int(c[1]) - int(sel.g)) < 45 &&
+                   std::abs(int(c[2]) - int(sel.b)) < 45;
+        };
+        // Region pixel bounds. glReadPixels returns BOTTOM-UP, so flip y:
+        // a top-down row y maps to framebuffer row (H-1-y).
+        const int rx0 = c0 * cw, rx1 = (c1 + 1) * cw;
+        const int ry_top = r0 * ch;                    // top-down top edge
+        auto fy = [&](int y_top) { return H - 1 - y_top; };
+        // Interior (well inside the second selected row) is filled.
+        const bool interior_filled = is_sel((rx0 + rx1) / 2, fy(ry_top + ch + ch / 2));
+        // The extreme top-left pixel of the region is in the rounded corner cut.
+        const bool tl_rounded = !is_sel(rx0, fy(ry_top));
+        // A few px down the left edge (past the arc) IS filled.
+        const bool tl_body = is_sel(rx0 + 1, fy(ry_top + ch - 2));
+        std::printf("selection: interior=%d tl_rounded=%d tl_body=%d\n", interior_filled,
+                    tl_rounded, tl_body);
+        if (!interior_filled) { std::printf("FAIL selection interior not filled\n"); ++fails; }
+        if (!tl_rounded) { std::printf("FAIL selection outer corner not rounded\n"); ++fails; }
+        if (!tl_body) { std::printf("FAIL selection corner cell body missing\n"); ++fails; }
+        screen.selection_clear();
+    }
+
     glDeleteFramebuffers(1, &fbo);
     glDeleteTextures(1, &tex);
 
