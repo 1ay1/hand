@@ -1,0 +1,127 @@
+// SPDX-License-Identifier: LGPL-2.0-or-later
+//
+// hand/actor/tab_actor.cpp — the per-tab blocking loop.
+//
+// The actor thread owns its Terminal end to end: it blocks on the child PTY fd
+// OR its inbound-command wakeup fd, drains input, pumps child output into its
+// own grid (under the per-tab render_lock, the only object the GUI also
+// touches), and posts CHANGE-ONLY status messages to the GUI mailbox. It never
+// renders — the single GL context lives on the GUI thread.
+
+#include "hand/actor/tab_actor.hpp"
+
+#include <poll.h>
+
+namespace hand {
+
+void TabActor::run() {
+    for (;;) {
+        if (stopping_.load()) break;
+
+        // --- 1. drain inbound commands from the GUI --------------------------
+        bool stop = false;
+        inbox_.drain([&](TabCmd c) {
+            std::visit(
+                [&](auto &&cmd) {
+                    using T = std::decay_t<decltype(cmd)>;
+                    if constexpr (std::is_same_v<T, TabInput>) {
+                        std::lock_guard lk(render_lock_);
+                        if (auto *s = term_.poll().running) s->send_text(cmd.bytes);
+                    } else if constexpr (std::is_same_v<T, TabResize>) {
+                        std::lock_guard lk(render_lock_);
+                        if (auto *s = term_.poll().running)
+                            s->resize(toe::PixelSize{cmd.px_w, cmd.px_h});
+                    } else if constexpr (std::is_same_v<T, TabStop>) {
+                        stop = true;
+                    }
+                },
+                std::move(c));
+        });
+        if (stop || stopping_.load()) break;
+
+        // --- 2. pump child output into our grid ------------------------------
+        int pty_fd = -1;
+        bool exited = false;
+        int exit_code = 0;
+        {
+            std::lock_guard lk(render_lock_);
+            auto p = term_.poll();
+            if (p.exited) {
+                exited = true;
+                exit_code = p.exited->code;
+            } else {
+                pty_fd = p.running->pty_fd();
+                p.running->pump_output();
+            }
+        }
+        if (exited) {
+            to_gui_.post(TabExited{id_, exit_code});
+            break;
+        }
+
+        // --- 3. post CHANGE-ONLY status to the GUI ---------------------------
+        publish_status();
+
+        // --- 4. block until the PTY or an inbound command is ready -----------
+        struct pollfd fds[2];
+        int n = 0;
+        if (pty_fd >= 0) {
+            fds[n].fd = pty_fd;
+            fds[n].events = POLLIN;
+            ++n;
+        }
+        const int wfd = inbox_.wait_fd();
+        if (wfd >= 0) {
+            fds[n].fd = wfd;
+            fds[n].events = POLLIN;
+            ++n;
+        }
+        if (n == 0) break; // nothing to wait on: bail rather than spin
+        // 100ms cap so a running-command elapsed clock still updates the chrome.
+        ::poll(fds, static_cast<nfds_t>(n), 100);
+    }
+}
+
+void TabActor::publish_status() {
+    std::lock_guard lk(render_lock_);
+    auto *s = term_.poll().running;
+    if (!s) return;
+
+    const std::uint64_t gen = s->generation();
+    if (gen != last_gen_) {
+        last_gen_ = gen;
+        to_gui_.post(TabOutput{id_, gen});
+    }
+
+    if (std::string t = s->window_title(); t != last_title_) {
+        last_title_ = t;
+        to_gui_.post(TabTitleChanged{id_, std::move(t)});
+    }
+    if (std::string d = s->working_dir(); d != last_cwd_) {
+        last_cwd_ = d;
+        to_gui_.post(TabDirChanged{id_, std::move(d)});
+    }
+
+    // OSC 133 command status: post when the running command or its completion
+    // changes, so the Activity-tab chrome tracks it live.
+    bool running = false;
+    std::string cmd;
+    bool finished = false;
+    int code = 0;
+    if (auto cur = s->current_command(); cur && !cur->finished) {
+        running = true;
+        cmd = cur->command;
+    } else if (auto last = s->last_command(); last && last->finished) {
+        finished = true;
+        cmd = last->command;
+        code = last->exit_code.value_or(0);
+    }
+    if (running != last_running_ || finished != last_finished_ || cmd != last_cmd_) {
+        last_running_ = running;
+        last_finished_ = finished;
+        last_cmd_ = cmd;
+        to_gui_.post(TabCommand{id_, running, cmd, finished, code});
+    }
+}
+
+} // namespace hand

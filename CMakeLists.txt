@@ -128,6 +128,7 @@ elseif(APPLE)
     src/help_panel.cpp
     src/workspace.cpp
     src/gui/update.cpp
+    src/actor/tab_actor.cpp
     src/theme/themes.cpp)
   add_library(hand::platform ALIAS hand-platform)
 
@@ -208,6 +209,7 @@ else()
     src/help_panel.cpp
     src/workspace.cpp
     src/gui/update.cpp
+    src/actor/tab_actor.cpp
     src/theme/themes.cpp
     "${GEN}/xdg-shell-client-protocol.h"
     "${GEN}/xdg-shell-protocol.c"
