@@ -64,6 +64,9 @@ public:
     [[nodiscard]] bool should_close() const { return impl_->should_close(); }
     void flush() { impl_->flush(); }
     void set_title(std::string_view t) { impl_->set_title(t); }
+    // CSD window control: 0 = minimize, 1 = toggle-maximize. No-op on backends
+    // that don't implement it (the impl provides an empty default).
+    void window_action(int action) { impl_->window_action(action); }
     void set_clipboard(std::string_view t) { impl_->set_clipboard(t); }
     [[nodiscard]] std::string get_clipboard() { return impl_->get_clipboard(); }
     void open_url(std::string_view u) { impl_->open_url(u); }

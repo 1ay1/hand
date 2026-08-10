@@ -106,6 +106,8 @@ private:
                     present = true;
                 } else if constexpr (std::is_same_v<T, SetWindowTitle>) {
                     if (set_title_) set_title_(e.title);
+                } else if constexpr (std::is_same_v<T, WindowControl>) {
+                    if (window_ctl_) window_ctl_(e.action);
                 } else if constexpr (std::is_same_v<T, Quit>) {
                     // Model is already quitting; stop every actor.
                     for (auto &[id, a] : actors_) a->stop();
@@ -139,6 +141,8 @@ private:
 public:
     // Optional: the backend installs a title setter (reflects focused tab title).
     std::function<void(const std::string &)> set_title_{};
+    // Optional: the backend installs a window-control handler (CSD buttons).
+    std::function<void(WinCtl)> window_ctl_{};
 
 private:
     SpawnFn spawn_;

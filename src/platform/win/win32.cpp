@@ -157,6 +157,9 @@ public:
     }
 
     void set_title(std::string_view title) { ::SetWindowTextW(hwnd_, widen(title).c_str()); }
+    void window_action(int action) {
+        ::ShowWindow(hwnd_, action == 0 ? SW_MINIMIZE : SW_MAXIMIZE);
+    }
 
     void set_clipboard(std::string_view utf8);
     [[nodiscard]] std::string get_clipboard();

@@ -40,6 +40,8 @@ public:
         buf_.set_alpha({0, 0, cols, ChromeBar::kRows}, 255);
 
         chrome_.render_model(buf_, model, frame);
+        cell_w_ = cell.cols;
+        cell_h_ = cell.rows;
 
         s.render_overlay(rc, buf_.data(), buf_.width(), buf_.height(), px, 0, 0, 1.0f,
                          buf_.alpha_data());
@@ -49,9 +51,17 @@ public:
         return chrome_.hit_test(cell_x, cell_y);
     }
 
+    // Resolve a PIXEL click to a chrome action using the last-rendered cell
+    // size. Returns Kind::None when the click isn't on the chrome row.
+    [[nodiscard]] ChromeHit hit_test_px(int px_x, int px_y) const {
+        if (cell_w_ <= 0 || cell_h_ <= 0) return {};
+        return chrome_.hit_test(px_x / cell_w_, px_y / cell_h_);
+    }
+
 private:
     ChromeBar chrome_{};
     glyph::Buffer buf_{};
+    int cell_w_ = 0, cell_h_ = 0;
 };
 
 } // namespace hand

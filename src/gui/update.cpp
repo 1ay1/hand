@@ -129,6 +129,21 @@ GuiCmds gui_update(GuiModel &m, GuiMsg msg) {
                 m.tabs().focus_index(e.index);
                 m.refresh(m.tabs().focus(), true);
                 cmds.push_back(Present{});
+            } else if constexpr (std::is_same_v<T, CloseTabAt>) {
+                // Close a SPECIFIC tab (chrome ×): focus it, then close_focus.
+                m.tabs().focus_index(e.index);
+                const TabId id = m.tabs().focus().id;
+                cmds.push_back(KillTab{id});
+                if (!m.tabs().close_focus()) {
+                    m.set_quitting();
+                    cmds.push_back(Quit{});
+                } else {
+                    cmds.push_back(Present{});
+                }
+            } else if constexpr (std::is_same_v<T, WinMinimize>) {
+                cmds.push_back(WindowControl{WinCtl::minimize});
+            } else if constexpr (std::is_same_v<T, WinToggleMax>) {
+                cmds.push_back(WindowControl{WinCtl::toggle_maximize});
             } else if constexpr (std::is_same_v<T, ForwardText>) {
                 cmds.push_back(SendToTab{m.tabs().focus().id, std::move(e.utf8)});
             } else if constexpr (std::is_same_v<T, ForwardKey>) {

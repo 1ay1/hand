@@ -85,6 +85,17 @@ public:
             xdg_toplevel_set_title(toplevel_, clamp_title(title).c_str());
         }
     }
+    // CSD window control: 0 = minimize, 1 = toggle-maximize.
+    void window_action(int action) {
+        if (!toplevel_) return;
+        if (action == 0) {
+            xdg_toplevel_set_minimized(toplevel_);
+        } else {
+            if (maximized_) xdg_toplevel_unset_maximized(toplevel_);
+            else xdg_toplevel_set_maximized(toplevel_);
+            maximized_ = !maximized_;
+        }
+    }
     void set_clipboard(std::string_view utf8);
     [[nodiscard]] std::string get_clipboard();
     void open_url(std::string_view uri) { hand::open_url_xdg(uri); }
@@ -291,6 +302,7 @@ private:
 
     PixelSize size_{960, 600};
     bool closed_ = false;
+    bool maximized_ = false; // CSD toggle-maximize state
     bool configured_ = false;
 
     // Event sink is only valid during a poll_events() call.

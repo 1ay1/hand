@@ -65,6 +65,11 @@ struct CloseTab    {};             // close the focused tab
 struct NextTab     {};
 struct PrevTab     {};
 struct FocusTabAt  { std::size_t index; };
+struct CloseTabAt  { std::size_t index; }; // close a specific tab (chrome × click)
+// Window-control intents from the chrome (CSD): the reducer turns these into
+// WindowControl cmds the backend actions.
+struct WinMinimize {};
+struct WinToggleMax {};
 
 // Input destined for the focused terminal. Text is committed UTF-8; a key is a
 // full KeyEvent the focused tab's Session encodes (send_key does the VT/kitty
@@ -75,7 +80,7 @@ struct ForwardKey  { toe::KeyEvent key; };
 using GuiMsg =
     std::variant<TabOutput, TabTitleChanged, TabDirChanged, TabCommand, TabExited, WinResized,
                  WinFocus, WinCloseReq, Tick, NewTab, CloseTab, NextTab, PrevTab, FocusTabAt,
-                 ForwardText, ForwardKey>;
+                 CloseTabAt, WinMinimize, WinToggleMax, ForwardText, ForwardKey>;
 
 // ===========================================================================
 // GuiCmd — effects as DATA. The impure runtime interprets these. Closed sum.
@@ -87,10 +92,13 @@ struct SendToTab  { TabId id; std::string bytes; }; // deliver text input to a t
 struct SendKeyToTab { TabId id; toe::KeyEvent key; }; // deliver a key to a tab
 struct Present     {};                        // draw a frame (active tab + chrome)
 struct SetWindowTitle { std::string title; }; // reflect focused tab's title
+// A window-management action for the backend to perform (CSD chrome buttons).
+enum class WinCtl { minimize, toggle_maximize };
+struct WindowControl { WinCtl action; };
 struct Quit        {};                        // last tab closed / window closed
 
 using GuiCmd = std::variant<SpawnTab, KillTab, SendToTab, SendKeyToTab, Present, SetWindowTitle,
-                            Quit>;
+                            WindowControl, Quit>;
 
 using GuiCmds = std::vector<GuiCmd>;
 

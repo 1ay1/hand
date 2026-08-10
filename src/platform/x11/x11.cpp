@@ -63,6 +63,32 @@ public:
             XFlush(display_);
         }
     }
+    // CSD window control from the chrome buttons. 0 = minimize (iconify),
+    // 1 = toggle maximize (via _NET_WM_STATE_MAXIMIZED_{HORZ,VERT}).
+    void window_action(int action) {
+        if (!display_ || !window_) return;
+        if (action == 0) {
+            XIconifyWindow(display_, static_cast<Window>(window_), DefaultScreen(display_));
+            XFlush(display_);
+            return;
+        }
+        // Toggle maximize: send a _NET_WM_STATE client message to the root.
+        const Atom wm_state = XInternAtom(display_, "_NET_WM_STATE", False);
+        const Atom max_h = XInternAtom(display_, "_NET_WM_STATE_MAXIMIZED_HORZ", False);
+        const Atom max_v = XInternAtom(display_, "_NET_WM_STATE_MAXIMIZED_VERT", False);
+        XEvent ev{};
+        ev.type = ClientMessage;
+        ev.xclient.window = static_cast<Window>(window_);
+        ev.xclient.message_type = wm_state;
+        ev.xclient.format = 32;
+        ev.xclient.data.l[0] = 2; // _NET_WM_STATE_TOGGLE
+        ev.xclient.data.l[1] = static_cast<long>(max_h);
+        ev.xclient.data.l[2] = static_cast<long>(max_v);
+        ev.xclient.data.l[3] = 1; // source: application
+        XSendEvent(display_, DefaultRootWindow(display_), False,
+                   SubstructureNotifyMask | SubstructureRedirectMask, &ev);
+        XFlush(display_);
+    }
     void set_clipboard(std::string_view utf8);
     [[nodiscard]] std::string get_clipboard();
     void open_url(std::string_view uri) { hand::open_url_xdg(uri); }

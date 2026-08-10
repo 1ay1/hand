@@ -512,6 +512,7 @@ public:
     [[nodiscard]] bool should_close() const { return inbox_.close_requested; }
 
     void set_title(std::string_view t);
+    void window_action(int action); // 0=minimize, 1=toggle-maximize (Cocoa)
     void set_clipboard(std::string_view t);
     [[nodiscard]] std::string get_clipboard();
     void open_url(std::string_view u);
@@ -957,6 +958,14 @@ void CocoaSurface::set_title(std::string_view t) {
                                                length:(NSUInteger)t.size()
                                              encoding:NSUTF8StringEncoding];
         if (s) [window_ setTitle:s];
+    }
+}
+
+void CocoaSurface::window_action(int action) {
+    @autoreleasepool {
+        if (!window_) return;
+        if (action == 0) [window_ miniaturize:nil];   // minimize
+        else [window_ zoom:nil];                        // toggle-maximize (AppKit zoom)
     }
 }
 

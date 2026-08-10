@@ -134,13 +134,33 @@ template <class App>
     GuiRuntime rt{std::move(spawn), std::move(present)};
     rt_ptr = &rt;
     rt.set_title_ = [&](const std::string &t) { app.set_title(t); };
+    // CSD window controls: route the chrome's –/□ buttons to the backend.
+    rt.window_ctl_ = [&](WinCtl a) {
+        app.window_action(a == WinCtl::minimize ? 0 : 1); // 0=minimize, 1=toggle-max
+    };
     rt.start(); // spawn the first tab's actor
 
     std::uint64_t frame = 0;
     const std::uint64_t start = detail::now_ms_();
     while (!app.should_close() && !rt.done()) {
-        // Translate any pending window events into GuiMsgs.
-        app.poll_events([&](const toe::win::Event &ev) { translate_event(rt, ev); });
+        // Translate any pending window events into GuiMsgs. Mouse-down on the
+        // chrome row is resolved here (needs the view's cell size); everything
+        // else goes through translate_event.
+        app.poll_events([&](const toe::win::Event &ev) {
+            if (const auto *md = std::get_if<toe::win::MouseDown>(&ev)) {
+                const ChromeHit hit = view.hit_test_px(md->x, md->y);
+                switch (hit.kind) {
+                case ChromeHit::Kind::ActivateTab: rt.post(FocusTabAt{hit.tab_index}); return;
+                case ChromeHit::Kind::CloseTab: rt.post(CloseTabAt{hit.tab_index}); return;
+                case ChromeHit::Kind::NewTab: rt.post(NewTab{}); return;
+                case ChromeHit::Kind::WinMinimize: rt.post(WinMinimize{}); return;
+                case ChromeHit::Kind::WinMaximize: rt.post(WinToggleMax{}); return;
+                case ChromeHit::Kind::WinClose: rt.post(WinCloseReq{}); return;
+                case ChromeHit::Kind::None: break; // click in the terminal body
+                }
+            }
+            translate_event(rt, ev);
+        });
 
         // A ~60fps tick drives the chrome spinner / attention pulse.
         rt.post(Tick{frame++});
