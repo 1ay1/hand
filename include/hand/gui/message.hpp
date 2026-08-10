@@ -20,6 +20,8 @@
 
 #include <cstdint>
 #include <string>
+#include <functional>
+#include <optional>
 #include <variant>
 #include <vector>
 
@@ -87,5 +89,13 @@ using GuiCmd = std::variant<SpawnTab, KillTab, SendToTab, Present, SetWindowTitl
 using GuiCmds = std::vector<GuiCmd>;
 
 } // namespace hand
+
+// TabId is an enum-class key for the runtime's actor map; give it a hash.
+template <>
+struct std::hash<hand::TabId> {
+    std::size_t operator()(hand::TabId id) const noexcept {
+        return std::hash<std::uint64_t>{}(static_cast<std::uint64_t>(id));
+    }
+};
 
 #endif // HAND_GUI_MESSAGE_HPP
