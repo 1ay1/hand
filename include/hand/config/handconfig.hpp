@@ -108,7 +108,7 @@ struct ChromeConfig {
     toe::Rgb rail_failed = toe::rgb(235, 90, 90);   // failed command segment
     toe::Rgb rail_running = toe::rgb(240, 190, 70); // in-flight command segment
     bool flyout = true;          // show the command-list flyout on rail hover
-    int flyout_rows = 12;        // max command rows the flyout shows at once
+    int flyout_rows = 7;         // command rows shown at once (auto-scrolls on hover)
     int flyout_width = 44;       // max flyout card width in cells
     toe::Rgb flyout_accent = toe::rgb(122, 168, 255); // title / pointer / bar
     toe::Rgb flyout_bg = toe::rgb(22, 24, 33);        // card background

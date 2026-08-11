@@ -81,7 +81,7 @@ struct Settings {
     std::string rail_running = "#f0be46";
     int rail_alpha = 210;
     bool flyout = true;
-    int flyout_rows = 12;
+    int flyout_rows = 7;
     std::string flyout_accent = "#7aa8ff";
 
     // Scroll
