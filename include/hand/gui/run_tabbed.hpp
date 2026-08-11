@@ -414,10 +414,10 @@ template <class App>
                     drag_col = std::max(0, mm->x / cw);
                     if (mm->y < 0) {
                         drag_dir = -1;                   // above the grid -> up
-                        drag_speed = 1 + (-mm->y) / chh;
+                        drag_speed = std::min(1 + (-mm->y) / chh, 8);
                     } else if (mm->y >= grid_px_h) {
                         drag_dir = +1;                   // below the grid -> down
-                        drag_speed = 1 + (mm->y - grid_px_h) / chh;
+                        drag_speed = std::min(1 + (mm->y - grid_px_h) / chh, 8);
                     } else {
                         drag_dir = 0;                    // inside: no autoscroll
                     }
