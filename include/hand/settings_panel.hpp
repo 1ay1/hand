@@ -123,7 +123,7 @@ public:
     SettingsPanel() = default;
 
     [[nodiscard]] bool active() const noexcept { return active_; }
-    void open(const Settings &current) { s_ = current; active_ = true; queue_.clear(); focus_ = 0; section_ = 0; dd_open_ = -1; sync_font_index(); }
+    void open(const Settings &current) { s_ = current; active_ = true; queue_.clear(); focus_ = 1; section_ = 0; dd_open_ = -1; sync_font_index(); }
     void close() { flush_pending(); active_ = false; queue_.clear(); dd_open_ = -1; }
     void toggle(const Settings &current) { active_ ? close() : open(current); }
 
@@ -154,7 +154,7 @@ public:
     }
     void toggle() {
         if (active_) { close(); }
-        else { s_ = Settings::from(cfg_); active_ = true; queue_.clear(); focus_ = 0; section_ = 0; dd_open_ = -1; sync_font_index(); }
+        else { s_ = Settings::from(cfg_); active_ = true; queue_.clear(); focus_ = 1; section_ = 0; dd_open_ = -1; sync_font_index(); }
     }
 
     [[nodiscard]] const Settings &state() const noexcept { return s_; }

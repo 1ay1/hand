@@ -196,6 +196,71 @@ public:
 
     [[nodiscard]] bool escaped() const { return in_.key == Key::Escape; }
 
+    // --- section sidebar (vertical tabs on the LEFT) ----------------------
+    // Like tab_bar, but lays the sections down the left edge as a sidebar and
+    // narrows the content area to the pane on its right. Up/Down move focus
+    // between rows as usual; while THIS row is focused, Left/Right OR Up/Down
+    // switch sections (so the sidebar behaves like a vertical selector). Call
+    // right after begin_panel(), before the section's widgets. Returns true when
+    // the section changed. The content area is reset each frame by begin_panel,
+    // so narrowing it here affects only this frame's widgets.
+    bool sidebar(const std::vector<std::string> &sections, int *active) {
+        const int n = (int)sections.size();
+        *active = n > 0 ? std::clamp(*active, 0, n - 1) : 0;
+        // Sidebar width = widest label + 3 (accent bar + pad + margin), clamped.
+        int w = 0;
+        for (const auto &s : sections) w = std::max(w, (int)Buffer::text_width(s));
+        const int side_w = std::clamp(w + 4, 10, content_.w - 20);
+
+        // This is a focusable "row" for nav purposes (row 0), but it spans the
+        // WHOLE content height on the left.
+        const int r = begin_row_norender();
+        const bool foc = (r == focus_);
+        bool changed = false;
+        if (foc) {
+            if (in_.key == Key::Down || in_.key == Key::Right) {
+                *active = (*active + 1) % n; changed = true; consumed_ = true;
+            } else if (in_.key == Key::Up || in_.key == Key::Left) {
+                *active = (*active - 1 + n) % n; changed = true; consumed_ = true;
+            }
+        }
+
+        const int top = cursor_y_;
+        const int bot = panel_.bottom() - 3; // above the footer rule
+        // Vertical divider between the sidebar and the content pane.
+        const int div_x = content_.x + side_w;
+        for (int y = top; y < bot; ++y)
+            buf_.put(div_x, y, U'\u2502', Style{theme_.border, theme_.panel_bg});
+
+        // The section rows.
+        for (int i = 0; i < n; ++i) {
+            const int y = top + i;
+            if (y >= bot) break;
+            const bool on = (i == *active);
+            const std::string &name = sections[(std::size_t)i];
+            if (on) {
+                buf_.fill(Rect{content_.x, y, side_w, 1}, Style{theme_.accent_fg, theme_.accent});
+                buf_.put(content_.x, y, U'\u2590', Style{theme_.accent, theme_.accent});
+                buf_.text(content_.x + 2, y, name,
+                          Style{theme_.accent_fg, theme_.accent, Attr::Bold});
+            } else {
+                // A focus caret on the sidebar itself when the sidebar row owns
+                // focus, so it's clear Up/Down is switching sections.
+                if (foc)
+                    buf_.put(content_.x, y, U'\u2502', Style{theme_.accent, theme_.panel_bg});
+                buf_.text(content_.x + 2, y, name,
+                          Style{foc ? theme_.fg : theme_.dim, theme_.panel_bg});
+            }
+        }
+
+        // Narrow the content area to the right pane for the rest of this frame.
+        content_.x += side_w + 2;
+        content_.w -= side_w + 2;
+        cursor_y_ = top; // content starts at the top, beside the sidebar
+        content_start_y_ = cursor_y_;
+        return changed;
+    }
+
     // --- section tab bar ---------------------------------------------------
     // A focusable row of section tabs (e.g. Appearance · Font · Colors). When
     // focused, Left/Right switch sections; the active one is highlighted. Draws
@@ -656,9 +721,15 @@ private:
         if (idx == focus_) {
             buf_.fill(Rect{content_.x, cursor_y_, content_.w, 1},
                       Style{theme_.fg, theme_.focus_bg});
-            buf_.put(content_.x, cursor_y_, U'▐', Style{theme_.accent, theme_.focus_bg});
+            buf_.put(content_.x, cursor_y_, U'\u2590', Style{theme_.accent, theme_.focus_bg});
         }
         return idx;
+    }
+    // A focusable row that paints NO default highlight (the caller draws its own
+    // — e.g. the sidebar). Just claims the next focus index.
+    int begin_row_norender() {
+        row_start_y_ = cursor_y_;
+        return row_index_++;
     }
     void end_row() { cursor_y_ += 1; }
     void row_gap() { cursor_y_ += 1; }

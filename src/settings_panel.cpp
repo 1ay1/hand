@@ -360,14 +360,14 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
     int panel_h = 2 + 2 + max_rows + 2 + 2;
     panel_h = std::clamp(panel_h, 12, buf.height() - 2);
 
-    // Width must fit the WHOLE tab strip so no tab is clipped off. Each tab
-    // occupies (label + 2 caps/pad + 1 gap) cells (see Ctx::tab_bar); add the
-    // frame + inner margins. Clamp to the screen; if the terminal is too narrow
-    // the tab_bar will scroll, but on any normal window all 8 tabs show.
-    int tabs_w = 1; // leading margin
+    // Width: a left SIDEBAR (widest section label + accent bar + margins) plus
+    // the content pane. Sidebar ~= max label + 4; content needs ~46 for the
+    // widest control (colour swatch rows, sliders). Clamp to the screen.
+    int side_w = 0;
     for (const auto &t : kSections)
-        tabs_w += static_cast<int>(t.size()) + 3;
-    const int panel_w = std::clamp(std::max(66, tabs_w + 5), 40, buf.width() - 2);
+        side_w = std::max(side_w, static_cast<int>(t.size()));
+    side_w += 4;
+    const int panel_w = std::clamp(side_w + 3 + 48, 40, buf.width() - 2);
 
     // Overlay translucency comes from the config (Window tab): the scrim dims
     // the terminal lightly, the panel card stays near-opaque and readable.
@@ -377,9 +377,10 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
     ui.begin_panel("hand · settings", panel_w, panel_h, a8(s_.overlay_scrim_opacity),
                    a8(s_.overlay_panel_opacity));
 
-    // Section tabs (focus row 0). ←/→ switch when the tab row is focused; each
-    // section shows only its own options so the panel stays scannable.
-    if (ui.tab_bar(kSections, &section_)) {
+    // Section SIDEBAR down the left (focus row 0). Up/Down (or ←/→) switch
+    // sections when the sidebar owns focus; each section shows only its own
+    // options in the pane on the right.
+    if (ui.sidebar(kSections, &section_)) {
         // Moved to another section: park focus on its first field and close any
         // open dropdown so state doesn't leak between tabs.
         focus_ = 1;
@@ -519,7 +520,7 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
     if (dd_open_ >= 0)
         ui.end_panel("type to filter   \u2191\u2193 preview   \u21b5 keep   esc close menu");
     else
-        ui.end_panel("tab section   \u2191\u2193 move   \u2190\u2192/space edit   applies live   esc close");
+        ui.end_panel("\u2191\u2193 move   \u2190\u2192/space edit   tab: switch section   applies live   esc close");
 
     // Live config: any edit is scheduled for persistence. We debounce so a
     // slider drag writes the file once it settles, not on every tick; close()
