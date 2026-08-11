@@ -393,6 +393,12 @@ if(HAND_BUILD_TESTS)
   target_include_directories(frame_gate_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
   add_test(NAME frame_gate COMMAND frame_gate_test)
 
+  # Animation authority: Animator (deadline aggregation + time-derived frame).
+  # Pure, lock-free, no engine — the animation timing proven in isolation.
+  add_executable(animator_test tests/animator_test.cpp)
+  target_include_directories(animator_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+  add_test(NAME animator COMMAND animator_test)
+
   # Config watcher: pure filesystem-watch logic (inotify on Linux, kqueue on
   # macOS/BSD), no GL / no deps. Guards live config hot-reload on every OS.
   add_executable(config_watch_test tests/config_watch_test.cpp)

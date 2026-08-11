@@ -32,6 +32,7 @@
 
 #include "hand/actor/mailbox.hpp"
 #include "hand/actor/tab_actor.hpp"
+#include "hand/gui/animator.hpp"
 #include "hand/gui/message.hpp"
 #include "hand/gui/model.hpp"
 #include "toe/terminal.hpp"
@@ -167,33 +168,27 @@ public:
 
     // A running-command spinner or a done-attention pulse needs ~60fps repaints.
     // Pure model read (TabModel status/attention) — no lock, no engine call.
-    [[nodiscard]] bool has_fast_animation() const {
+    // Refreshes the Animator's Spinner/Pulse sources; call once per pump.
+    void refresh_anim_sources() {
         bool fast = false;
         model_.tabs().for_each_ordered([&](const TabEntry &e, bool, std::size_t) {
             if (e.model.status() == TabStatus::Running ||
                 e.model.attention() != TabAttention::None)
                 fast = true;
         });
-        return fast;
+        anim_.set(Anim::Spinner, fast);
     }
 
-    // The wait deadline in ms, or -1 to block FOREVER (zero idle CPU). LOCK-FREE:
-    //   16ms  while a spinner/pulse animates OR the focused caret is gliding;
-    //   blink half-period for the steady cursor blink;
-    //   -1     when nothing moves.
-    [[nodiscard]] int animation_deadline_ms() const {
-        if (has_fast_animation() || focus_animating_.load(std::memory_order_relaxed))
-            return 16;
-        return focus_blink_ms_ > 0 ? focus_blink_ms_ : -1;
-    }
+    // The one animation authority — the loop asks it for the wait deadline, and
+    // present()/refresh publish the live sources into it. Lock-free.
+    [[nodiscard]] Animator &animator() noexcept { return anim_; }
+    [[nodiscard]] int animation_deadline_ms() { refresh_anim_sources(); return anim_.next_deadline_ms(); }
     // Cache the focused tab's cursor-blink period (call when focus changes /
-    // settings apply). Kept out of the hot deadline path so it stays lock-free.
-    void set_focus_blink_ms(int ms) noexcept { focus_blink_ms_ = ms; }
+    // settings apply).
+    void set_focus_blink_ms(int ms) noexcept { anim_.set_blink_ms(ms); anim_.set(Anim::Blink, ms > 0); }
     // Publish whether the focused caret is animating (set by present() under the
-    // render_lock). Read lock-free by animation_deadline_ms().
-    void set_focus_animating(bool a) noexcept {
-        focus_animating_.store(a, std::memory_order_relaxed);
-    }
+    // render_lock). Feeds the Animator's CaretGlide source, lock-free.
+    void set_focus_animating(bool a) noexcept { anim_.set(Anim::CaretGlide, a); }
     // Set the animation frame index (time-derived; drives the chrome spinner /
     // pulse phase). Also refreshes the focused tab's derived state.
     void set_frame(std::uint32_t f) {
@@ -218,8 +213,7 @@ private:
     Mailbox<GuiMsg> mailbox_;
     GuiModel model_;
     std::unordered_map<TabId, std::unique_ptr<TabActor>> actors_;
-    int focus_blink_ms_ = 530; // cached blink period (lock-free anim deadline)
-    std::atomic<bool> focus_animating_{false}; // focused caret mid-glide (lock-free)
+    Animator anim_; // the single animation-timing authority (lock-free)
 };
 
 } // namespace hand

@@ -167,20 +167,22 @@ template <class App>
         if (!s) return;
 
         // The caret glide / bell fade changes the pixels every frame even when
-        // generation() doesn't; publish it (lock-free read by the loop) and fold
-        // it into the key so those frames aren't skipped.
-        const bool caret_anim = s->cursor_animating();
-        rt_ptr->set_focus_animating(caret_anim);
+        // generation() doesn't. Its live state is only known AFTER render()
+        // updates it, so we publish it post-render (below). Use the animator's
+        // current view for the key so an in-flight glide isn't frame-skipped.
         const std::uint32_t chrome_frame = static_cast<std::uint32_t>(rt_ptr->model().frame());
-        const bool animating = caret_anim || rt_ptr->has_fast_animation() || help.active() ||
-                               search.active() || settings.panel_active();
 
         RenderKey rk;
         rk.generation = s->generation();
         rk.scroll = s->scroll_offset();
         rk.w = px.w; rk.h = px.h;
         rk.overlay = help.active() ? 1u : search.active() ? 2u : settings.panel_active() ? 3u : 0u;
-        rk.anim_frame = animating ? chrome_frame : 0u; // stable when static -> skips GPU
+        // Fold the frame index UNCONDITIONALLY: the loop only advances it (via
+        // set_frame) while something animates, so it's constant on a static
+        // screen (key stable -> GPU skipped) but changes every 16ms during any
+        // animation (glide/spinner/pulse) -> a fresh frame is guaranteed, no
+        // chicken-and-egg with the caret-animating flag.
+        rk.anim_frame = chrome_frame;
         if (!gate.should_present(rk)) return;          // pixel-identical: no GPU work
         if (loop_hz_present) ++present_count;
 
@@ -202,6 +204,10 @@ template <class App>
                 // Terminal into the lower (h - chrome_h) region.
                 glViewport(0, 0, term_px.w, term_px.h);
                 s->render(rc, term_px);
+                // Publish the caret-glide state NOW — render() just updated it.
+                // This is what keeps the loop waking at 60fps until the glide
+                // settles (the fix for the choppy cursor).
+                rt_ptr->set_focus_animating(s->cursor_animating());
                 // Chrome overlay across the FULL window (its own top row).
                 glViewport(0, 0, px.w, px.h);
                 view.render_chrome(rc, *s, rt_ptr->model(), px, chrome_frame);
@@ -253,15 +259,16 @@ template <class App>
     bool running = true;
     // Diagnostic: HAND_LOOP_HZ=1 prints GUI-loop iterations/sec to stderr.
     const bool loop_hz = std::getenv("HAND_LOOP_HZ") != nullptr;
-    std::uint64_t loop_iters = 0, loop_win = start;
+    std::uint64_t loop_iters = 0, loop_win = start, anim_wakes = 0;
     while (!app.should_close() && !rt.done() && running) {
         if (loop_hz) {
             ++loop_iters;
             const std::uint64_t now = detail::now_ms_();
             if (now - loop_win >= 1000) {
-                std::fprintf(stderr, "[loop] GUI %llu iters/sec, %llu presents/sec\n",
-                             (unsigned long long)loop_iters, (unsigned long long)present_count);
-                loop_iters = 0; loop_win = now; present_count = 0;
+                std::fprintf(stderr, "[loop] GUI %llu iters/sec, %llu presents/sec, %llu anim-wakes/sec\n",
+                             (unsigned long long)loop_iters, (unsigned long long)present_count,
+                             (unsigned long long)anim_wakes);
+                loop_iters = 0; loop_win = now; present_count = 0; anim_wakes = 0;
             }
         }
         app.poll_events([&](const toe::win::Event &ev) {
@@ -373,6 +380,7 @@ template <class App>
             const std::int64_t now = static_cast<std::int64_t>(detail::now_ms_() - start);
             if (now - static_cast<std::int64_t>(last_anim_ms) >= dl_ms) {
                 last_anim_ms = static_cast<std::uint64_t>(now);
+                if (loop_hz_present && dl_ms == 16) ++anim_wakes;
                 rt.set_frame(FrameGate::frame_index(now)); // time-derived spinner phase
                 rt.present_focused();                       // direct present; FrameGate skips if static
             }
