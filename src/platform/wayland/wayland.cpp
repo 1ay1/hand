@@ -622,6 +622,11 @@ void WaylandSurface::emit_key(uint32_t key, KeyEvent::Kind kind) {
         KeyEvent ev;
         ev.key = sk;
         ev.mods = mods;
+        // ISO_Left_Tab is produced ONLY by Shift+Tab; some compositors report
+        // Shift as consumed in the effective mods, which would misclassify
+        // Ctrl+Shift+Tab as NextTab (not PrevTab). Force the shift bit so the
+        // chord layer sees the real intent.
+        if (sym == XKB_KEY_ISO_Left_Tab) ev.mods.shift = true;
         ev.kind = kind;
         (*sink_)(Event{KeyPressed{ev}});
     };

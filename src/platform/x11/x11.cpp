@@ -532,13 +532,17 @@ void X11Surface::handle_key(xcb_keycode_t code, KeyEvent::Kind kind,
         KeyEvent ev;
         ev.key = sk;
         ev.mods = mods;
+        // ISO_Left_Tab is produced ONLY by Shift+Tab; the server may report
+        // Shift as consumed, which would misclassify Ctrl+Shift+Tab as NextTab.
+        // Force the shift bit so the chord layer sees PrevTab.
+        if (sym == XKB_KEY_ISO_Left_Tab) ev.mods.shift = true;
         ev.kind = kind;
         sink(Event{KeyPressed{ev}});
     };
     switch (sym) {
     case XKB_KEY_Return: case XKB_KEY_KP_Enter: return special(SpecialKey::Enter);
     case XKB_KEY_BackSpace: return special(SpecialKey::Backspace);
-    case XKB_KEY_Tab: return special(SpecialKey::Tab);
+    case XKB_KEY_Tab: case XKB_KEY_ISO_Left_Tab: return special(SpecialKey::Tab);
     case XKB_KEY_Escape: return special(SpecialKey::Escape);
     case XKB_KEY_Up: return special(SpecialKey::Up);
     case XKB_KEY_Down: return special(SpecialKey::Down);

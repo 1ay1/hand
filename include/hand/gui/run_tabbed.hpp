@@ -327,6 +327,9 @@ template <class App>
                 const auto &k = kp->key;
                 const bool press = k.kind == toe::KeyEvent::Kind::press;
                 const platform::Chord ch = platform::classify_chord(k);
+                if (detail::trace_on() && press && ch != platform::Chord::None)
+                    std::fprintf(stderr, "[tabs] chord=%d (ctrl=%d shift=%d)\n",
+                                 static_cast<int>(ch), k.mods.ctrl, k.mods.shift);
                 if (press && ch == platform::Chord::ToggleSettings) {
                     help.close();
                     if (search.active())
