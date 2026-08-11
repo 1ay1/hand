@@ -29,6 +29,7 @@
 #include "hand/help_panel.hpp"
 #include "hand/search_bar.hpp"
 #include "hand/config/config.hpp" // load_hand_config for hot-reload
+#include "hand/gui/host_config.hpp" // process-wide host-only knobs (flyout/autoscroll)
 #include "hand/config_watch.hpp"  // inotify config watcher
 #include "toe/app.hpp"      // toe::win::Event
 #include "toe/terminal.hpp"
@@ -271,6 +272,7 @@ private:
             session.set_palette(pal);
         }
         session.set_cursor_animation(s.animate_cursor, s.animate_ms, s.animate_trail);
+        session.set_cursor_trail_len(s.animate_trail_len);
         session.set_cursor_blink_ms(s.blink_cursor ? s.blink_ms : 0);
         session.set_behavior({s.scroll_mult, s.scroll_on_output, s.scroll_on_keystroke,
                               s.copy_on_select});
@@ -279,6 +281,29 @@ private:
         session.set_ligatures(s.ligatures, px);
         session.set_padding(s.padding, px);
         session.set_opacity(s.opacity);
+        // Search-match highlight + selection fine-tuning (live).
+        session.set_search_colors(parse_hex(s.search_match), parse_hex(s.search_current));
+        session.set_selection_tuning(static_cast<float>(s.selection_contrast) / 10.0f,
+                                     static_cast<float>(s.selection_radius) / 100.0f, 0.11f);
+        // Command-minimap rail (live).
+        session.set_rail(s.rail, s.rail_width, parse_hex(s.rail_ok), parse_hex(s.rail_failed),
+                         parse_hex(s.rail_running));
+        session.set_rail_alpha(s.rail_alpha, 90);
+        // Host-only GUI knobs the run loop reads (autoscroll/zoom/pointer/
+        // flyout) — update the process-wide host_config so they take effect
+        // immediately on the next interaction, no relaunch.
+        auto &host = host_config();
+        host.autoscroll_max = static_cast<float>(s.autoscroll_max);
+        host.font_zoom_step = s.font_zoom_step;
+        host.pointer_shapes = s.pointer_shapes;
+        host.flyout = s.flyout;
+        host.flyout_rows = s.flyout_rows;
+        {
+            const toe::Rgb a = parse_hex(s.flyout_accent);
+            host.flyout_accent = (static_cast<std::uint32_t>(a.r) << 16) |
+                                 (static_cast<std::uint32_t>(a.g) << 8) |
+                                 static_cast<std::uint32_t>(a.b);
+        }
     }
 
     // Logical point size -> device pixels. The exact conversion is HOST policy
