@@ -310,6 +310,17 @@ template <class App>
     // has a valid terminal-viewport size (present recomputes it each frame with
     // the real cell size).
     lay.set(px0.w, px0.h, 8, 16, tab_side, host_config().tab_side_width);
+    // Derive the tab-bar palette from the active theme (the single source of
+    // colour truth) and re-derive when it changes (live theme switch).
+    std::string tab_theme_name;
+    auto refresh_tab_theme = [&] {
+        const std::string &want = host_config().theme_name;
+        if (want == tab_theme_name) return;
+        tab_theme_name = want;
+        if (const NamedTheme *t = find_theme(want)) view.set_tab_theme(derive_tab_theme(*t));
+        else view.set_tab_theme(default_tab_theme());
+    };
+    refresh_tab_theme();
 
     const std::uint64_t start = detail::now_ms_();
     // Elapsed-ms baseline: the loop compares against `now = now_ms_() - start`
@@ -660,6 +671,7 @@ template <class App>
 
         if (settings_changed_this_frame) {
             settings_changed_this_frame = false;
+            refresh_tab_theme(); // a theme switch re-colours the tab bar too
             const toe::PixelSize px = app.pixel_size();
             rt.for_each_live_session([&](toe::Session &s) { settings.apply_to(s, px); });
         }

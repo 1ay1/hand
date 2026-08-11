@@ -306,6 +306,7 @@ private:
         host.tab_controls = s.tab_controls;
         host.tab_plus = s.tab_plus;
         host.tab_side_width = s.tab_side_width;
+        host.theme_name = s.theme; // keeps the tab-bar palette in sync
         {
             const toe::Rgb a = parse_hex(s.flyout_accent);
             host.flyout_accent = (static_cast<std::uint32_t>(a.r) << 16) |

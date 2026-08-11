@@ -26,6 +26,7 @@
 #include "hand/glyph/buffer.hpp"
 #include "hand/gui/chrome_layout.hpp"
 #include "hand/tab_model.hpp"
+#include "hand/theme/tab_theme.hpp"
 #include "hand/workspace.hpp"
 
 namespace hand {
@@ -43,6 +44,8 @@ struct ChromeHit {
 
 class ChromeBar {
 public:
+    // Set the tab palette (derived from the active theme). Call on theme change.
+    void set_theme(const TabTheme &t) noexcept { tt_ = t; }
     // The chrome occupies the top ROW of the grid (row 0). The terminal content
     // is offset down by this many rows by the host.
     static constexpr int kRows = 1;
@@ -56,7 +59,7 @@ public:
         const int y = 0;
 
         // Base bar.
-        const glyph::Style base{.fg = rgb(150, 150, 165), .bg = rgb(24, 24, 32)};
+        const glyph::Style base{.fg = tt_.inactive_fg, .bg = tt_.bar_bg};
         buf.fill({0, y, w, 1}, base);
 
         // Reserve the right end for window controls:  ─  □  ✕  (3 cells + gaps).
@@ -68,7 +71,7 @@ public:
         // A "+" new-tab button just left of the controls.
         const int plus_x = ctrl_x - 3;
         if (plus_x > 2) {
-            const glyph::Style plus{.fg = rgb(150, 150, 165), .bg = rgb(24, 24, 32)};
+            const glyph::Style plus{.fg = tt_.inactive_fg, .bg = tt_.bar_bg};
             buf.put(plus_x + 1, y, U'+', plus);
             hits_.push_back({{ChromeHit::Kind::NewTab, 0}, plus_x, plus_x + 3});
         }
@@ -101,7 +104,7 @@ public:
         const int w = buf.width();
         if (w <= 0 || buf.height() <= 0) return;
         const int y = 0;
-        const glyph::Style base{.fg = rgb(150, 150, 165), .bg = rgb(24, 24, 32)};
+        const glyph::Style base{.fg = tt_.inactive_fg, .bg = tt_.bar_bg};
         buf.fill({0, y, w, 1}, base);
 
         const int ctrl_w = 9;
@@ -152,7 +155,7 @@ public:
         hits_.clear();
         if (r.w <= 0 || r.h <= 0) return;
         const bool vert = (side == ChromeSide::Left || side == ChromeSide::Right);
-        const glyph::Style base{.fg = rgb(150, 150, 165), .bg = rgb(24, 24, 32)};
+        const glyph::Style base{.fg = tt_.inactive_fg, .bg = tt_.bar_bg};
         buf.fill({r.x, r.y, r.w, r.h}, base);
 
         const std::size_t n = m.tabs().size();
@@ -178,7 +181,7 @@ private:
                            ChromeSide, bool show_ctrls, bool show_plus, std::size_t n,
                            std::size_t focus_i) {
         const int y = r.y;
-        const glyph::Style base{.fg = rgb(150, 150, 165), .bg = rgb(24, 24, 32)};
+        const glyph::Style base{.fg = tt_.inactive_fg, .bg = tt_.bar_bg};
         int right = r.x + r.w;
         if (show_ctrls) { right -= 9; draw_window_controls(buf, y, right); }
         if (show_plus && right - 3 > r.x + 2) {
@@ -216,7 +219,7 @@ private:
     void render_vertical(glyph::Buffer &buf, const Model &m, std::uint32_t frame, RectC r,
                          ChromeSide side, bool show_ctrls, bool show_plus, std::size_t n,
                          std::size_t focus_i) {
-        const glyph::Style base{.fg = rgb(150, 150, 165), .bg = rgb(24, 24, 32)};
+        const glyph::Style base{.fg = tt_.inactive_fg, .bg = tt_.bar_bg};
         // Reserve the bottom rows for + and window controls.
         int bottom = r.y + r.h;
         if (show_ctrls) { draw_window_controls_v(buf, r, bottom - 1); bottom -= 1; }
@@ -224,7 +227,7 @@ private:
             const int py = bottom - 1;
             buf.fill({r.x, py, r.w, 1}, base);
             buf.put(r.x + 1, py, U'+', base);
-            buf.text(r.x + 3, py, "new tab", glyph::Style{.fg = rgb(150,150,165), .bg = rgb(24,24,32)}, r.w - 4);
+            buf.text(r.x + 3, py, "new tab", glyph::Style{.fg = tt_.inactive_fg, .bg = tt_.bar_bg}, r.w - 4);
             reg({ChromeHit::Kind::NewTab, 0}, r.x, py, r.x + r.w - 1, py);
             bottom -= 1;
         }
@@ -259,11 +262,11 @@ private:
     }
 
     void draw_window_controls_v(glyph::Buffer &buf, RectC r, int y) {
-        const glyph::Style base{.fg = rgb(150, 150, 165), .bg = rgb(24, 24, 32)};
+        const glyph::Style base{.fg = tt_.inactive_fg, .bg = tt_.bar_bg};
         buf.fill({r.x, y, r.w, 1}, base);
-        buf.put(r.x + 1, y, U'\u2013', glyph::Style{.fg = rgb(180,180,120), .bg = rgb(24,24,32)});
-        buf.put(r.x + 3, y, U'\u25A1', glyph::Style{.fg = rgb(120,180,120), .bg = rgb(24,24,32)});
-        buf.put(r.x + 5, y, U'\u2715', glyph::Style{.fg = rgb(210,110,110), .bg = rgb(24,24,32)});
+        buf.put(r.x + 1, y, U'\u2013', glyph::Style{.fg = tt_.btn_min, .bg = tt_.bar_bg});
+        buf.put(r.x + 3, y, U'\u25A1', glyph::Style{.fg = tt_.btn_max, .bg = tt_.bar_bg});
+        buf.put(r.x + 5, y, U'\u2715', glyph::Style{.fg = tt_.btn_close, .bg = tt_.bar_bg});
         reg({ChromeHit::Kind::WinMinimize, 0}, r.x, y, r.x + 2, y);
         reg({ChromeHit::Kind::WinMaximize, 0}, r.x + 3, y, r.x + 4, y);
         reg({ChromeHit::Kind::WinClose, 0}, r.x + 5, y, r.x + r.w - 1, y);
@@ -273,23 +276,23 @@ private:
                     std::uint32_t frame, ChromeSide side) {
         const TabAttention att = tm.attention();
         const bool pulse_on = (frame / 8) % 2 == 0;
-        Rgb bg = is_focus ? rgb(44, 44, 58) : rgb(24, 24, 32);
-        Rgb fg = is_focus ? rgb(235, 235, 240) : rgb(150, 150, 165);
-        if (att == TabAttention::DoneOk && pulse_on) bg = rgb(30, 70, 40);
-        if (att == TabAttention::DoneFail && pulse_on) bg = rgb(80, 34, 34);
+        Rgb bg = is_focus ? tt_.active_bg : tt_.inactive_bg;
+        Rgb fg = is_focus ? tt_.active_fg : tt_.inactive_fg;
+        if (att == TabAttention::DoneOk && pulse_on) bg = tt_.pulse_ok;
+        if (att == TabAttention::DoneFail && pulse_on) bg = tt_.pulse_fail;
         const glyph::Style st{.fg = fg, .bg = bg};
         buf.fill({r.x, y, r.w, 1}, st);
         // Accent bar on the inner edge of the focused tab.
         if (is_focus) {
             const int ax = (side == ChromeSide::Left) ? r.x : r.x + r.w - 1;
-            buf.put(ax, y, U'\u2590', glyph::Style{.fg = rgb(120, 170, 255), .bg = bg});
+            buf.put(ax, y, U'\u2590', glyph::Style{.fg = tt_.accent, .bg = bg});
         }
         int cx = r.x + 1;
         Rgb gcol = fg;
         switch (tm.status()) {
-        case TabStatus::Ok: gcol = rgb(120, 210, 130); break;
-        case TabStatus::Failed: gcol = rgb(230, 120, 120); break;
-        case TabStatus::Running: gcol = rgb(220, 200, 120); break;
+        case TabStatus::Ok: gcol = tt_.status_ok; break;
+        case TabStatus::Failed: gcol = tt_.status_fail; break;
+        case TabStatus::Running: gcol = tt_.status_run; break;
         default: break;
         }
         buf.put(cx, y, tm.glyph(frame), glyph::Style{.fg = gcol, .bg = bg});
@@ -297,15 +300,15 @@ private:
         const int label_w = r.w - (cx - r.x) - 2;
         if (label_w > 0) buf.text(cx, y, tm.label(), st, label_w);
         if (tm.unseen() && !is_focus)
-            buf.put(r.x + r.w - 2, y, U'\u2022', glyph::Style{.fg = rgb(120,170,230), .bg = bg});
+            buf.put(r.x + r.w - 2, y, U'\u2022', glyph::Style{.fg = tt_.unseen, .bg = bg});
         if (is_focus && r.w >= 4)
-            buf.put(r.x + r.w - 2, y, U'\u2715', glyph::Style{.fg = rgb(180,120,120), .bg = bg});
+            buf.put(r.x + r.w - 2, y, U'\u2715', glyph::Style{.fg = tt_.btn_close, .bg = bg});
     }
 
     void draw_window_controls(glyph::Buffer &buf, int y, int x0) {
-        const glyph::Style min_s{.fg = rgb(180, 180, 120), .bg = rgb(24, 24, 32)};
-        const glyph::Style max_s{.fg = rgb(120, 180, 120), .bg = rgb(24, 24, 32)};
-        const glyph::Style cls_s{.fg = rgb(210, 110, 110), .bg = rgb(24, 24, 32)};
+        const glyph::Style min_s{.fg = tt_.btn_min, .bg = tt_.bar_bg};
+        const glyph::Style max_s{.fg = tt_.btn_max, .bg = tt_.bar_bg};
+        const glyph::Style cls_s{.fg = tt_.btn_close, .bg = tt_.bar_bg};
         int x = x0;
         buf.put(x + 1, y, U'\u2013', min_s); // – minimize
         hits_.push_back({{ChromeHit::Kind::WinMinimize, 0}, x, x + 2});
@@ -322,10 +325,10 @@ private:
         // Colours: focused tab reads brighter; a done-attention tab pulses.
         const TabAttention att = tm.attention();
         const bool pulse_on = (frame / 8) % 2 == 0; // ~slow blink
-        Rgb bg = is_focus ? rgb(44, 44, 58) : rgb(24, 24, 32);
-        Rgb fg = is_focus ? rgb(235, 235, 240) : rgb(150, 150, 165);
-        if (att == TabAttention::DoneOk && pulse_on) bg = rgb(30, 70, 40);
-        if (att == TabAttention::DoneFail && pulse_on) bg = rgb(80, 34, 34);
+        Rgb bg = is_focus ? tt_.active_bg : tt_.inactive_bg;
+        Rgb fg = is_focus ? tt_.active_fg : tt_.inactive_fg;
+        if (att == TabAttention::DoneOk && pulse_on) bg = tt_.pulse_ok;
+        if (att == TabAttention::DoneFail && pulse_on) bg = tt_.pulse_fail;
         const glyph::Style st{.fg = fg, .bg = bg};
         buf.fill({x, y, tw, 1}, st);
 
@@ -333,9 +336,9 @@ private:
         // Status glyph (spinner / ✓ / ✗ / ●), coloured by status.
         Rgb gcol = fg;
         switch (tm.status()) {
-        case TabStatus::Ok: gcol = rgb(120, 210, 130); break;
-        case TabStatus::Failed: gcol = rgb(230, 120, 120); break;
-        case TabStatus::Running: gcol = rgb(220, 200, 120); break;
+        case TabStatus::Ok: gcol = tt_.status_ok; break;
+        case TabStatus::Failed: gcol = tt_.status_fail; break;
+        case TabStatus::Running: gcol = tt_.status_run; break;
         default: break;
         }
         buf.put(cx, y, tm.glyph(frame), glyph::Style{.fg = gcol, .bg = bg});
@@ -347,16 +350,17 @@ private:
 
         // Unseen-output dot just before the close ×.
         if (tm.unseen() && !is_focus) {
-            buf.put(x + tw - 3, y, U'\u2022', glyph::Style{.fg = rgb(120, 170, 230), .bg = bg});
+            buf.put(x + tw - 3, y, U'\u2022', glyph::Style{.fg = tt_.unseen, .bg = bg});
         }
         // Close × in the last cell (only shown on the focused tab or on hover;
         // here: always on the focused tab to keep it discoverable).
         if (is_focus && tw >= 4) {
-            buf.put(x + tw - 2, y, U'\u2715', glyph::Style{.fg = rgb(180, 120, 120), .bg = bg});
+            buf.put(x + tw - 2, y, U'\u2715', glyph::Style{.fg = tt_.btn_close, .bg = bg});
         }
     }
 
     std::vector<Region> hits_;
+    TabTheme tt_ = default_tab_theme();
 };
 
 } // namespace hand

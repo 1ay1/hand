@@ -54,6 +54,9 @@ public:
         return chrome_.hit_test(cell_x, cell_y);
     }
 
+    // Set the tab palette (derived from the active theme).
+    void set_tab_theme(const TabTheme &t) { chrome_.set_theme(t); }
+
     // Resolve a PIXEL click to a chrome action using the last-rendered cell
     // size. Returns Kind::None when the click isn't on a chrome control.
     [[nodiscard]] ChromeHit hit_test_px(int px_x, int px_y) const {

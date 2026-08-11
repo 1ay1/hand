@@ -39,6 +39,7 @@ struct HostConfig {
     int tab_side_width = 18;           // column width (cells) for left/right
     bool tab_controls = true;          // window min/max/close buttons
     bool tab_plus = true;              // the + new-tab button
+    std::string theme_name = "catppuccin-mocha"; // active theme (tab colours)
 };
 
 // The single process-wide instance, filled by main() from the vibe config.
