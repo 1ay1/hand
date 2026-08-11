@@ -88,7 +88,6 @@ struct Settings {
     int tab_side_width = 18;   // column width (cells) for left/right
     bool tab_controls = true;  // window min/max/close buttons
     bool tab_plus = true;      // + new-tab button
-    bool tab_auto_hide = false; // hide bar, keep window controls
 
     // Scroll
     int scrollback = 10000;  // lines

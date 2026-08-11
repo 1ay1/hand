@@ -108,9 +108,6 @@ struct TabsConfig {
     int side_width = 18;
     bool show_window_controls = true; // the min/max/close buttons on the bar
     bool show_new_tab_button = true;  // the + button
-    // Auto-hide the whole tab bar; only the window controls (– □ ✕) stay,
-    // floating in the top-right corner, and the terminal fills the window.
-    bool auto_hide = false;
 };
 
 // The command minimap rail + its hover flyout (OSC-133 shell integration).

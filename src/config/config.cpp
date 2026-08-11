@@ -220,7 +220,6 @@ HandConfig load_hand_config(std::string_view path) {
     I("tabs.side_width", cfg.tabs.side_width);
     B("tabs.window_controls", cfg.tabs.show_window_controls);
     B("tabs.new_tab_button", cfg.tabs.show_new_tab_button);
-    B("tabs.auto_hide", cfg.tabs.auto_hide);
 
     // scroll
     I("scroll.scrollback", cfg.scroll.scrollback_lines);
@@ -331,7 +330,6 @@ bool save_hand_config(const HandConfig &cfg, std::string_view path) {
     vibe_object_set_int(tb, "side_width", cfg.tabs.side_width);
     vibe_object_set_bool(tb, "window_controls", cfg.tabs.show_window_controls);
     vibe_object_set_bool(tb, "new_tab_button", cfg.tabs.show_new_tab_button);
-    vibe_object_set_bool(tb, "auto_hide", cfg.tabs.auto_hide);
 
     VibeObject *scr = obj("scroll");
     vibe_object_set_int(scr, "scrollback", cfg.scroll.scrollback_lines);

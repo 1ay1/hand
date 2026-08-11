@@ -79,7 +79,6 @@ int main(int argc, char **argv) {
         host.tab_side_width = hc.tabs.side_width;
         host.tab_controls = hc.tabs.show_window_controls;
         host.tab_plus = hc.tabs.show_new_tab_button;
-        host.tab_auto_hide = hc.tabs.auto_hide;
         host.theme_name = hc.theme_name;
     }
     const std::vector<std::string> child = child_argv_from(argc, argv);
