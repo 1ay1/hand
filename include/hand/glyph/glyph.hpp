@@ -156,6 +156,7 @@ public:
         content_ = panel_.inset(1);
         content_.x += 1; content_.w -= 2; // horizontal breathing room
         cursor_y_ = band_y + 3;           // header band + rule + a blank line
+        content_start_y_ = cursor_y_;     // so heading() can skip a leading gap here
         row_index_ = 0;
         activated_ = -1;
         consumed_ = false;
@@ -269,7 +270,10 @@ public:
 
     // --- section heading (non-focusable) -----------------------------------
     void heading(std::string_view text) {
-        row_gap();
+        // A heading normally leaves a blank line above it to separate sections;
+        // but the FIRST heading sits right under the title rule, so skip that
+        // gap to avoid a dead band at the top of the pane.
+        if (cursor_y_ != content_start_y_) row_gap();
         buf_.text(content_.x, cursor_y_, text,
                   Style{theme_.accent, theme_.panel_bg, Attr::Bold});
         cursor_y_ += 1;
@@ -719,6 +723,7 @@ private:
     Rect panel_{}, content_{};
     int panel_w_ = 0, panel_h_ = 0;
     int cursor_y_ = 0, row_start_y_ = 0;
+    int content_start_y_ = 0; // first content row (heading() skips its gap here)
     int row_index_ = 0, row_count_ = 0;
     int focus_ = 0;
     int label_w_ = 18;
