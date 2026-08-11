@@ -72,6 +72,17 @@ public:
 
     void hide() noexcept { active_ = false; }
 
+    // Test seam: inject list + hover state directly (bypassing a live Session)
+    // so the RENDER path can be exercised in isolation.
+    void set_state_for_test(std::vector<toe::CommandView> items, std::int64_t hover_row,
+                            std::int64_t total_rows) {
+        items_ = std::move(items);
+        hover_row_ = hover_row;
+        total_rows_ = std::max<std::int64_t>(1, total_rows);
+        hover_idx_ = pick_hover(items_, hover_row_);
+        active_ = true;
+    }
+
     // A left-click landed on the rail while the flyout is up. If a command is
     // under the pointer, jump the view to it and return true (consumed).
     [[nodiscard]] bool click(toe::Session &s) {
@@ -82,75 +93,105 @@ public:
     }
 
     // Paint the flyout card into `buf` (sized to the terminal grid in cells).
-    // Floats against the right edge just left of the rail, vertically centered
-    // on the hovered row. Everything outside the card is transparent (alpha 0).
+    // Floats against the right edge just left of the rail and FOLLOWS the
+    // pointer vertically (centered on the hovered rail row), with a connector
+    // notch pointing at that row. Everything outside the card is transparent.
     void render(glyph::Buffer &buf) const {
-        if (!active() ) return;
+        if (!active()) return;
         const int W = buf.width(), H = buf.height();
-        if (W < 26 || H < 4) return;
+        if (W < 28 || H < 6) return;
 
         const int n_items = static_cast<int>(items_.size());
-        const int max_rows = std::min(n_items, std::min(14, H - 2));
-        const int card_h = max_rows + 2;
-        const int card_w = std::clamp(longest_text() + 15, 24, W - 6);
-        const int card_x = W - card_w - 3;             // just left of the rail
+        const int list_rows = std::min(n_items, std::min(12, H - 5));
+        const int card_h = list_rows + 3;               // header + divider + list + pad
+        const int card_w = std::clamp(longest_text() + 16, 26, std::min(W - 8, 48));
+        const int card_x = W - card_w - 4;              // leave room for the rail + notch
 
-        // Scroll the window so the hovered row is visible & roughly centered.
+        // Scroll the list so the hovered row is centered in the window.
         const int center = hover_idx_ >= 0 ? hover_idx_ : n_items - 1;
-        const int first = std::clamp(center - max_rows / 2, 0, std::max(0, n_items - max_rows));
+        const int first = std::clamp(center - list_rows / 2, 0, std::max(0, n_items - list_rows));
 
-        // Vertical placement: PINNED near the top so the card doesn't jitter
-        // around while you slide along the rail — only the highlighted row and
-        // the scroll window change. Nudge down only if it would clip the top.
-        const int card_y = std::clamp(2, 1, std::max(1, H - card_h - 1));
+        // Follow the mouse: center the card on the hovered rail pixel row.
+        const int hover_y = static_cast<int>(hover_row_ * H /
+                                             std::max<std::int64_t>(1, total_rows_));
+        const int card_y = std::clamp(hover_y - card_h / 2, 1, std::max(1, H - card_h - 1));
 
-        const glyph::Rgb bg = glyph::rgb(26, 28, 38);
+        // Palette (self-contained; a dark frosted card with a cool accent).
+        const glyph::Rgb bg   = glyph::rgb(24, 26, 36);
+        const glyph::Rgb bg2  = glyph::rgb(30, 33, 46);   // header band
+        const glyph::Rgb acc  = glyph::rgb(120, 165, 255);
+        const glyph::Style body{glyph::rgb(224, 227, 238), bg};
+        const glyph::Style border{glyph::rgb(70, 78, 110), bg};
+        const glyph::Style dim{glyph::rgb(120, 125, 145), bg};
+
         buf.clear_alpha(0);
         const glyph::Rect card{card_x, card_y, card_w, card_h};
-        buf.set_alpha(card, 246);
-        buf.set_alpha(glyph::Rect{card_x + 1, card_y + card_h, card_w, 1}, 80); // shadow
+        buf.set_alpha(card, 250);
+        // Two-step soft shadow down-right.
+        buf.set_alpha(glyph::Rect{card_x + 1, card_y + card_h, card_w, 1}, 90);
+        buf.set_alpha(glyph::Rect{card_x + 2, card_y + card_h + 1, card_w - 2, 1}, 45);
+        buf.set_alpha(glyph::Rect{card_x + card_w, card_y + 1, 1, card_h}, 60);
 
-        const glyph::Style body{glyph::rgb(226, 228, 238), bg};
-        const glyph::Style border{glyph::rgb(92, 100, 138), bg};
-        const glyph::Style dim{glyph::rgb(128, 132, 150), bg};
         buf.fill(card, body);
         buf.frame(card, border, glyph::BoxStyle::Rounded);
-        buf.text(card_x + 2, card_y, " Commands ",
-                 glyph::Style{glyph::rgb(150, 180, 255), bg});
-        // A caret hinting the list belongs to the rail on the right.
-        buf.put(card_x + card_w, card_y + card_h / 2, U'\u25B8',
-                glyph::Style{glyph::rgb(150, 180, 255), bg});
 
-        for (int r = 0; r < max_rows; ++r) {
+        // Header band: title + count, then a divider rule.
+        buf.fill(glyph::Rect{card_x + 1, card_y + 1, card_w - 2, 1}, glyph::Style{acc, bg2});
+        buf.text(card_x + 2, card_y + 1, "COMMANDS", glyph::Style{acc, bg2});
+        {
+            const std::string cnt = std::to_string(n_items);
+            buf.text(card_x + card_w - 2 - static_cast<int>(cnt.size()), card_y + 1, cnt,
+                     glyph::Style{glyph::rgb(150, 156, 180), bg2});
+        }
+        // Divider under the header.
+        for (int c = card_x + 1; c < card_x + card_w - 1; ++c)
+            buf.put(c, card_y + 2, U'\u2500', border);
+
+        const int list_y0 = card_y + 3;
+        for (int r = 0; r < list_rows; ++r) {
             const int i = first + r;
             if (i >= n_items) break;
             const toe::CommandView &it = items_[static_cast<std::size_t>(i)];
-            const int y = card_y + 1 + r;
+            const int y = list_y0 + r;
             const bool hot = i == hover_idx_;
-            const glyph::Style rs =
-                hot ? glyph::Style{glyph::rgb(245, 247, 255), glyph::rgb(56, 66, 104)} : body;
-            if (hot) {
-                buf.fill(glyph::Rect{card_x + 1, y, card_w - 2, 1}, rs);
-                // Bright left accent bar + caret so the hovered command reads as
-                // SELECTED, not merely tinted.
-                buf.put(card_x + 1, y, U'\u2590',
-                        glyph::Style{glyph::rgb(120, 170, 255), rs.bg});
-            }
 
             const int status = !it.finished ? 0 : (it.succeeded() ? 1 : 2);
-            const char32_t pip = status == 0 ? U'\u25D0' : U'\u25CF';
-            const glyph::Rgb pc = status == 1 ? glyph::rgb(90, 210, 140)
-                                : status == 2 ? glyph::rgb(235, 95, 95)
-                                              : glyph::rgb(240, 190, 70);
-            buf.put(card_x + 2, y, pip, glyph::Style{pc, rs.bg});
+            const glyph::Rgb pc = status == 1 ? glyph::rgb(90, 214, 140)
+                                : status == 2 ? glyph::rgb(240, 96, 96)
+                                              : glyph::rgb(242, 194, 74);
 
+            // Selected row: a status-tinted fill + bright left accent bar so it
+            // pops, and a caret linking it to the connector notch on the right.
+            const glyph::Rgb row_bg = hot ? blend(bg, pc, 0.22f) : bg;
+            const glyph::Style rs{hot ? glyph::rgb(248, 249, 255) : body.fg, row_bg};
+            buf.fill(glyph::Rect{card_x + 1, y, card_w - 2, 1}, rs);
+            if (hot)
+                buf.put(card_x + 1, y, U'\u2590', glyph::Style{pc, row_bg});
+
+            // Status pip.
+            const char32_t pip = status == 0 ? U'\u25D0' : U'\u25CF';
+            buf.put(card_x + 3, y, pip, glyph::Style{pc, row_bg});
+
+            // Command text, then a right-aligned duration in a muted tone.
             const std::string dur = it.duration_ms > 0 ? fmt_dur(it.duration_ms) : std::string{};
-            const int dur_w = static_cast<int>(dur.size());
-            const int text_x = card_x + 4;
-            const int text_max = card_w - 6 - dur_w;
+            const int dur_w = dur.empty() ? 0 : static_cast<int>(dur.size()) + 1;
+            const int text_x = card_x + 5;
+            const int text_max = card_w - 7 - dur_w;
             buf.text(text_x, y, first_line(it.command), rs, std::max(1, text_max));
             if (dur_w > 0)
-                buf.text(card_x + card_w - 1 - dur_w, y, dur, hot ? rs : dim);
+                buf.text(card_x + card_w - 1 - static_cast<int>(dur.size()), y, dur,
+                         hot ? glyph::Style{glyph::rgb(210, 214, 230), row_bg} : dim);
+        }
+
+        // Connector notch: a caret on the card's right edge at the hovered
+        // row's height, pointing toward the rail so the card reads as attached
+        // to the exact command under the pointer.
+        if (hover_idx_ >= 0) {
+            const int hy = std::clamp(list_y0 + (hover_idx_ - first), card_y + 1,
+                                      card_y + card_h - 2);
+            buf.put(card_x + card_w - 1, hy, U'\u25B8', glyph::Style{acc, bg});
+            buf.put(card_x + card_w, hy, U'\u25B8', glyph::Style{acc, bg});
+            buf.set_alpha(glyph::Rect{card_x + card_w, hy, 1, 1}, 250);
         }
     }
 
@@ -159,11 +200,18 @@ private:
         int m = 0;
         for (const auto &it : items_)
             m = std::max(m, glyph::Buffer::text_width(first_line(it.command)));
-        return std::min(m, 56);
+        return std::min(m, 30);
     }
     static std::string first_line(const std::string &s) {
         const auto nl = s.find('\n');
         return nl == std::string::npos ? s : s.substr(0, nl);
+    }
+    // Linear blend a->b by t in [0,1] (self-contained; no Theme dependency).
+    static glyph::Rgb blend(glyph::Rgb a, glyph::Rgb b, float t) noexcept {
+        const auto mix1 = [t](std::uint8_t x, std::uint8_t y) {
+            return static_cast<std::uint8_t>(x + (static_cast<int>(y) - x) * t);
+        };
+        return glyph::rgb(mix1(a.r, b.r), mix1(a.g, b.g), mix1(a.b, b.b));
     }
     static std::string fmt_dur(std::int64_t ms) {
         if (ms < 1000) return std::to_string(ms) + "ms";

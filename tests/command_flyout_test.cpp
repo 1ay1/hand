@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "hand/command_flyout.hpp"
+#include "hand/glyph/buffer.hpp"
 
 static int failures = 0;
 static void ck(bool cond, const char *msg) {
@@ -59,6 +60,22 @@ int main() {
 
     // Empty list -> -1.
     ck(CommandFlyout::pick_hover({}, 5) == -1, "empty -> nothing selected");
+
+    // Render smoke: the card paints without going out of bounds and writes the
+    // header text somewhere in the buffer.
+    {
+        CommandFlyout f;
+        f.set_state_for_test(items, 10, 60);
+        glyph::Buffer buf;
+        buf.resize(80, 24);
+        buf.clear(glyph::Style{});
+        f.render(buf); // must not crash / write OOB (put() is bounds-checked)
+        bool found_c = false;
+        const glyph::Cell *d = buf.data();
+        for (int i = 0; i < buf.width() * buf.height(); ++i)
+            if (d[i].cp == U'C') { found_c = true; break; }
+        ck(found_c, "render draws the COMMANDS header");
+    }
 
     if (failures == 0) std::printf("command_flyout: all tests passed\n");
     return failures ? 1 : 0;
