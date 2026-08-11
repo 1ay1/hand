@@ -39,6 +39,7 @@
 
 #include <string>
 #include <string_view>
+#include <variant>
 
 #include "hand/platform/settings_host.hpp"
 #include "hand/platform/surface.hpp"
@@ -57,7 +58,46 @@ enum class Chord {
     ToggleSettings, // Ctrl+Shift+,   (macOS: Cmd+,)
     ToggleHelp,     // Ctrl+Shift+?   (macOS: Cmd+?)
     OpenSearch,     // Ctrl+Shift+F   (macOS: Cmd+F) — scrollback search
+    // Tab management (tabbed mode). Same neutral vocabulary so there is ONE
+    // chord layer, classified in ONE place — no per-backend key handling.
+    NewTab,         // Ctrl+Shift+T
+    CloseTab,       // Ctrl+Shift+W
+    NextTab,        // Ctrl+Tab
+    PrevTab,        // Ctrl+Shift+Tab
 };
+
+// Classify a PLATFORM-NEUTRAL key event into a reserved Chord. This is the ONE
+// place key bindings are decided; every backend produces the neutral
+// toe::KeyEvent (keysym -> SpecialKey/TextInput + mods) and calls this, so no
+// backend re-implements chord logic (the rule PORTING.md states). Returns
+// Chord::None for anything that should reach the terminal.
+[[nodiscard]] inline Chord classify_chord(const toe::KeyEvent &k) noexcept {
+    const auto &m = k.mods;
+    // Ctrl+Tab / Ctrl+Shift+Tab cycle tabs (Tab arrives as a SpecialKey).
+    if (m.ctrl) {
+        if (const auto *sk = std::get_if<toe::SpecialKey>(&k.key)) {
+            if (*sk == toe::SpecialKey::Tab) return m.shift ? Chord::PrevTab : Chord::NextTab;
+        }
+    }
+    // The Ctrl+Shift letter/punct chords. Backends fold Ctrl combos to a
+    // single lowercased char (TextInput), so match case-insensitively.
+    if (m.ctrl && m.shift) {
+        if (const auto *ti = std::get_if<toe::TextInput>(&k.key)) {
+            if (ti->utf8.size() == 1) {
+                switch (ti->utf8[0]) {
+                case 't': case 'T': return Chord::NewTab;
+                case 'w': case 'W': return Chord::CloseTab;
+                case 'f': case 'F': return Chord::OpenSearch;
+                default: break;
+                }
+            }
+            // ',' and '?' (which is Shift+'/') for the panes.
+            if (ti->utf8 == "," || ti->utf8 == "<") return Chord::ToggleSettings;
+            if (ti->utf8 == "?" || ti->utf8 == "/") return Chord::ToggleHelp;
+        }
+    }
+    return Chord::None;
+}
 
 // `Derived` is the concrete surface (Win32Surface, X11Surface, ...). CRTP lets
 // the base call into it with zero virtual dispatch, preserving the monomorphic

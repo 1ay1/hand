@@ -380,6 +380,13 @@ if(HAND_BUILD_TESTS)
   target_link_libraries(gui_update_test PRIVATE toe::toe)
   add_test(NAME gui_update COMMAND gui_update_test)
 
+  # The SHARED chord classifier: one place decides key bindings; proving it here
+  # means every backend gets identical, correct chords (no per-backend drift).
+  add_executable(chord_test tests/chord_test.cpp)
+  target_include_directories(chord_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+  target_link_libraries(chord_test PRIVATE hand::platform toe::toe)
+  add_test(NAME chord COMMAND chord_test)
+
   # Config watcher: pure filesystem-watch logic (inotify on Linux, kqueue on
   # macOS/BSD), no GL / no deps. Guards live config hot-reload on every OS.
   add_executable(config_watch_test tests/config_watch_test.cpp)

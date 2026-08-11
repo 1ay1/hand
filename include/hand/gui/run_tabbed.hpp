@@ -21,6 +21,8 @@
 #define HAND_GUI_RUN_TABBED_HPP
 
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <optional>
 #include <string>
 #include <variant>
@@ -28,6 +30,7 @@
 #include "hand/actor/tab_actor.hpp"
 #include "hand/gui/message.hpp"
 #include "hand/gui/runtime.hpp"
+#include "hand/platform/backend_base.hpp" // Chord + classify_chord (shared, one place)
 #include "hand/platform/posix_pty.hpp" // spawn_pty (fresh PTY per tab)
 #include "hand/platform/sokol_gl.hpp" // GL (glViewport) with prototypes
 #include "hand/tabbed_view.hpp"
@@ -43,6 +46,35 @@ inline std::uint64_t now_ms_() {
         std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now().time_since_epoch())
             .count());
+}
+
+// Diagnostic: with HAND_TABS_TRACE=1 in the env, log every window event that
+// reaches the tabbed loop's sink to stderr — pinpoints whether input arrives.
+inline bool trace_on() {
+    static const bool on = std::getenv("HAND_TABS_TRACE") != nullptr;
+    return on;
+}
+inline void trace_event(const toe::win::Event &ev) {
+    std::visit(
+        [](auto &&e) {
+            using T = std::decay_t<decltype(e)>;
+            if constexpr (std::is_same_v<T, toe::win::KeyPressed>) {
+                const auto &k = e.key;
+                const char *kind = std::get_if<toe::TextInput>(&k.key) ? "text" : "special";
+                std::string tx = std::get_if<toe::TextInput>(&k.key)
+                                     ? std::get<toe::TextInput>(k.key).utf8 : std::string{};
+                std::fprintf(stderr, "[tabs] KeyPressed %s '%s' ctrl=%d shift=%d alt=%d\n", kind,
+                             tx.c_str(), k.mods.ctrl, k.mods.shift, k.mods.alt);
+            } else if constexpr (std::is_same_v<T, toe::win::TextEntered>) {
+                std::fprintf(stderr, "[tabs] TextEntered '%.*s'\n",
+                             static_cast<int>(e.utf8.size()), e.utf8.data());
+            } else if constexpr (std::is_same_v<T, toe::win::MouseDown>) {
+                std::fprintf(stderr, "[tabs] MouseDown %d,%d\n", e.x, e.y);
+            } else {
+                std::fprintf(stderr, "[tabs] (other event)\n");
+            }
+        },
+        ev);
 }
 
 // Turn an OSC 7 cwd ("file://host/abs/path" or a bare path) into a filesystem
@@ -77,26 +109,19 @@ inline void translate_event(Rt &rt, const toe::win::Event &ev) {
             } else if constexpr (std::is_same_v<T, FocusChanged>) {
                 rt.post(WinFocus{e.focused});
             } else if constexpr (std::is_same_v<T, KeyPressed>) {
-                // Tab chords first (Ctrl+Shift+T new, Ctrl+Shift+W close,
-                // Ctrl+Tab / Ctrl+Shift+Tab cycle). Otherwise encode the key for
-                // the child via toe's keymap and forward the bytes.
+                // ONE chord layer: classify the neutral key via the shared
+                // classifier (no per-backend, no per-loop chord logic). Tab
+                // chords become GuiMsgs; anything else is child input.
                 const auto &k = e.key;
-                if (k.mods.ctrl && k.mods.shift) {
-                    if (const auto *ti = std::get_if<toe::TextInput>(&k.key)) {
-                        if (ti->utf8 == "T" || ti->utf8 == "t") { rt.post(NewTab{}); return; }
-                        if (ti->utf8 == "W" || ti->utf8 == "w") { rt.post(CloseTab{}); return; }
-                    }
+                switch (platform::classify_chord(k)) {
+                case platform::Chord::NewTab: rt.post(NewTab{}); return;
+                case platform::Chord::CloseTab: rt.post(CloseTab{}); return;
+                case platform::Chord::NextTab: rt.post(NextTab{}); return;
+                case platform::Chord::PrevTab: rt.post(PrevTab{}); return;
+                default: break; // ToggleSettings/Help/Search: handled elsewhere
                 }
-                if (k.mods.ctrl) {
-                    if (const auto *sk = std::get_if<toe::SpecialKey>(&k.key)) {
-                        if (*sk == toe::SpecialKey::Tab) {
-                            rt.post(k.mods.shift ? GuiMsg{PrevTab{}} : GuiMsg{NextTab{}});
-                            return;
-                        }
-                    }
-                }
-                // Not a chord: hand the whole KeyEvent to the focused tab; its
-                // Session encodes it (send_key) with the right mode/kitty flags.
+                // Not a tab chord: hand the whole KeyEvent to the focused tab;
+                // its Session encodes it (send_key) with the right mode/flags.
                 rt.post(ForwardKey{k});
             } else if constexpr (std::is_same_v<T, TextEntered>) {
                 rt.post(ForwardText{std::string{e.utf8}});
@@ -192,6 +217,7 @@ template <class App>
         // chrome row is resolved here (needs the view's cell size); everything
         // else goes through translate_event.
         app.poll_events([&](const toe::win::Event &ev) {
+            if (detail::trace_on()) detail::trace_event(ev);
             if (const auto *md = std::get_if<toe::win::MouseDown>(&ev)) {
                 const ChromeHit hit = view.hit_test_px(md->x, md->y);
                 switch (hit.kind) {
