@@ -264,6 +264,16 @@ template <class App>
     // `now - last_anim_ms` is permanently a huge negative number and the
     // animation branch never fires (the caret glide limps, its trail freezes).
     std::int64_t last_anim_ms = 0; // last elapsed-ms an animation frame was posted
+    // --- drag-selection autoscroll --------------------------------------
+    // While the left button is held and the pointer leaves the grid vertically,
+    // the view auto-scrolls so a selection can span more than one screen of
+    // scrollback (like every polished terminal / editor). This is driven as an
+    // Animator source (Anim::Autoscroll) so the loop keeps waking at ~60fps for
+    // as long as the pointer stays past the edge, then stops — zero idle cost.
+    bool drag_sel = false;   // left button held after a body mouse-down
+    int drag_col = 0;        // last in-grid column the pointer was over
+    int drag_dir = 0;        // -1 scroll up (pointer above), +1 down, 0 none
+    int drag_speed = 1;      // rows/frame, grows with distance past the edge
     bool running = true;
     // Diagnostic: HAND_LOOP_HZ=1 prints GUI-loop iterations/sec to stderr.
     const bool loop_hz = std::getenv("HAND_LOOP_HZ") != nullptr;
@@ -381,6 +391,39 @@ template <class App>
                 (std::holds_alternative<toe::win::MouseMove>(adj) &&
                  std::get<toe::win::MouseMove>(adj).button_down);
             if (pixel_affecting) rt.request_present();
+
+            // --- drag-selection autoscroll arming ---------------------------
+            // Decide whether the view should auto-scroll: the pointer is being
+            // dragged (left button held) PAST the top or bottom of the grid.
+            // We use the CHROME-ADJUSTED y (`adj`), so 0 == the grid's top edge
+            // and grid_px_h == its bottom. Distance past an edge sets both the
+            // direction and a distance-scaled speed (faster the farther out you
+            // drag) for a natural feel. The actual scroll+extend happens once
+            // per frame in the loop while Anim::Autoscroll is live.
+            if (const auto *md = std::get_if<toe::win::MouseDown>(&adj)) {
+                if (md->button == toe::win::MouseButton::left) drag_sel = true;
+            } else if (std::holds_alternative<toe::win::MouseUp>(adj)) {
+                drag_sel = false; drag_dir = 0;
+                rt.animator().set(Anim::Autoscroll, false);
+            } else if (const auto *mm = std::get_if<toe::win::MouseMove>(&adj);
+                       mm && drag_sel && mm->button_down) {
+                const int grid_px_h = std::max(1, app.pixel_size().h - ch_h);
+                rt.with_focus_session([&](toe::Session &s) {
+                    const int cw = std::max(1, s.cell_width());
+                    const int chh = std::max(1, s.cell_height());
+                    drag_col = std::max(0, mm->x / cw);
+                    if (mm->y < 0) {
+                        drag_dir = -1;                   // above the grid -> up
+                        drag_speed = 1 + (-mm->y) / chh;
+                    } else if (mm->y >= grid_px_h) {
+                        drag_dir = +1;                   // below the grid -> down
+                        drag_speed = 1 + (mm->y - grid_px_h) / chh;
+                    } else {
+                        drag_dir = 0;                    // inside: no autoscroll
+                    }
+                });
+                rt.animator().set(Anim::Autoscroll, drag_dir != 0);
+            }
         });
 
         // --- process actor messages (output/status/exit) --------------------
@@ -396,6 +439,23 @@ template <class App>
         // skipped and lagged. FrameGate still de-dups via the interaction
         // revision folded into the RenderKey, so redundant requests are free.
         if (rt.take_present_request()) rt.present_focused();
+
+        // --- drag-selection autoscroll step ---------------------------------
+        // While the pointer is held past a vertical edge, scroll the view and
+        // extend the selection to the edge row so the highlight keeps growing
+        // into scrollback. Runs once per loop wake; Anim::Autoscroll keeps the
+        // loop waking at ~60fps (see the animation clock below) and is cleared
+        // on MouseUp or when the pointer re-enters the grid.
+        if (drag_dir != 0) {
+            rt.with_focus_session([&](toe::Session &s) {
+                s.scroll(-drag_dir * drag_speed); // scroll(+n)=older; dir<0=up=older
+                const int rows = s.grid_size().rows;
+                const int edge_row = drag_dir < 0 ? 0 : std::max(0, rows - 1);
+                const int col = std::min(drag_col, std::max(0, s.grid_size().cols - 1));
+                s.select_extend(edge_row, col);
+            });
+            rt.request_present();
+        }
 
         if (settings_changed_this_frame) {
             settings_changed_this_frame = false;

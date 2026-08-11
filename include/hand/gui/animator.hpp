@@ -38,6 +38,7 @@ enum class Anim : std::uint32_t {
     Pulse      = 1u << 2, // a done-attention pulse                    [fast]
     Bell       = 1u << 3, // visual-bell fade                          [fast]
     Blink      = 1u << 4, // steady cursor blink                       [slow]
+    Autoscroll = 1u << 5, // drag-selection past the viewport edge     [fast]
 };
 
 class Animator {
@@ -52,7 +53,8 @@ public:
     [[nodiscard]] bool any_fast() const noexcept {
         constexpr std::uint32_t kFast =
             static_cast<std::uint32_t>(Anim::CaretGlide) | static_cast<std::uint32_t>(Anim::Spinner) |
-            static_cast<std::uint32_t>(Anim::Pulse) | static_cast<std::uint32_t>(Anim::Bell);
+            static_cast<std::uint32_t>(Anim::Pulse) | static_cast<std::uint32_t>(Anim::Bell) |
+            static_cast<std::uint32_t>(Anim::Autoscroll);
         return (live_.load(std::memory_order_relaxed) & kFast) != 0;
     }
     [[nodiscard]] bool blinking() const noexcept {
