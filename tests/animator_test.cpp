@@ -50,13 +50,21 @@ int main() {
     ck(a.next_deadline_ms() == -1, "blink disabled + idle -> forever");
     a.set(Anim::Blink, false);
 
-    // Each fast source independently forces 60fps.
-    for (Anim s : {Anim::CaretGlide, Anim::Spinner, Anim::Pulse, Anim::Bell}) {
+    // Each genuinely-fast source independently forces 60fps.
+    for (Anim s : {Anim::CaretGlide, Anim::Spinner, Anim::Bell, Anim::Autoscroll}) {
         a.set(s, true);
         ck(a.next_deadline_ms() == 16, "each fast source -> 16ms");
         a.set(s, false);
     }
     ck(a.next_deadline_ms() == -1, "all cleared -> idle");
+
+    // Pulse (done-attention) is a SLOW blink, not 60fps: it must NOT peg the
+    // loop while a background tab's attention stays latched forever.
+    a.set(Anim::Pulse, true);
+    ck(!a.any_fast(), "pulse is not a fast source");
+    ck(a.next_deadline_ms() == 64, "pulse -> ~64ms slow cadence");
+    a.set(Anim::Pulse, false);
+    ck(a.next_deadline_ms() == -1, "pulse cleared -> idle");
 
     // Time-derived frame index: monotone, ~60fps.
     ck(Animator::frame(0) == 0, "t=0 -> frame 0");

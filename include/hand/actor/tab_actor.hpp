@@ -92,10 +92,10 @@ public:
 
 private:
     void run();  // in tab_actor.cpp — the blocking loop
-    void publish_status(bool post_output); // post CHANGE-ONLY status GuiMsgs (under render_lock_)
-    // The live grid generation, read under render_lock_ (0 if no running term).
-    // Lets run() detect a coalesced-but-undelivered change so it never drops it.
-    std::uint64_t grid_generation();
+    // Post CHANGE-ONLY status GuiMsgs (under render_lock_). Returns true if the
+    // grid changed but the output notification was COALESCED (not posted this
+    // pass) so run() can wake precisely at the deadline. No second lock needed.
+    bool publish_status(bool post_output);
 
     TabId id_;
     toe::Terminal term_;

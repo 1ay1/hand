@@ -170,13 +170,14 @@ public:
     // Pure model read (TabModel status/attention) — no lock, no engine call.
     // Refreshes the Animator's Spinner/Pulse sources; call once per pump.
     void refresh_anim_sources() {
-        bool fast = false;
+        bool running = false; // a command IN FLIGHT -> smooth 60fps spinner
+        bool pulse = false;   // a latched done-attention -> slow pulse
         model_.tabs().for_each_ordered([&](const TabEntry &e, bool, std::size_t) {
-            if (e.model.status() == TabStatus::Running ||
-                e.model.attention() != TabAttention::None)
-                fast = true;
+            if (e.model.status() == TabStatus::Running) running = true;
+            if (e.model.attention() != TabAttention::None) pulse = true;
         });
-        anim_.set(Anim::Spinner, fast);
+        anim_.set(Anim::Spinner, running);
+        anim_.set(Anim::Pulse, pulse);
     }
 
     // The one animation authority — the loop asks it for the wait deadline, and

@@ -97,11 +97,13 @@ void TabActor::run() {
         const std::int64_t now = now_ms_actor();
         const std::int64_t since = now - last_notify_ms_;
         const bool due = since >= kCoalesceMs;
-        publish_status(/*post_output=*/due);
+        // publish_status returns true when a grid change was COALESCED (held
+        // back this pass); one lock acquisition does both the post and the peek.
+        const bool pending_change = publish_status(/*post_output=*/due);
         if (due) {
             last_notify_ms_ = now;
             pending_output_ = false;
-        } else if (grid_generation() != last_gen_) {
+        } else if (pending_change) {
             pending_output_ = true; // deferred; step 4 wakes us at the deadline
         }
 
@@ -138,24 +140,25 @@ void TabActor::run() {
     }
 }
 
-std::uint64_t TabActor::grid_generation() {
+// Returns true when the grid CHANGED but the change was NOT posted (because
+// post_output was false — coalesced within the window). The caller uses that to
+// arm a precise wake at the coalesce deadline, so no change is ever dropped and
+// we avoid a second render_lock acquisition just to peek the generation.
+bool TabActor::publish_status(bool post_output) {
     std::lock_guard lk(render_lock_);
     auto *s = term_.poll().running;
-    return s ? s->generation() : 0;
-}
+    if (!s) return false;
 
-void TabActor::publish_status(bool post_output) {
-    std::lock_guard lk(render_lock_);
-    auto *s = term_.poll().running;
-    if (!s) return;
-
+    bool pending = false;
     // Output (grid advanced) is coalesced/rate-limited by the caller: only post
     // when it's due, so a flooding child can't drown the GUI in wakeups.
-    if (post_output) {
-        const std::uint64_t gen = s->generation();
-        if (gen != last_gen_) {
+    const std::uint64_t gen = s->generation();
+    if (gen != last_gen_) {
+        if (post_output) {
             last_gen_ = gen;
             to_gui_.post(TabOutput{id_, gen});
+        } else {
+            pending = true; // changed but held back this pass
         }
     }
 
@@ -188,6 +191,7 @@ void TabActor::publish_status(bool post_output) {
         last_cmd_ = cmd;
         to_gui_.post(TabCommand{id_, running, cmd, finished, code});
     }
+    return pending;
 }
 
 } // namespace hand

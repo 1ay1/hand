@@ -26,6 +26,7 @@
 #ifndef HAND_GUI_ANIMATOR_HPP
 #define HAND_GUI_ANIMATOR_HPP
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 
@@ -51,15 +52,21 @@ public:
         else      live_.fetch_and(~bit, std::memory_order_relaxed);
     }
     [[nodiscard]] bool any_fast() const noexcept {
+        // Genuinely 60fps sources: a caret glide, a spinning "running" glyph, a
+        // visual-bell fade, drag autoscroll. NOT Pulse — the done-attention
+        // pulse is a SLOW blink (see next_deadline_ms), so it must not peg the
+        // loop at 60fps while a background tab's attention stays latched.
         constexpr std::uint32_t kFast =
             static_cast<std::uint32_t>(Anim::CaretGlide) | static_cast<std::uint32_t>(Anim::Spinner) |
-            static_cast<std::uint32_t>(Anim::Pulse) | static_cast<std::uint32_t>(Anim::Bell) |
-            static_cast<std::uint32_t>(Anim::Autoscroll);
+            static_cast<std::uint32_t>(Anim::Bell) | static_cast<std::uint32_t>(Anim::Autoscroll);
         return (live_.load(std::memory_order_relaxed) & kFast) != 0;
     }
     [[nodiscard]] bool blinking() const noexcept {
-        return (live_.load(std::memory_order_relaxed) &
-                static_cast<std::uint32_t>(Anim::Blink)) != 0;
+        // The steady cursor blink AND the done-attention pulse are both slow
+        // blinks driven off the frame clock — neither needs 60fps.
+        constexpr std::uint32_t kSlow =
+            static_cast<std::uint32_t>(Anim::Blink) | static_cast<std::uint32_t>(Anim::Pulse);
+        return (live_.load(std::memory_order_relaxed) & kSlow) != 0;
     }
     // Any animation at all live (fast or blink)?
     [[nodiscard]] bool active() const noexcept { return live_.load(std::memory_order_relaxed) != 0; }
@@ -70,7 +77,18 @@ public:
     // How long the loop may sleep. -1 => block forever (nothing animates).
     [[nodiscard]] int next_deadline_ms() const noexcept {
         if (any_fast()) return 16;                 // ~60fps
-        if (blinking() && blink_ms_ > 0) return blink_ms_;
+        // A slow blink (cursor blink or done-attention pulse). The pulse toggles
+        // every 8 frames (~128ms); waking at ~64ms is comfortably fast enough
+        // and costs a fraction of the 60fps path. The cursor blink uses its
+        // configured half-period.
+        if (blinking()) {
+            const bool pulse = (live_.load(std::memory_order_relaxed) &
+                                static_cast<std::uint32_t>(Anim::Pulse)) != 0;
+            const int blink = (blink_ms_ > 0) ? blink_ms_ : 1 << 30;
+            const int pulse_ms = pulse ? 64 : 1 << 30;
+            const int d = std::min(blink, pulse_ms);
+            return d < (1 << 30) ? d : -1;
+        }
         return -1;                                  // idle: block forever
     }
 
