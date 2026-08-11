@@ -102,15 +102,20 @@ public:
         if (W < 28 || H < 6) return;
 
         const int n_items = static_cast<int>(items_.size());
-        const int list_rows = std::min(n_items, std::min(12, H - 5));
-        const int card_h = list_rows + 3;               // header + divider + list
+        // Card chrome is 4 rows: top border, header, divider, bottom border.
+        // The list occupies rows [card_y+3, card_y+3+list_rows), so card_h MUST
+        // be list_rows+4 or the last item overwrites the bottom border (the
+        // "list overflows the box" bug).
+        const int list_rows = std::min(n_items, std::max(1, H - 6));
+        const int shown = std::min(list_rows, 12);
+        const int card_h = shown + 4;
         const int card_w = std::clamp(longest_text() + 15, 24, std::min(W - 6, 44));
         // Hug the rail: the card's right border sits one cell in from the edge,
         // with the pointer triangle occupying that last cell toward the rail.
         const int card_x = W - card_w - 1;
 
         const int center = hover_idx_ >= 0 ? hover_idx_ : n_items - 1;
-        const int first = std::clamp(center - list_rows / 2, 0, std::max(0, n_items - list_rows));
+        const int first = std::clamp(center - shown / 2, 0, std::max(0, n_items - shown));
 
         // Follow the mouse: center the card on the hovered rail pixel row.
         const int hover_y = static_cast<int>(hover_row_ * H /
@@ -151,7 +156,7 @@ public:
         buf.put(card_x + card_w - 1, card_y + 2, U'\u2524', border);
 
         const int list_y0 = card_y + 3;
-        for (int r = 0; r < list_rows; ++r) {
+        for (int r = 0; r < shown; ++r) {
             const int i = first + r;
             if (i >= n_items) break;
             const toe::CommandView &it = items_[static_cast<std::size_t>(i)];
@@ -194,6 +199,14 @@ public:
                                       card_y + card_h - 2);
             buf.put(card_x + card_w - 1, hy, U'\u25B6', glyph::Style{acc, bg});
         }
+
+        // Scroll affordances: chevrons in the divider / bottom border when the
+        // list is windowed, so it's clear there's more above or below.
+        const int mid = card_x + card_w / 2;
+        if (first > 0)
+            buf.put(mid, card_y + 2, U'\u25B4', glyph::Style{acc, bg}); // ▴ more above
+        if (first + shown < n_items)
+            buf.put(mid, card_y + card_h - 1, U'\u25BE', glyph::Style{acc, bg}); // ▾ more below
     }
 
 private:
