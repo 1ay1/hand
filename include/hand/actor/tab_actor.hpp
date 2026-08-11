@@ -47,9 +47,11 @@ namespace hand {
 // Inbound commands the GUI sends to a tab actor.
 struct TabInput { std::string bytes; };          // deliver text bytes to the child
 struct TabKey { toe::KeyEvent key; };            // deliver a key (Session encodes it)
-struct TabResize { int cols, rows, px_w, px_h; };// grid/pixel resize
 struct TabStop {};                                // shut the actor down + join
-using TabCmd = std::variant<TabInput, TabKey, TabResize, TabStop>;
+using TabCmd = std::variant<TabInput, TabKey, TabStop>;
+// NOTE: resize is intentionally NOT an actor command — Session::resize touches
+// the (GL-adjacent) renderer, so it runs ONLY on the GUI thread (in present),
+// keeping the invariant that actor threads never touch the renderer.
 
 // The actor. Constructed with an already-created Terminal (moved in) + the GUI's
 // outbound mailbox + this tab's stable id. start() spawns the thread; stop()
