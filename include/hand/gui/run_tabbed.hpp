@@ -306,6 +306,10 @@ template <class App>
         app.window_action(a == WinCtl::minimize ? 0 : 1); // 0=minimize, 1=toggle-max
     };
     rt.start(); // spawn the first tab's actor
+    // Seed the layout so any pointer/font-zoom event before the first present
+    // has a valid terminal-viewport size (present recomputes it each frame with
+    // the real cell size).
+    lay.set(px0.w, px0.h, 8, 16, tab_side, host_config().tab_side_width);
 
     const std::uint64_t start = detail::now_ms_();
     // Elapsed-ms baseline: the loop compares against `now = now_ms_() - start`
@@ -438,7 +442,11 @@ template <class App>
             // focused session the EventRouter would touch — otherwise switching
             // tabs would show an un-zoomed grid.
             if (const auto *fz = std::get_if<toe::win::FontZoom>(&ev)) {
-                const toe::PixelSize fpx = app.pixel_size();
+                // Size against the TERMINAL viewport (the area the tab bar
+                // leaves), NOT the full window — otherwise the font rebuild
+                // computes a grid for the wrong height and the present loop then
+                // resizes it again, double-reflowing (and corrupting) history.
+                const toe::PixelSize fpx{lay.term_px_w(), lay.term_px_h()};
                 rt.for_each_live_session([&](toe::Session &s) {
                     const int px = fz->absolute >= 0
                                        ? fz->absolute
