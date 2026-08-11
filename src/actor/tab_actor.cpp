@@ -107,10 +107,13 @@ void TabActor::run() {
             ++n;
         }
         if (n == 0) break; // nothing to wait on: bail rather than spin
-        // While a coalesced output notification is still pending (fd stays
-        // readable under a flood), a short timeout paces us to ~60fps; otherwise
-        // block up to 100ms so the running-command elapsed clock still ticks.
-        const int timeout = due ? 100 : 16;
+        // Timeout policy: while draining a flood (fd stays readable) pace to
+        // ~60fps; while a command is RUNNING, wake every 100ms so its elapsed
+        // clock in the chrome ticks; otherwise (idle at a prompt) block
+        // INDEFINITELY — zero wakeups until real PTY/inbox activity.
+        int timeout = -1;
+        if (!due) timeout = 16;          // mid-flood: pace the drain
+        else if (last_running_) timeout = 100; // running command: tick its clock
         ::poll(fds, static_cast<nfds_t>(n), timeout);
     }
 }

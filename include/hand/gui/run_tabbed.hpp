@@ -156,12 +156,37 @@ template <class App>
     // terminal is resized to that reduced area so its grid fits exactly.
     GuiRuntime *rt_ptr = nullptr; // set below; present needs the frame counter
     bool settings_changed_this_frame = false; // set by render_panel; fanned out below
+    std::uint64_t last_render_key = ~0ull;    // skip the GPU frame when unchanged
+    const bool loop_hz_present = std::getenv("HAND_LOOP_HZ") != nullptr;
+    std::uint64_t present_count = 0;
     auto present = [&](TabActor &active) {
         const toe::PixelSize px = app.pixel_size();
+        std::lock_guard lk(active.render_lock());
+        auto *s = active.terminal().poll().running;
+        if (!s) return;
+
+        // Render key: fold everything that affects the pixels into one value. If
+        // it matches the last presented frame, the image is identical — skip the
+        // whole clear/render/swap and don't touch the GPU at all. This is what
+        // keeps a static screen at zero GPU cost.
+        const std::uint32_t chrome_frame = static_cast<std::uint32_t>(rt_ptr->model().frame());
+        std::uint64_t key = s->generation();
+        key = key * 1099511628211ull + static_cast<std::uint64_t>(s->scroll_offset() + 1);
+        key = key * 1099511628211ull + (static_cast<std::uint64_t>(px.w) << 16 | px.h);
+        key = key * 1099511628211ull +
+              (help.active() ? 1u : search.active() ? 2u : settings.panel_active() ? 3u : 0u);
+        // Chrome + overlays animate; fold the frame counter ONLY when something
+        // is actually animating so a static screen's key is stable.
+        if (rt_ptr->animation_deadline_ms() >= 0 || help.active() || search.active() ||
+            settings.panel_active())
+            key = key * 1099511628211ull + chrome_frame;
+        if (key == last_render_key) return; // nothing changed — no GPU work
+        last_render_key = key;
+        if (loop_hz_present) ++present_count;
+
         app.begin_frame(px, 23, 23, 28, 1.0f); // clear; toe overdraws its own bg
         {
-            std::lock_guard lk(active.render_lock());
-            if (auto *s = active.terminal().poll().running) {
+            {
                 const toe::Extent cell = s->cell_size();
                 const int chrome_h =
                     (cell.rows > 0) ? ChromeBar::kRows * cell.rows : 0;
@@ -179,8 +204,7 @@ template <class App>
                 s->render(rc, term_px);
                 // Chrome overlay across the FULL window (its own top row).
                 glViewport(0, 0, px.w, px.h);
-                view.render_chrome(rc, *s, rt_ptr->model(), px,
-                                   static_cast<std::uint32_t>(rt_ptr->model().frame()));
+                view.render_chrome(rc, *s, rt_ptr->model(), px, chrome_frame);
                 // Help / search overlays (full-window cell buffer over the grid).
                 if (help.active() || search.active()) {
                     const int cols = std::max(1, px.w / std::max(1, cell.cols));
@@ -235,9 +259,9 @@ template <class App>
             ++loop_iters;
             const std::uint64_t now = detail::now_ms_();
             if (now - loop_win >= 1000) {
-                std::fprintf(stderr, "[loop] GUI %llu iters/sec\n",
-                             (unsigned long long)loop_iters);
-                loop_iters = 0; loop_win = now;
+                std::fprintf(stderr, "[loop] GUI %llu iters/sec, %llu presents/sec\n",
+                             (unsigned long long)loop_iters, (unsigned long long)present_count);
+                loop_iters = 0; loop_win = now; present_count = 0;
             }
         }
         app.poll_events([&](const toe::win::Event &ev) {
