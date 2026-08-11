@@ -347,7 +347,7 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
     // layout below; when it drifts the card either clips its last control or
     // floats in a band of empty space. Theme: dropdown + note + 4 colours +
     // "Save as" + button + status line.
-    static const int kSectionRows[] = {14, 8, 5, 9, 7, 4, 6, 3};
+    static const int kSectionRows[] = {14, 8, 7, 9, 7, 5, 6, 3};
     // STATIC PANEL: size the card once to the TALLEST section so switching
     // sections never resizes it, and an open dropdown renders WITHIN this fixed
     // area (the dropdown scrolls its list internally via dd_top_) instead of
@@ -485,6 +485,7 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
         changed |= ui.toggle("Visual bell", &s_.visual_bell);
         changed |= ui.toggle("Copy on select", &s_.copy_on_select);
         changed |= ui.toggle("Confirm on close", &s_.confirm_close);
+        changed |= ui.text_input("Word separators", &s_.word_separators);
         break;
     case 6: { // Window
         changed |= ui.text_input("Title", &s_.title);

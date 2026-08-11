@@ -85,8 +85,11 @@ public:
     // shows. Re-called on reload so the toggles stay live.
     void install_bell(toe::Session &session) {
         const HandConfig &c = panel_.config();
-        const bool audible = c.behavior.audible_bell;
-        const bool visual = c.behavior.visual_bell;
+        install_bell_from(session, c.behavior.audible_bell, c.behavior.visual_bell);
+    }
+    // Arm the on-bell handler with explicit modes (so a live panel edit can
+    // re-install without going through the loaded config).
+    void install_bell_from(toe::Session &session, bool audible, bool visual) {
         toe::Session *sp = &session;
         session.set_on_bell([audible, visual, sp] {
             if (audible) {
@@ -304,6 +307,10 @@ private:
                                  (static_cast<std::uint32_t>(a.g) << 8) |
                                  static_cast<std::uint32_t>(a.b);
         }
+        // Bell mode is live too: re-arm the on-bell handler from the CURRENT
+        // (edited) settings, not the loaded config, so toggling audible/visual
+        // bell in the panel takes effect immediately.
+        install_bell_from(session, s.audible_bell, s.visual_bell);
     }
 
     // Logical point size -> device pixels. The exact conversion is HOST policy
