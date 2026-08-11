@@ -554,10 +554,16 @@ void X11Surface::handle_key(xcb_keycode_t code, KeyEvent::Kind kind,
     }
 
     if (mods.ctrl) {
+        // Fold a Ctrl/Alt combo to a single base ASCII char (TextInput) with the
+        // mods preserved, so the shared classify_chord sees it. This MUST cover
+        // punctuation, not just a-z: Ctrl+Shift+, (settings) and Ctrl+Shift+?
+        // (help) are chords too, and dropping non-letters here made them dead
+        // on X11 (they fell through the ctrl-guarded text block below).
         const xkb_keysym_t lower = xkb_keysym_to_lower(sym);
-        if (lower >= XKB_KEY_a && lower <= XKB_KEY_z) {
+        const uint32_t cp = xkb_keysym_to_utf32(lower);
+        if (cp && cp < 0x80) {
             KeyEvent ev;
-            ev.key = TextInput{std::string(1, static_cast<char>('a' + (lower - XKB_KEY_a)))};
+            ev.key = TextInput{std::string(1, static_cast<char>(cp))};
             ev.mods = mods;
             ev.kind = kind;
             sink(Event{KeyPressed{ev}});

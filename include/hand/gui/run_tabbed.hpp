@@ -405,6 +405,22 @@ template <class App>
             const int ch_h = view.chrome_px_h();
             toe::win::Event adj = detail::shift_pointer_y(ev, -ch_h);
 
+            // --- font zoom (Ctrl +/- / Ctrl+0): a GLOBAL setting -----------
+            // Apply to EVERY tab (font size is not per-tab) instead of only the
+            // focused session the EventRouter would touch — otherwise switching
+            // tabs would show an un-zoomed grid.
+            if (const auto *fz = std::get_if<toe::win::FontZoom>(&ev)) {
+                const toe::PixelSize fpx = app.pixel_size();
+                rt.for_each_live_session([&](toe::Session &s) {
+                    const int px = fz->absolute >= 0
+                                       ? fz->absolute
+                                       : std::clamp(s.font_pixel_size() + fz->delta * 2, 6, 96);
+                    s.set_font_pixel_size(px, fpx);
+                });
+                rt.request_present();
+                return;
+            }
+
             // --- context-aware mouse pointer shape --------------------------
             // I-beam over the terminal text, a pointing hand over the command
             // rail and over hovered OSC-8 links, and the default arrow over the

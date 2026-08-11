@@ -57,6 +57,14 @@ int main() {
         ck(classify_chord(plain_tab) == Chord::None, "plain Tab -> None (reaches shell)");
     }
 
+    // Punctuation chords: the backends fold Ctrl+Shift+, to '<' (or ',') and
+    // Ctrl+Shift+? to '?' (or '/'). BOTH forms must classify — the X11 backend
+    // used to drop non-letter ctrl combos, making these dead.
+    ck(classify_chord(text_key(",", true, true)) == Chord::ToggleSettings, "ctrl+shift+, -> Settings");
+    ck(classify_chord(text_key("<", true, true)) == Chord::ToggleSettings, "ctrl+shift+< -> Settings");
+    ck(classify_chord(text_key("?", true, true)) == Chord::ToggleHelp, "ctrl+shift+? -> Help");
+    ck(classify_chord(text_key("/", true, true)) == Chord::ToggleHelp, "ctrl+shift+/ -> Help");
+
     std::printf(fails ? "%d CHORD TEST(S) FAILED\n" : "ALL CHORD TESTS PASS\n", fails);
     return fails ? 1 : 0;
 }
