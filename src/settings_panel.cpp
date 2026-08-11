@@ -4,6 +4,7 @@
 // the form layout.
 
 #include "hand/settings_panel.hpp"
+#include "hand/platform/shells.hpp"
 #include "hand/config/config.hpp"
 #include "hand/theme/themes.hpp"
 #include "hand/theme/user_themes.hpp"
@@ -530,11 +531,27 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
         changed |= ui.toggle("Decorations", &s_.decorations);
         break;
     }
-    case 7: // Advanced
+    case 7: { // Advanced
         ui.note("Shell / TERM take effect on the NEXT window.");
-        changed |= ui.text_input("Shell (empty = $SHELL)", &s_.shell);
+        // Shell picker: "$SHELL (default)" + every installed shell (/etc/shells).
+        static const std::vector<std::string> kShellPaths = installed_shells();
+        static const std::vector<std::string> kShellOpts = [] {
+            std::vector<std::string> o{"$SHELL (default)"};
+            for (const auto &p : kShellPaths) o.push_back(shell_name(p) + "  " + p);
+            return o;
+        }();
+        int si = 0;
+        for (std::size_t i = 0; i < kShellPaths.size(); ++i)
+            if (kShellPaths[i] == s_.shell) { si = static_cast<int>(i) + 1; break; }
+        if (ui.select("Shell", &si, kShellOpts)) {
+            s_.shell = (si <= 0 || static_cast<std::size_t>(si - 1) >= kShellPaths.size())
+                           ? std::string{}
+                           : kShellPaths[static_cast<std::size_t>(si - 1)];
+            changed = true;
+        }
         changed |= ui.text_input("TERM", &s_.term_env);
         break;
+    }
     default: break;
     }
 

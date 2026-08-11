@@ -33,6 +33,7 @@
 #include "hand/gui/runtime.hpp"
 #include "hand/help_panel.hpp"
 #include "hand/command_flyout.hpp"
+#include "hand/shell_picker.hpp"
 #include "hand/gui/host_config.hpp"
 #include "hand/gui/chrome_layout.hpp"
 #include "hand/search_bar.hpp"
@@ -133,6 +134,7 @@ template <class App>
     hand::HelpPanel help;   // Ctrl+Shift+?  (read-only cheatsheet)
     hand::SearchBar search; // Ctrl+Shift+F  (scrollback search, per focused tab)
     hand::CommandFlyout flyout; // rail-hover command list (click to jump)
+    hand::ShellPicker shell_picker; // Ctrl+Shift+N — pick a shell for a new tab
     hand::platform::SettingsHost settings; // Ctrl+Shift+,  (GLOBAL pane, all tabs)
     settings.bind();        // config file + inotify watch, same as single-terminal
     glyph::Buffer overlay_buf; // cell buffer for the help/search overlays
@@ -140,8 +142,15 @@ template <class App>
     // SpawnFn: a new tab is a FRESH forkpty'd child (its own PTY + AdoptFd), so
     // tabs never share an fd. `cwd` (from the focused tab's OSC 7) chdir's the
     // child before exec, so a new tab opens in the same directory.
+    // A one-shot shell override for the NEXT spawned tab (set by the Ctrl+Shift+N
+    // shell picker). Consumed on the next spawn, then cleared.
+    std::string pending_shell;
     auto spawn = [&](const std::string &cwd) -> std::optional<toe::Terminal> {
         SpawnCommand sc = base_sc;
+        if (!pending_shell.empty()) {
+            sc.argv = {pending_shell}; // run the picked shell for this tab
+            pending_shell.clear();
+        }
         const std::string dir = detail::osc7_to_path(cwd);
         if (!dir.empty()) {
             sc.pre_exec = [dir] {
@@ -190,7 +199,7 @@ template <class App>
         // is frame-skipped and you keep seeing the previous tab's framebuffer.
         rk.tab = static_cast<std::uint32_t>(
             static_cast<std::uint64_t>(rt_ptr->model().tabs().focus().id));
-        rk.overlay = help.active() ? 1u : search.active() ? 2u : settings.panel_active() ? 3u : 0u;
+        rk.overlay = help.active() ? 1u : search.active() ? 2u : settings.panel_active() ? 3u : shell_picker.active() ? 5u : 0u;
         // Fold the frame index UNCONDITIONALLY: the loop only advances it (via
         // set_frame) while something animates, so it's constant on a static
         // screen (key stable -> GPU skipped) but changes every 16ms during any
@@ -301,6 +310,18 @@ template <class App>
                 if (settings.panel_active()) {
                     settings.render_panel(*s, px, settings_changed_this_frame);
                 }
+                // Shell picker (Ctrl+Shift+N): a small centred popup over the
+                // grid; only the card composites (its render sets alpha).
+                if (shell_picker.active()) {
+                    const int cols = std::max(1, px.w / std::max(1, cell.cols));
+                    const int rows = std::max(1, px.h / std::max(1, cell.rows));
+                    if (overlay_buf.width() != cols || overlay_buf.height() != rows)
+                        overlay_buf.resize(cols, rows);
+                    overlay_buf.clear(glyph::Style{});
+                    shell_picker.render(overlay_buf);
+                    s->render_overlay(rc, overlay_buf.data(), cols, rows, px, 0, 0, 1.0f,
+                                      overlay_buf.alpha_data());
+                }
             }
         }
         app.end_frame();
@@ -386,6 +407,28 @@ template <class App>
                     rt.request_present(); // GUI-local state change -> repaint now
                     return;
                 }
+                // Ctrl+Shift+N: open the shell picker for a NEW tab.
+                if (press && ch == platform::Chord::NewTabPick) {
+                    if (shell_picker.active()) shell_picker.close();
+                    else shell_picker.open();
+                    rt.request_present();
+                    return;
+                }
+                // While the shell picker is open it owns the keyboard.
+                if (shell_picker.active()) {
+                    switch (shell_picker.handle(ev)) {
+                    case hand::ShellPicker::Result::Accepted:
+                        pending_shell = shell_picker.chosen();
+                        rt.post(NewTab{});
+                        rt.request_present();
+                        return;
+                    case hand::ShellPicker::Result::Cancelled:
+                    case hand::ShellPicker::Result::Consumed:
+                        rt.request_present();
+                        return;
+                    default: break;
+                    }
+                }
                 if (press && ch == platform::Chord::ToggleHelp) {
                     if (search.active())
                         rt.with_focus_session([&](toe::Session &s) { search.close(s); });
@@ -418,8 +461,10 @@ template <class App>
                     default: break;
                     }
                 }
-            } else if (help.active() || search.active() || settings.panel_active()) {
+            } else if (help.active() || search.active() || settings.panel_active() ||
+                       shell_picker.active()) {
                 if (std::get_if<toe::win::TextEntered>(&ev)) {
+                    if (shell_picker.active()) { shell_picker.handle(ev); rt.request_present(); return; }
                     if (settings.panel_active()) { settings.panel_event(ev); rt.request_present(); return; }
                     if (search.active())
                         rt.with_focus_session([&](toe::Session &s) { search.handle(ev, s); });

@@ -61,6 +61,7 @@ enum class Chord {
     // Tab management (tabbed mode). Same neutral vocabulary so there is ONE
     // chord layer, classified in ONE place — no per-backend key handling.
     NewTab,         // Ctrl+Shift+T
+    NewTabPick,     // Ctrl+Shift+N   — new tab, choose the shell first
     CloseTab,       // Ctrl+Shift+W
     NextTab,        // Ctrl+Tab
     PrevTab,        // Ctrl+Shift+Tab
@@ -86,6 +87,7 @@ enum class Chord {
             if (ti->utf8.size() == 1) {
                 switch (ti->utf8[0]) {
                 case 't': case 'T': return Chord::NewTab;
+                case 'n': case 'N': return Chord::NewTabPick;
                 case 'w': case 'W': return Chord::CloseTab;
                 case 'f': case 'F': return Chord::OpenSearch;
                 default: break;
