@@ -37,6 +37,7 @@
 #include "hand/platform/sokol_gl.hpp" // GL (glViewport) with prototypes
 #include "hand/tabbed_view.hpp"
 #include "toe/app.hpp"
+#include "toe/core/event_router.hpp" // reuse toe's input policy (DRY)
 #include "toe/gfx/render_target.hpp"
 #include "toe/terminal.hpp"
 
@@ -95,63 +96,23 @@ inline std::string osc7_to_path(std::string_view cwd) {
     }
     return cwd.front() == '/' ? std::string{cwd} : std::string{};
 }
-} // namespace detail
-
-// Translate one backend window Event into a GuiMsg and post it to the runtime.
-// Tab chords (Ctrl+Shift+T/W and Ctrl+Tab) become tab-management messages;
-// everything else the terminal cares about becomes ForwardBytes/keys via the
-// focused actor. Kept simple + explicit; the closed GuiMsg sum keeps it honest.
-template <class Rt>
-inline void translate_event(Rt &rt, const toe::win::Event &ev) {
-    using namespace toe::win;
-    std::visit(
-        [&](auto &&e) {
-            using T = std::decay_t<decltype(e)>;
-            if constexpr (std::is_same_v<T, CloseRequested>) {
-                rt.post(WinCloseReq{});
-            } else if constexpr (std::is_same_v<T, Resized>) {
-                rt.post(WinResized{e.size.w, e.size.h});
-            } else if constexpr (std::is_same_v<T, FocusChanged>) {
-                rt.post(WinFocus{e.focused});
-            } else if constexpr (std::is_same_v<T, KeyPressed>) {
-                const auto &k = e.key;
-                // Only PRESS drives chords + input. Release/repeat of a chord
-                // must not re-fire it (that was the "events fire twice" bug);
-                // key REPEAT still forwards to the shell (held-key autorepeat).
-                const bool is_press = k.kind == toe::KeyEvent::Kind::press;
-                const bool is_repeat = k.kind == toe::KeyEvent::Kind::repeat;
-
-                // ONE chord layer via the shared classifier. A recognised chord
-                // is CONSUMED here (never forwarded to the shell), on press only.
-                const platform::Chord chord = platform::classify_chord(k);
-                if (chord != platform::Chord::None) {
-                    if (is_press) {
-                        switch (chord) {
-                        case platform::Chord::NewTab: rt.post(NewTab{}); break;
-                        case platform::Chord::CloseTab: rt.post(CloseTab{}); break;
-                        case platform::Chord::NextTab: rt.post(NextTab{}); break;
-                        case platform::Chord::PrevTab: rt.post(PrevTab{}); break;
-                        // Settings/Help/Search overlays aren't wired in tabbed
-                        // mode yet; consume them so they don't type into the
-                        // shell (a later pass opens the per-tab overlays).
-                        default: break;
-                        }
-                    }
-                    return; // consumed: never reaches the terminal
-                }
-                // Not a chord: forward the key to the focused tab on press OR
-                // repeat (so held keys autorepeat); drop bare releases.
-                if (is_press || is_repeat) rt.post(ForwardKey{k});
-            } else if constexpr (std::is_same_v<T, TextEntered>) {
-                rt.post(ForwardText{std::string{e.utf8}});
-            }
-            // Mouse events: routed to the focused tab / chrome by a later pass;
-            // for the first live cut, the terminal's own mouse handling suffices
-            // through ForwardBytes when apps request it. (Chrome click routing
-            // is added next.)
-        },
-        ev);
+// Return a copy of `ev` with any pointer Y coordinate shifted by `dy` (used to
+// map window-space clicks into the terminal viewport, which sits below the
+// chrome strip). Non-pointer events are returned unchanged.
+inline toe::win::Event shift_pointer_y(const toe::win::Event &ev, int dy) {
+    if (auto *e = std::get_if<toe::win::MouseDown>(&ev)) {
+        auto c = *e; c.y += dy; return c;
+    }
+    if (auto *e = std::get_if<toe::win::MouseUp>(&ev)) {
+        auto c = *e; c.y += dy; return c;
+    }
+    if (auto *e = std::get_if<toe::win::MouseMove>(&ev)) {
+        auto c = *e; c.y += dy; return c;
+    }
+    return ev;
 }
+
+} // namespace detail
 
 // Enter the tabbed loop. `app` is an opened backend; `cfg` is the terminal
 // config (its .source is IGNORED here — each tab spawns its own PTY); `base_sc`
@@ -264,19 +225,14 @@ template <class App>
 
     std::uint64_t frame = 0;
     const std::uint64_t start = detail::now_ms_();
-    while (!app.should_close() && !rt.done()) {
-        // Translate any pending window events into GuiMsgs. Mouse-down on the
-        // chrome row is resolved here (needs the view's cell size); everything
-        // else goes through translate_event.
+    bool running = true;
+    while (!app.should_close() && !rt.done() && running) {
         app.poll_events([&](const toe::win::Event &ev) {
-            // --- overlay (help/search) input routing --------------------------
-            // While an overlay is open it OWNS the keyboard. Handle its keys +
-            // the chords that open/close overlays here, before tab routing.
+            // --- 1. overlay (help/search/settings) owns the keyboard ----------
             if (const auto *kp = std::get_if<toe::win::KeyPressed>(&ev)) {
                 const auto &k = kp->key;
                 const bool press = k.kind == toe::KeyEvent::Kind::press;
                 const platform::Chord ch = platform::classify_chord(k);
-                // Toggle overlays on their chord (press only).
                 if (press && ch == platform::Chord::ToggleSettings) {
                     help.close();
                     if (search.active())
@@ -285,7 +241,8 @@ template <class App>
                     return;
                 }
                 if (press && ch == platform::Chord::ToggleHelp) {
-                    if (search.active()) rt.with_focus_session([&](toe::Session &s) { search.close(s); });
+                    if (search.active())
+                        rt.with_focus_session([&](toe::Session &s) { search.close(s); });
                     help.toggle();
                     return;
                 }
@@ -302,8 +259,17 @@ template <class App>
                     rt.with_focus_session([&](toe::Session &s) { search.handle(ev, s); });
                     return;
                 }
+                // --- 2. tab-management chords -------------------------------
+                if (press) {
+                    switch (ch) {
+                    case platform::Chord::NewTab: rt.post(NewTab{}); return;
+                    case platform::Chord::CloseTab: rt.post(CloseTab{}); return;
+                    case platform::Chord::NextTab: rt.post(NextTab{}); return;
+                    case platform::Chord::PrevTab: rt.post(PrevTab{}); return;
+                    default: break;
+                    }
+                }
             } else if (help.active() || search.active() || settings.panel_active()) {
-                // Swallow text/other input while an overlay is up.
                 if (std::get_if<toe::win::TextEntered>(&ev)) {
                     if (settings.panel_active()) { settings.panel_event(ev); return; }
                     if (search.active())
@@ -312,6 +278,7 @@ template <class App>
                 }
             }
 
+            // --- 3. chrome (tab bar + window controls) ------------------------
             if (const auto *md = std::get_if<toe::win::MouseDown>(&ev)) {
                 const ChromeHit hit = view.hit_test_px(md->x, md->y);
                 switch (hit.kind) {
@@ -322,37 +289,40 @@ template <class App>
                 case ChromeHit::Kind::WinMaximize: rt.post(WinToggleMax{}); return;
                 case ChromeHit::Kind::WinClose: rt.post(WinCloseReq{}); return;
                 case ChromeHit::Kind::None:
-                    // Empty area of the chrome row acts as a titlebar: a press
-                    // there starts an interactive window MOVE (the chrome row is
-                    // the top `view.chrome_px_h()` pixels).
                     if (md->y >= 0 && md->y < view.chrome_px_h()) {
                         app.window_move(md->x, md->y);
                         return;
                     }
-                    break; // click in the terminal body
+                    break; // click in the terminal body -> falls through
                 }
             }
-            translate_event(rt, ev);
+
+            // --- 4. everything else = terminal input for the FOCUSED tab ------
+            // Reuse toe's EventRouter (the SAME input policy as single-terminal
+            // mode) so scroll, wheel, selection, copy/paste, OSC-8 links,
+            // command-block nav and focus all Just Work — no reimplementation.
+            // Pointer Y is shifted down by the chrome strip; correct it so the
+            // grid's top cell maps right.
+            const int ch_h = view.chrome_px_h();
+            toe::win::Event adj = detail::shift_pointer_y(ev, -ch_h);
+            rt.with_focus_session([&](toe::Session &s) {
+                toe::PixelSize tpx = app.pixel_size();
+                tpx.h = std::max(1, tpx.h - ch_h);
+                toe::EventRouter<App> router{s, app, tpx, running};
+                std::visit(router, adj);
+            });
         });
 
         // A ~60fps tick drives the chrome spinner / attention pulse.
         rt.post(Tick{frame++});
-
-        // Process everything (spawns, input routing, present).
         rt.pump();
 
-        // A global settings edit was applied to the focused tab during present;
-        // fan the new state out to every OTHER live tab so settings behave the
-        // same across all tabs.
         if (settings_changed_this_frame) {
             settings_changed_this_frame = false;
             const toe::PixelSize px = app.pixel_size();
             rt.for_each_live_session([&](toe::Session &s) { settings.apply_to(s, px); });
         }
 
-        // Block until the window has events OR an actor posted to the mailbox.
-        // We reuse wait_readable, passing the GUI mailbox fd as the "pty" fd —
-        // the GUI never waits on real PTYs (the actor threads own those).
         app.wait_readable(rt.mailbox().wait_fd(), toe::WaitDeadline::millis(16));
         (void)start;
     }
