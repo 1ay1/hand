@@ -171,10 +171,10 @@ template <class App>
     };
 
     // PresentFn: render the active tab's grid + chrome into the window. The
-    // chrome occupies a reserved strip at the TOP; the terminal renders into the
-    // area below it. GL's origin is bottom-left, so glViewport(0,0,w,h-chrome)
-    // places the terminal in the lower part = below the top chrome strip. The
-    // terminal is resized to that reduced area so its grid fits exactly.
+    // terminal uses the viewport carved out by ChromeLayout; chrome and host
+    // overlays then switch back to the full-window viewport. Keep viewport
+    // changes inside Sokol's render API instead of mutating backend GL state
+    // behind it; this also applies the same geometry on Metal and D3D11.
     GuiRuntime *rt_ptr = nullptr; // set below; present needs the frame counter
     bool settings_changed_this_frame = false; // set by render_panel; fanned out below
     FrameGate gate;                          // frame-skip decision (render key)
@@ -259,13 +259,16 @@ template <class App>
                 }
 
                 auto rc = toe::gfx::RenderContext::adopt_current();
-                // Terminal into the viewport carved out by the layout.
-                glViewport(lay.gl_viewport_x(), lay.gl_viewport_y(), term_px.w, term_px.h);
+                // Terminal into the viewport carved out by the layout. Use the
+                // active render pass API rather than backend GL state so the
+                // terminal and its right-edge rail share the exact same bounds.
+                sg_apply_viewport(lay.gl_viewport_x(), lay.gl_viewport_y(),
+                                  term_px.w, term_px.h, false);
                 s->render(rc, term_px);
                 // Publish the caret-glide state NOW — render() just updated it.
                 rt_ptr->set_focus_animating(s->cursor_animating());
                 // Chrome overlay across the FULL window (tab bar at its edge).
-                glViewport(0, 0, px.w, px.h);
+                sg_apply_viewport(0, 0, px.w, px.h, false);
                 view.render_chrome(rc, *s, rt_ptr->model(), px, chrome_frame, lay,
                                    host_config().tab_controls, host_config().tab_plus);
                 // Help / search overlays (full-window cell buffer over the grid).
