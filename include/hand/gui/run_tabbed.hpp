@@ -225,8 +225,21 @@ template <class App>
 
     std::uint64_t frame = 0;
     const std::uint64_t start = detail::now_ms_();
+    std::uint64_t last_anim_ms = start; // last time an animation frame was posted
     bool running = true;
+    // Diagnostic: HAND_LOOP_HZ=1 prints GUI-loop iterations/sec to stderr.
+    const bool loop_hz = std::getenv("HAND_LOOP_HZ") != nullptr;
+    std::uint64_t loop_iters = 0, loop_win = start;
     while (!app.should_close() && !rt.done() && running) {
+        if (loop_hz) {
+            ++loop_iters;
+            const std::uint64_t now = detail::now_ms_();
+            if (now - loop_win >= 1000) {
+                std::fprintf(stderr, "[loop] GUI %llu iters/sec\n",
+                             (unsigned long long)loop_iters);
+                loop_iters = 0; loop_win = now;
+            }
+        }
         app.poll_events([&](const toe::win::Event &ev) {
             // --- 1. overlay (help/search/settings) owns the keyboard ----------
             if (const auto *kp = std::get_if<toe::win::KeyPressed>(&ev)) {
@@ -313,8 +326,10 @@ template <class App>
             });
         });
 
-        // A ~60fps tick drives the chrome spinner / attention pulse.
-        rt.post(Tick{frame++});
+        // --- process actor messages (output/status/exit) --------------------
+        // pump() drains the GUI mailbox, runs gui_update, interprets Cmds, and
+        // presents at most once if a Present cmd fired. So a repaint happens
+        // ONLY in response to real input or new child output — never on a timer.
         rt.pump();
 
         if (settings_changed_this_frame) {
@@ -323,8 +338,32 @@ template <class App>
             rt.for_each_live_session([&](toe::Session &s) { settings.apply_to(s, px); });
         }
 
-        app.wait_readable(rt.mailbox().wait_fd(), toe::WaitDeadline::millis(16));
-        (void)start;
+        // --- animation clock: advance only while something animates ---------
+        // A running-command spinner / done-attention pulse / cursor glide runs
+        // at ~60fps; a steady cursor blink at its half-period. When nothing
+        // animates the deadline is -1 and the wait below blocks FOREVER.
+        const int dl_ms = rt.animation_deadline_ms();
+        if (dl_ms > 0) {
+            // Advance the frame + repaint only when the animation cadence is
+            // actually DUE (elapsed >= dl_ms) — NOT every loop iteration. Posting
+            // a Tick every iteration would re-signal the mailbox and spin the
+            // loop (the bug this replaces).
+            const std::uint64_t now = detail::now_ms_();
+            if (now - last_anim_ms >= static_cast<std::uint64_t>(dl_ms)) {
+                last_anim_ms = now;
+                rt.post(Tick{++frame});
+                rt.pump(); // Tick -> present (advances spinner / pulse / blink)
+            }
+        }
+
+        // --- ONE blocking wait: window fd + GUI mailbox fd ------------------
+        // Zero idle CPU: with nothing animating and no input, this blocks until
+        // the compositor sends an event OR an actor posts to the mailbox (its
+        // wakeup fd is passed as the "pty" fd; wait_readable folds in the window
+        // fd). Deadline: the animation cadence, else forever.
+        const toe::WaitDeadline wd =
+            dl_ms < 0 ? toe::WaitDeadline::forever() : toe::WaitDeadline::millis(dl_ms);
+        app.wait_readable(rt.mailbox().wait_fd(), wd);
     }
     return 0;
 }

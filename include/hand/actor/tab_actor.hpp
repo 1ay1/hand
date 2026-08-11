@@ -90,7 +90,7 @@ public:
 
 private:
     void run();  // in tab_actor.cpp — the blocking loop
-    void publish_status(); // post CHANGE-ONLY status GuiMsgs (under render_lock_)
+    void publish_status(bool post_output); // post CHANGE-ONLY status GuiMsgs (under render_lock_)
 
     TabId id_;
     toe::Terminal term_;
@@ -107,6 +107,7 @@ private:
     std::string last_cmd_;
     bool last_running_ = false;
     bool last_finished_ = false;
+    std::int64_t last_notify_ms_ = 0; // last GUI output-notification time (rate limit)
 };
 
 } // namespace hand

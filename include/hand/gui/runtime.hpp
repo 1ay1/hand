@@ -164,6 +164,32 @@ public:
         }
     }
 
+    // Time-driven repaint need, split by cadence:
+    //   fast (16ms): a running-command spinner, a done-attention pulse, or the
+    //                focused terminal mid-animation (cursor glide / bell fade).
+    //   slow (blink half-period): the focused terminal's steady cursor blink.
+    // Returns the wait deadline in ms, or -1 to block FOREVER (zero idle CPU).
+    [[nodiscard]] int animation_deadline_ms() {
+        bool fast = false;
+        model_.tabs().for_each_ordered([&](const TabEntry &e, bool, std::size_t) {
+            if (e.model.status() == TabStatus::Running ||
+                e.model.attention() != TabAttention::None)
+                fast = true;
+        });
+        int blink_ms = 0;
+        const TabId fid = model_.tabs().focus().id;
+        if (auto it = actors_.find(fid); it != actors_.end()) {
+            std::lock_guard lk(it->second->render_lock());
+            if (auto *s = it->second->terminal().poll().running) {
+                if (s->cursor_animating()) fast = true; // active glide / bell fade
+                blink_ms = s->cursor_blink_ms();  // 0 = steady (no blink)
+            }
+        }
+        if (fast) return 16;
+        if (blink_ms > 0) return blink_ms; // wake once per blink phase only
+        return -1;                          // nothing animates: block forever
+    }
+
 private:
     static TabId mint_first_() { return TabId{1}; }
 

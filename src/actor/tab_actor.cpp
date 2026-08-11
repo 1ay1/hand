@@ -10,9 +10,18 @@
 
 #include "hand/actor/tab_actor.hpp"
 
+#include <chrono>
 #include <poll.h>
 
 namespace hand {
+
+namespace {
+std::int64_t now_ms_actor() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+} // namespace
 
 void TabActor::run() {
     for (;;) {
@@ -43,6 +52,10 @@ void TabActor::run() {
         if (stop || stopping_.load()) break;
 
         // --- 2. pump child output into our grid ------------------------------
+        // Drain the PTY to EMPTY in this wakeup (pump_output only consumes a
+        // budget per call; a flooding child leaves more pending). Looping here
+        // means one wakeup absorbs the whole backlog, then we block — instead of
+        // returning to poll() with the fd still readable and spinning.
         int pty_fd = -1;
         bool exited = false;
         int exit_code = 0;
@@ -54,7 +67,13 @@ void TabActor::run() {
                 exit_code = p.exited->code;
             } else {
                 pty_fd = p.running->pty_fd();
-                p.running->pump_output();
+                // Bounded drain: consume all readable output, but cap the number
+                // of budgeted passes so a truly endless stream can't starve the
+                // command loop (it just resumes next wakeup).
+                for (int passes = 0; passes < 64; ++passes) {
+                    p.running->pump_output();
+                    if (!p.running->output_pending()) break;
+                }
             }
         }
         if (exited) {
@@ -62,8 +81,16 @@ void TabActor::run() {
             break;
         }
 
-        // --- 3. post CHANGE-ONLY status to the GUI ---------------------------
-        publish_status();
+        // --- 3. post CHANGE-ONLY status, RATE-LIMITED ------------------------
+        // A chatty child (an agent, a build) bumps the grid many times per
+        // millisecond; notifying the GUI on every bump would peg a core. Coalesce
+        // to at most ~1 output notification per frame (16ms) — the GUI can't
+        // show more than that anyway. Title/dir/command changes are posted
+        // immediately (they're rare).
+        const std::int64_t now = now_ms_actor();
+        const bool due = (now - last_notify_ms_) >= 16;
+        publish_status(due);
+        if (due) last_notify_ms_ = now;
 
         // --- 4. block until the PTY or an inbound command is ready -----------
         struct pollfd fds[2];
@@ -80,20 +107,27 @@ void TabActor::run() {
             ++n;
         }
         if (n == 0) break; // nothing to wait on: bail rather than spin
-        // 100ms cap so a running-command elapsed clock still updates the chrome.
-        ::poll(fds, static_cast<nfds_t>(n), 100);
+        // While a coalesced output notification is still pending (fd stays
+        // readable under a flood), a short timeout paces us to ~60fps; otherwise
+        // block up to 100ms so the running-command elapsed clock still ticks.
+        const int timeout = due ? 100 : 16;
+        ::poll(fds, static_cast<nfds_t>(n), timeout);
     }
 }
 
-void TabActor::publish_status() {
+void TabActor::publish_status(bool post_output) {
     std::lock_guard lk(render_lock_);
     auto *s = term_.poll().running;
     if (!s) return;
 
-    const std::uint64_t gen = s->generation();
-    if (gen != last_gen_) {
-        last_gen_ = gen;
-        to_gui_.post(TabOutput{id_, gen});
+    // Output (grid advanced) is coalesced/rate-limited by the caller: only post
+    // when it's due, so a flooding child can't drown the GUI in wakeups.
+    if (post_output) {
+        const std::uint64_t gen = s->generation();
+        if (gen != last_gen_) {
+            last_gen_ = gen;
+            to_gui_.post(TabOutput{id_, gen});
+        }
     }
 
     if (std::string t = s->window_title(); t != last_title_) {
