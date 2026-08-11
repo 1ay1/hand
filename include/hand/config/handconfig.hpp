@@ -67,6 +67,9 @@ struct ColorsConfig {
     toe::Rgb background = toe::rgb(23, 23, 28);
     toe::Rgb cursor = toe::rgb(220, 220, 220);
     toe::Rgb selection_bg = toe::rgb(60, 70, 110);
+    // Reverse-video selection: swap each selected cell's fg/bg (classic terminal
+    // look) instead of a coloured highlight. On by default — the crisp default.
+    bool selection_invert = true;
     // The 16 ANSI palette colors (0-7 normal, 8-15 bright). Empty vector = use
     // toe's built-in palette; a full 16 overrides it.
     std::vector<toe::Rgb> palette{};
@@ -146,6 +149,7 @@ struct HandConfig {
         c.default_fg = colors.foreground;
         c.default_bg = colors.background;
         c.selection_bg = colors.selection_bg;
+        c.selection_invert = colors.selection_invert;
         // Blink OFF => steady cursor (period 0); else the configured half-period.
         c.cursor_blink_ms = cursor.blink ? cursor.blink_ms : 0;
         c.cursor_shape = static_cast<int>(cursor.shape);

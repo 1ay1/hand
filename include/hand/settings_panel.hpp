@@ -63,6 +63,7 @@ struct Settings {
     std::string bg = "#171720";
     std::string cursor_color = "#dcdcdc";
     std::string selection = "#3c466e";
+    bool selection_invert = true; // reverse-video selection (swap fg/bg)
     // The 16 ANSI palette (hex), from the active theme or explicit overrides.
     // Empty => toe's built-in palette. Drives live recolour on theme switch.
     std::vector<std::string> palette{};

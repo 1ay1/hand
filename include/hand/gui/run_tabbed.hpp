@@ -190,6 +190,16 @@ template <class App>
         // what makes the gate repaint them instead of frame-skipping (the fix
         // for laggy text selection).
         rk.interaction = rt_ptr->interaction_revision();
+        // Fold the cursor state (position + whether it's still gliding) so a
+        // cursor move, a settle at the end of a glide, or a reappearance can
+        // NEVER be frame-skipped into invisibility — the cursor is always drawn
+        // on the frame its state changes.
+        {
+            const toe::Pos cp = s->cursor();
+            rk.cursor = (static_cast<std::uint32_t>(cp.row.get() & 0xFFFF) << 16) |
+                        static_cast<std::uint32_t>(cp.col.get() & 0x7FFF) |
+                        (s->cursor_animating() ? 0x8000u : 0u);
+        }
         // Fold the flyout's visibility so it can't be frame-skipped on the
         // frame it first appears (its content rides the interaction revision).
         if (flyout.active()) rk.overlay = rk.overlay ? rk.overlay : 4u;
@@ -322,12 +332,14 @@ template <class App>
                     if (search.active())
                         rt.with_focus_session([&](toe::Session &s) { search.close(s); });
                     settings.toggle_panel();
+                    rt.request_present(); // GUI-local state change -> repaint now
                     return;
                 }
                 if (press && ch == platform::Chord::ToggleHelp) {
                     if (search.active())
                         rt.with_focus_session([&](toe::Session &s) { search.close(s); });
                     help.toggle();
+                    rt.request_present();
                     return;
                 }
                 if (press && ch == platform::Chord::OpenSearch) {
@@ -335,12 +347,14 @@ template <class App>
                         if (search.active()) search.close(s);
                         else { help.close(); search.open(s); }
                     });
+                    rt.request_present();
                     return;
                 }
-                if (help.active()) { help.handle(ev); return; }
-                if (settings.panel_active()) { settings.panel_event(ev); return; }
+                if (help.active()) { help.handle(ev); rt.request_present(); return; }
+                if (settings.panel_active()) { settings.panel_event(ev); rt.request_present(); return; }
                 if (search.active()) {
                     rt.with_focus_session([&](toe::Session &s) { search.handle(ev, s); });
+                    rt.request_present();
                     return;
                 }
                 // --- 2. tab-management chords -------------------------------
@@ -355,9 +369,10 @@ template <class App>
                 }
             } else if (help.active() || search.active() || settings.panel_active()) {
                 if (std::get_if<toe::win::TextEntered>(&ev)) {
-                    if (settings.panel_active()) { settings.panel_event(ev); return; }
+                    if (settings.panel_active()) { settings.panel_event(ev); rt.request_present(); return; }
                     if (search.active())
                         rt.with_focus_session([&](toe::Session &s) { search.handle(ev, s); });
+                    rt.request_present();
                     return;
                 }
             }

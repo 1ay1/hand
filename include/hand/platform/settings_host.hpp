@@ -259,6 +259,7 @@ private:
         if (!file.empty()) session.set_font(file, px);
         session.set_default_colors(parse_hex(s.fg), parse_hex(s.bg));
         session.set_selection_color(parse_hex(s.selection));
+        session.set_selection_invert(s.selection_invert);
         session.set_cursor_color(parse_hex(s.cursor_color));
         // The 16 ANSI palette (from the active theme, or explicit overrides).
         // Empty => keep the built-in palette. This is what makes a theme switch

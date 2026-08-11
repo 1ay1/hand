@@ -38,6 +38,10 @@ int main() {
     // even when generation() is unchanged — the fix for laggy text selection.
     { auto n = k; n.interaction = 1; ck(g.should_present(n), "interaction bump presents"); k = n; }
     { auto n = k; n.interaction = 2; ck(g.should_present(n), "next interaction bump presents"); k = n; }
+    // A cursor move / show-hide / glide-settle must force a present (the
+    // cursor can never be frame-skipped into invisibility).
+    { auto n = k; n.cursor = 42; ck(g.should_present(n), "cursor move presents"); k = n; }
+    { auto n = k; n.cursor = 43; ck(g.should_present(n), "cursor settle presents"); k = n; }
     ck(!g.should_present(k), "settled again -> skip");
 
     // invalidate() forces the next present even with an unchanged key.
