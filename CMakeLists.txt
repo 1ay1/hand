@@ -399,6 +399,12 @@ if(HAND_BUILD_TESTS)
   target_include_directories(animator_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
   add_test(NAME animator COMMAND animator_test)
 
+  # Command-minimap flyout: the rail-hover -> selected-command rule (pure).
+  add_executable(command_flyout_test tests/command_flyout_test.cpp)
+  target_include_directories(command_flyout_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+  target_link_libraries(command_flyout_test PRIVATE toe)
+  add_test(NAME command_flyout COMMAND command_flyout_test)
+
   # Config watcher: pure filesystem-watch logic (inotify on Linux, kqueue on
   # macOS/BSD), no GL / no deps. Guards live config hot-reload on every OS.
   add_executable(config_watch_test tests/config_watch_test.cpp)

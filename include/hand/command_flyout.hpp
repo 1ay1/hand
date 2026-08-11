@@ -46,25 +46,28 @@ public:
         items_.erase(std::remove_if(items_.begin(), items_.end(),
                                     [](const toe::CommandView &c) { return c.command.empty(); }),
                      items_.end());
-        // Which listed command is under the pointer?
-        hover_idx_ = -1;
-        for (std::size_t i = 0; i < items_.size(); ++i) {
-            const auto &c = items_[i];
-            if (c.prompt_row >= 0 && hover_row_ >= c.prompt_row &&
-                (c.end_row < 0 || hover_row_ < c.end_row)) {
-                hover_idx_ = static_cast<int>(i);
-                break;
-            }
+        // Which listed command is under the pointer? Use the NEAREST command
+        // whose prompt is at or above the hovered rail row (like a scrollbar
+        // thumb landing between ticks) so every rail position selects something.
+        hover_idx_ = pick_hover(items_, hover_row_);
+    }
+
+    // Pure selection rule (testable): the index of the nearest command whose
+    // prompt_row is <= `row`; if `row` is above all of them, the first command.
+    // -1 only when there are no row-bearing commands.
+    [[nodiscard]] static int pick_hover(const std::vector<toe::CommandView> &items,
+                                        std::int64_t row) noexcept {
+        int idx = -1;
+        std::int64_t best_row = -1;
+        for (std::size_t i = 0; i < items.size(); ++i) {
+            const std::int64_t pr = items[i].prompt_row;
+            if (pr < 0) continue;
+            if (pr <= row && pr >= best_row) { best_row = pr; idx = static_cast<int>(i); }
         }
-        // If the hover fell between blocks, snap to the nearest by prompt row.
-        if (hover_idx_ < 0 && !items_.empty()) {
-            std::int64_t best = -1;
-            for (std::size_t i = 0; i < items_.size(); ++i) {
-                if (items_[i].prompt_row < 0) continue;
-                if (items_[i].prompt_row <= hover_row_) { hover_idx_ = static_cast<int>(i); best = items_[i].prompt_row; }
-            }
-            (void)best;
-        }
+        if (idx < 0)
+            for (std::size_t i = 0; i < items.size(); ++i)
+                if (items[i].prompt_row >= 0) { idx = static_cast<int>(i); break; }
+        return idx;
     }
 
     void hide() noexcept { active_ = false; }
@@ -96,9 +99,10 @@ public:
         const int center = hover_idx_ >= 0 ? hover_idx_ : n_items - 1;
         const int first = std::clamp(center - max_rows / 2, 0, std::max(0, n_items - max_rows));
 
-        // Vertical placement: center the card on the hovered rail pixel row.
-        const int hover_y = static_cast<int>(hover_row_ * H / total_rows_);
-        const int card_y = std::clamp(hover_y - card_h / 2, 1, std::max(1, H - card_h - 1));
+        // Vertical placement: PINNED near the top so the card doesn't jitter
+        // around while you slide along the rail — only the highlighted row and
+        // the scroll window change. Nudge down only if it would clip the top.
+        const int card_y = std::clamp(2, 1, std::max(1, H - card_h - 1));
 
         const glyph::Rgb bg = glyph::rgb(26, 28, 38);
         buf.clear_alpha(0);
