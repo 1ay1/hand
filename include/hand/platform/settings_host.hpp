@@ -301,6 +301,11 @@ private:
         host.pointer_shapes = s.pointer_shapes;
         host.flyout = s.flyout;
         host.flyout_rows = s.flyout_rows;
+        // Tab-bar toggles that can update live (position needs a relaunch to
+        // re-carve the viewport, so it's not pushed here).
+        host.tab_controls = s.tab_controls;
+        host.tab_plus = s.tab_plus;
+        host.tab_side_width = s.tab_side_width;
         {
             const toe::Rgb a = parse_hex(s.flyout_accent);
             host.flyout_accent = (static_cast<std::uint32_t>(a.r) << 16) |

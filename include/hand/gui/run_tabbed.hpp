@@ -131,9 +131,6 @@ template <class App>
     TabbedView view;
     ChromeLayout lay; // tab-bar placement + terminal viewport geometry (per frame)
     const ChromeSide tab_side = chrome_side_from(host_config().tab_position);
-    const int tab_side_w = host_config().tab_side_width;
-    const bool tab_ctrls = host_config().tab_controls;
-    const bool tab_plus = host_config().tab_plus;
     hand::HelpPanel help;   // Ctrl+Shift+?  (read-only cheatsheet)
     hand::SearchBar search; // Ctrl+Shift+F  (scrollback search, per focused tab)
     hand::CommandFlyout flyout; // rail-hover command list (click to jump)
@@ -237,7 +234,7 @@ template <class App>
                 // Recompute tab-bar + terminal geometry for this frame from the
                 // window size, cell size, and configured placement.
                 lay.set(px.w, px.h, std::max(1, cell.cols), std::max(1, cell.rows), tab_side,
-                        tab_side_w);
+                        host_config().tab_side_width);
                 const toe::PixelSize term_px{lay.term_px_w(), lay.term_px_h()};
 
                 // Keep the terminal sized to the viewport the tab bar leaves.
@@ -254,8 +251,8 @@ template <class App>
                 rt_ptr->set_focus_animating(s->cursor_animating());
                 // Chrome overlay across the FULL window (tab bar at its edge).
                 glViewport(0, 0, px.w, px.h);
-                view.render_chrome(rc, *s, rt_ptr->model(), px, chrome_frame, lay, tab_ctrls,
-                                   tab_plus);
+                view.render_chrome(rc, *s, rt_ptr->model(), px, chrome_frame, lay,
+                                   host_config().tab_controls, host_config().tab_plus);
                 // Help / search overlays (full-window cell buffer over the grid).
                 if (help.active() || search.active()) {
                     const int cols = std::max(1, px.w / std::max(1, cell.cols));

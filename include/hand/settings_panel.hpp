@@ -83,6 +83,11 @@ struct Settings {
     bool flyout = true;
     int flyout_rows = 7;
     std::string flyout_accent = "#7aa8ff";
+    // Tab bar
+    int tab_position = 0;      // 0 top / 1 bottom / 2 left / 3 right
+    int tab_side_width = 18;   // column width (cells) for left/right
+    bool tab_controls = true;  // window min/max/close buttons
+    bool tab_plus = true;      // + new-tab button
 
     // Scroll
     int scrollback = 10000;  // lines
