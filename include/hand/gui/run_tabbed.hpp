@@ -122,6 +122,10 @@ inline void translate_event(Rt &rt, const toe::win::Event &ev) {
                 // ONE chord layer via the shared classifier. A recognised chord
                 // is CONSUMED here (never forwarded to the shell), on press only.
                 const platform::Chord chord = platform::classify_chord(k);
+                if (detail::trace_on() && chord != platform::Chord::None) {
+                    std::fprintf(stderr, "[tabs]   -> chord=%d press=%d\n",
+                                 static_cast<int>(chord), is_press);
+                }
                 if (chord != platform::Chord::None) {
                     if (is_press) {
                         switch (chord) {
