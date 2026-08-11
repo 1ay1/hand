@@ -183,6 +183,11 @@ template <class App>
         // animation (glide/spinner/pulse) -> a fresh frame is guaranteed, no
         // chicken-and-egg with the caret-animating flag.
         rk.anim_frame = chrome_frame;
+        // Fold the interaction revision: a selection drag / scrollback jump /
+        // hover changes VISIBLE pixels without bumping generation(), so this is
+        // what makes the gate repaint them instead of frame-skipping (the fix
+        // for laggy text selection).
+        rk.interaction = rt_ptr->interaction_revision();
         if (!gate.should_present(rk)) return;          // pixel-identical: no GPU work
         if (loop_hz_present) ++present_count;
 
@@ -253,7 +258,6 @@ template <class App>
     };
     rt.start(); // spawn the first tab's actor
 
-    std::uint64_t frame = 0;
     const std::uint64_t start = detail::now_ms_();
     // Elapsed-ms baseline: the loop compares against `now = now_ms_() - start`
     // (elapsed), so this MUST be 0, not the absolute `start` — otherwise
@@ -359,6 +363,24 @@ template <class App>
                 toe::EventRouter<App> router{s, app, tpx, running};
                 std::visit(router, adj);
             });
+            // A pointer/scroll event can change the VISIBLE pixels (selection
+            // highlight, scrollback view, hover) WITHOUT bumping the terminal's
+            // content generation() — which the RenderKey keys on. Request ONE
+            // present so the change isn't frame-skipped and lagged. Gate it to
+            // the events that actually move those pixels: a DRAG (mouse move
+            // with a button held = selection extend), a click (anchor/clear),
+            // and the wheel (scrollback). A plain hover / bare move must NOT
+            // request — that would repaint every idle mouse twitch. (Keyboard
+            // input already presents via the actor's TabOutput → generation
+            // bump; animation goes through the Animator. This is the one-shot
+            // INTERACTION repaint path — the other half of the unified trigger.)
+            const bool pixel_affecting =
+                std::holds_alternative<toe::win::MouseWheel>(adj) ||
+                std::holds_alternative<toe::win::MouseDown>(adj) ||
+                std::holds_alternative<toe::win::MouseUp>(adj) ||
+                (std::holds_alternative<toe::win::MouseMove>(adj) &&
+                 std::get<toe::win::MouseMove>(adj).button_down);
+            if (pixel_affecting) rt.request_present();
         });
 
         // --- process actor messages (output/status/exit) --------------------
@@ -366,6 +388,14 @@ template <class App>
         // presents at most once if a Present cmd fired. So a repaint happens
         // ONLY in response to real input or new child output — never on a timer.
         rt.pump();
+
+        // --- interaction-driven present (selection / scroll / hover) --------
+        // The input path (section 4) called request_present() after routing a
+        // pointer/scroll event that may have changed VISIBLE pixels without
+        // bumping content generation(). Present once here so it isn't frame-
+        // skipped and lagged. FrameGate still de-dups via the interaction
+        // revision folded into the RenderKey, so redundant requests are free.
+        if (rt.take_present_request()) rt.present_focused();
 
         if (settings_changed_this_frame) {
             settings_changed_this_frame = false;

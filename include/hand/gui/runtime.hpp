@@ -198,6 +198,29 @@ public:
     // Present the focused tab now (the loop's direct-present path for animation).
     void present_focused() { present_active(); }
 
+    // --- interaction-driven present (the OTHER repaint reason) --------------
+    // Animation is time-driven (Animator). But some interactions change the
+    // VISIBLE pixels WITHOUT bumping the terminal's content generation() — a
+    // selection drag, a scrollback jump, rail hover. Those would be frame-
+    // skipped by the RenderKey (generation unchanged) and lag until the next
+    // unrelated repaint. So the input path calls request_present() after
+    // routing any event to the session; the loop consumes the flag and folds
+    // interaction_revision() into the RenderKey so the gate can't skip it.
+    void request_present() noexcept {
+        interaction_rev_.fetch_add(1, std::memory_order_relaxed);
+        present_pending_.store(true, std::memory_order_relaxed);
+    }
+    // The loop calls this once per iteration: true (once) if a present was
+    // requested since the last take. Clears the pending flag.
+    [[nodiscard]] bool take_present_request() noexcept {
+        return present_pending_.exchange(false, std::memory_order_relaxed);
+    }
+    // Monotonic counter of interaction-driven repaint requests; fold into the
+    // RenderKey so a selection/scroll/hover change always yields a fresh key.
+    [[nodiscard]] std::uint32_t interaction_revision() const noexcept {
+        return interaction_rev_.load(std::memory_order_relaxed);
+    }
+
 private:
     static TabId mint_first_() { return TabId{1}; }
 
@@ -214,6 +237,11 @@ private:
     GuiModel model_;
     std::unordered_map<TabId, std::unique_ptr<TabActor>> actors_;
     Animator anim_; // the single animation-timing authority (lock-free)
+    // Interaction repaint bus: request_present() raises present_pending_ and
+    // bumps interaction_rev_ (folded into the RenderKey so the gate repaints a
+    // selection/scroll change whose content generation() is unchanged).
+    std::atomic<bool> present_pending_{false};
+    std::atomic<std::uint32_t> interaction_rev_{0};
 };
 
 } // namespace hand

@@ -34,6 +34,10 @@ int main() {
     { auto n = k; n.w = 1024; ck(g.should_present(n), "resize presents"); k = n; }
     { auto n = k; n.overlay = 2; ck(g.should_present(n), "overlay open presents"); k = n; }
     { auto n = k; n.anim_frame = 7; ck(g.should_present(n), "animation frame presents"); k = n; }
+    // Interaction revision (selection drag / scroll / hover) forces a present
+    // even when generation() is unchanged — the fix for laggy text selection.
+    { auto n = k; n.interaction = 1; ck(g.should_present(n), "interaction bump presents"); k = n; }
+    { auto n = k; n.interaction = 2; ck(g.should_present(n), "next interaction bump presents"); k = n; }
     ck(!g.should_present(k), "settled again -> skip");
 
     // invalidate() forces the next present even with an unchanged key.

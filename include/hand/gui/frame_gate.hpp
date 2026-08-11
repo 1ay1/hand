@@ -32,6 +32,7 @@ struct RenderKey {
     std::int32_t w = 0, h = 0;    // drawable size
     std::uint32_t overlay = 0;    // 0 none / 1 help / 2 search / 3 settings
     std::uint32_t anim_frame = 0; // animation frame index (only when animating)
+    std::uint32_t interaction = 0; // interaction revision (selection/scroll/hover)
 
     [[nodiscard]] std::uint64_t fold() const noexcept {
         std::uint64_t k = 1469598103934665603ull; // FNV-1a offset
@@ -42,6 +43,7 @@ struct RenderKey {
             static_cast<std::uint32_t>(h));
         mix(overlay);
         mix(anim_frame);
+        mix(interaction);
         return k;
     }
 };
