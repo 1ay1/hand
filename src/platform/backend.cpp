@@ -56,7 +56,11 @@ namespace {
 } // namespace
 
 int run(const toe::Config &cfg_in, const toe::WindowConfig &win, Backend force,
-        const std::vector<std::string> &child_argv) {
+        const std::vector<std::string> &child_argv, bool tabs) {
+    // Tabbed (Activity Tabs) mode: enabled by the config's behavior.tabs, and
+    // still overridable by the HAND_TABS env var (either turns it on).
+    const char *tabs_env = std::getenv("HAND_TABS");
+    const bool tabbed = tabs || (tabs_env && *tabs_env);
     // Process creation is the HOST's job: the engine never forks (see
     // posix_pty.hpp). NOTE the ordering — the child is spawned near the END of
     // this function, AFTER font/DPI resolution, because the initial pty grid is
@@ -183,16 +187,14 @@ int run(const toe::Config &cfg_in, const toe::WindowConfig &win, Backend force,
         return run_cocoa(cfg, win);
 #else
     case Backend::wayland: {
-        const char *tabs = std::getenv("HAND_TABS");
-        const int rc = (tabs && *tabs) ? run_wayland_tabbed(cfg, win, sc) : run_wayland(cfg, win);
+        const int rc = tabbed ? run_wayland_tabbed(cfg, win, sc) : run_wayland(cfg, win);
         if (rc >= 0) return rc; // else fall back
         [[fallthrough]];
     }
     case Backend::x11: {
-        // HAND_TABS=1 selects the multi-terminal Activity-Tabs loop (Elm/actor
-        // GUI); default is the tuned single-terminal loop.
-        const char *tabs = std::getenv("HAND_TABS");
-        const int rc = (tabs && *tabs) ? run_x11_tabbed(cfg, win, sc) : run_x11(cfg, win);
+        // Tabbed mode = the multi-terminal Activity-Tabs loop (Elm/actor GUI);
+        // else the tuned single-terminal loop.
+        const int rc = tabbed ? run_x11_tabbed(cfg, win, sc) : run_x11(cfg, win);
         if (rc >= 0) return rc;
         [[fallthrough]];
     }

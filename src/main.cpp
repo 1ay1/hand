@@ -55,13 +55,14 @@ int main(int argc, char **argv) {
 
     const toe::Config cfg = hc.to_toe();
     const std::vector<std::string> child = child_argv_from(argc, argv);
-    // Tabbed mode draws its OWN chrome, so it turns off the server titlebar
-    // regardless of the config's `decorations`.
-    const char *tabs = std::getenv("HAND_TABS");
-    const bool decorations = hc.window.decorations && !(tabs && *tabs);
+    // Tabs come from config (default on) OR the HAND_TABS env var. Tabbed mode
+    // draws its OWN chrome, so it turns off the server titlebar.
+    const char *tabs_env = std::getenv("HAND_TABS");
+    const bool tabs = hc.behavior.tabs || (tabs_env && *tabs_env);
+    const bool decorations = hc.window.decorations && !tabs;
     return hand::run(cfg,
                      {.title = hc.window.title,
                       .size = {hc.window.width, hc.window.height},
                       .decorations = decorations},
-                     hand::Backend::automatic, child);
+                     hand::Backend::automatic, child, tabs);
 }

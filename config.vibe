@@ -87,5 +87,6 @@ behavior {
     visual_bell  true
     copy_on_select false          # auto-copy a drag selection
     confirm_close false           # ask before closing a running child
+    tabs         true             # multi-terminal Activity Tabs UI (own chrome)
     # word_separators ",'"         # extra chars joined into a word on double-click
 }

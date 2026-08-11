@@ -96,6 +96,7 @@ struct BehaviorConfig {
     bool copy_on_select = false;  // auto-copy a selection to the clipboard
     bool confirm_close = false;   // ask before closing with a running child
     std::string word_separators{}; // extra word-joining chars for double-click select
+    bool tabs = true;             // multi-terminal Activity Tabs UI (own chrome)
 };
 
 // The complete config. Loaded from VIBE, edited by the settings panel, saved
