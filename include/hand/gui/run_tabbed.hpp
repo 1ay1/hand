@@ -32,6 +32,7 @@
 #include "hand/gui/message.hpp"
 #include "hand/gui/runtime.hpp"
 #include "hand/help_panel.hpp"
+#include "hand/command_flyout.hpp"
 #include "hand/search_bar.hpp"
 #include "hand/platform/backend_base.hpp" // Chord + classify_chord (shared, one place)
 #include "hand/platform/posix_pty.hpp" // spawn_pty (fresh PTY per tab)
@@ -125,6 +126,7 @@ template <class App>
     TabbedView view;
     hand::HelpPanel help;   // Ctrl+Shift+?  (read-only cheatsheet)
     hand::SearchBar search; // Ctrl+Shift+F  (scrollback search, per focused tab)
+    hand::CommandFlyout flyout; // rail-hover command list (click to jump)
     hand::platform::SettingsHost settings; // Ctrl+Shift+,  (GLOBAL pane, all tabs)
     settings.bind();        // config file + inotify watch, same as single-terminal
     glyph::Buffer overlay_buf; // cell buffer for the help/search overlays
@@ -188,6 +190,9 @@ template <class App>
         // what makes the gate repaint them instead of frame-skipping (the fix
         // for laggy text selection).
         rk.interaction = rt_ptr->interaction_revision();
+        // Fold the flyout's visibility so it can't be frame-skipped on the
+        // frame it first appears (its content rides the interaction revision).
+        if (flyout.active()) rk.overlay = rk.overlay ? rk.overlay : 4u;
         if (!gate.should_present(rk)) return;          // pixel-identical: no GPU work
         if (loop_hz_present) ++present_count;
 
@@ -236,6 +241,18 @@ template <class App>
                         s->render_overlay(rc, overlay_buf.data(), cols, rows, px, 0, 0, 1.0f,
                                           overlay_buf.alpha_data());
                     }
+                } else if (flyout.active()) {
+                    // Command-list flyout: a floating card beside the rail. No
+                    // scrim — only the card composites (its render() sets alpha).
+                    const toe::Extent cell = s->cell_size();
+                    const int cols = std::max(1, px.w / std::max(1, cell.cols));
+                    const int rows = std::max(1, px.h / std::max(1, cell.rows));
+                    if (overlay_buf.width() != cols || overlay_buf.height() != rows)
+                        overlay_buf.resize(cols, rows);
+                    overlay_buf.clear(glyph::Style{});
+                    flyout.render(overlay_buf);
+                    s->render_overlay(rc, overlay_buf.data(), cols, rows, px, 0, 0, 1.0f,
+                                      overlay_buf.alpha_data());
                 }
                 // Settings panel: renders + applies to the focused tab; a change
                 // this frame is flagged so the loop fans it out to ALL tabs
@@ -374,6 +391,18 @@ template <class App>
                 tpx.h = std::max(1, tpx.h - ch_h);
                 toe::EventRouter<App> router{s, app, tpx, running};
                 std::visit(router, adj);
+                // The router just updated the rail-hover row (mouse-move) and
+                // may have jumped on a rail click. Refresh the command-list
+                // flyout from that state: it shows/hides itself based on whether
+                // the pointer is on the rail. Click-to-jump is already handled
+                // by the router's rail_click (snaps to the block under the
+                // pointer) — exactly the flyout row the user sees highlighted.
+                const bool was = flyout.active();
+                flyout.update(s);
+                // Repaint on any flyout change: appear/disappear OR the hovered
+                // row moving. A bare hover (MouseMove w/o button) isn't in the
+                // pixel_affecting set below, so request here while it's live.
+                if (flyout.active() || was) rt.request_present();
             });
             // A pointer/scroll event can change the VISIBLE pixels (selection
             // highlight, scrollback view, hover) WITHOUT bumping the terminal's
