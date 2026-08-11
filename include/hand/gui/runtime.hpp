@@ -24,6 +24,7 @@
 #ifndef HAND_GUI_RUNTIME_HPP
 #define HAND_GUI_RUNTIME_HPP
 
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <unordered_map>
@@ -165,29 +166,33 @@ public:
     }
 
     // Time-driven repaint need, split by cadence:
-    //   fast (16ms): a running-command spinner, a done-attention pulse, or the
-    //                focused terminal mid-animation (cursor glide / bell fade).
+    //   fast (16ms): a running-command spinner, a done-attention pulse.
     //   slow (blink half-period): the focused terminal's steady cursor blink.
     // Returns the wait deadline in ms, or -1 to block FOREVER (zero idle CPU).
-    [[nodiscard]] int animation_deadline_ms() {
+    // LOCK-FREE: reads only the pure model (TabModel status/attention) + a
+    // cached blink period — never acquires an actor's render_lock, so it can't
+    // be starved by a busy actor thread mid-drain (that was the freeze).
+    [[nodiscard]] int animation_deadline_ms() const {
         bool fast = false;
         model_.tabs().for_each_ordered([&](const TabEntry &e, bool, std::size_t) {
             if (e.model.status() == TabStatus::Running ||
                 e.model.attention() != TabAttention::None)
                 fast = true;
         });
-        int blink_ms = 0;
-        const TabId fid = model_.tabs().focus().id;
-        if (auto it = actors_.find(fid); it != actors_.end()) {
-            std::lock_guard lk(it->second->render_lock());
-            if (auto *s = it->second->terminal().poll().running) {
-                if (s->cursor_animating()) fast = true; // active glide / bell fade
-                blink_ms = s->cursor_blink_ms();  // 0 = steady (no blink)
-            }
-        }
         if (fast) return 16;
-        if (blink_ms > 0) return blink_ms; // wake once per blink phase only
-        return -1;                          // nothing animates: block forever
+        // The focused terminal's caret is mid-glide (or a bell is fading): keep
+        // rendering at ~60fps. This flag is published by present() under the
+        // render_lock it already holds, and read here LOCK-FREE.
+        if (focus_animating_.load(std::memory_order_relaxed)) return 16;
+        return focus_blink_ms_ > 0 ? focus_blink_ms_ : -1;
+    }
+    // Cache the focused tab's cursor-blink period (call when focus changes /
+    // settings apply). Kept out of the hot deadline path so it stays lock-free.
+    void set_focus_blink_ms(int ms) noexcept { focus_blink_ms_ = ms; }
+    // Publish whether the focused caret is animating (set by present() under the
+    // render_lock). Read lock-free by animation_deadline_ms().
+    void set_focus_animating(bool a) noexcept {
+        focus_animating_.store(a, std::memory_order_relaxed);
     }
 
 private:
@@ -205,6 +210,8 @@ private:
     Mailbox<GuiMsg> mailbox_;
     GuiModel model_;
     std::unordered_map<TabId, std::unique_ptr<TabActor>> actors_;
+    int focus_blink_ms_ = 530; // cached blink period (lock-free anim deadline)
+    std::atomic<bool> focus_animating_{false}; // focused caret mid-glide (lock-free)
 };
 
 } // namespace hand

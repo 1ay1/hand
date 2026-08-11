@@ -170,15 +170,23 @@ template <class App>
         // whole clear/render/swap and don't touch the GPU at all. This is what
         // keeps a static screen at zero GPU cost.
         const std::uint32_t chrome_frame = static_cast<std::uint32_t>(rt_ptr->model().frame());
+        // Is the caret gliding / a bell fading? While it is, the pixels change
+        // every frame even though generation() doesn't — so fold the frame
+        // counter into the key (forces a fresh render) AND publish the flag so
+        // the loop keeps waking at 60fps.
+        const bool caret_anim = s->cursor_animating();
+        rt_ptr->set_focus_animating(caret_anim);
         std::uint64_t key = s->generation();
         key = key * 1099511628211ull + static_cast<std::uint64_t>(s->scroll_offset() + 1);
         key = key * 1099511628211ull + (static_cast<std::uint64_t>(px.w) << 16 | px.h);
         key = key * 1099511628211ull +
               (help.active() ? 1u : search.active() ? 2u : settings.panel_active() ? 3u : 0u);
-        // Chrome + overlays animate; fold the frame counter ONLY when something
-        // is actually animating so a static screen's key is stable.
-        if (rt_ptr->animation_deadline_ms() >= 0 || help.active() || search.active() ||
-            settings.panel_active())
+        // Fold the frame counter whenever ANYTHING animates — chrome spinner /
+        // pulse (deadline>=0) OR the caret glide OR an open overlay — so a live
+        // animation always renders a fresh frame; a fully static screen keeps a
+        // stable key and skips the GPU.
+        if (caret_anim || rt_ptr->animation_deadline_ms() >= 0 || help.active() ||
+            search.active() || settings.panel_active())
             key = key * 1099511628211ull + chrome_frame;
         if (key == last_render_key) return; // nothing changed — no GPU work
         last_render_key = key;

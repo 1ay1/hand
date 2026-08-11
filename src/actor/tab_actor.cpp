@@ -62,23 +62,27 @@ void TabActor::run() {
         {
             std::lock_guard lk(render_lock_);
             auto p = term_.poll();
-            if (p.exited) {
-                exited = true;
-                exit_code = p.exited->code;
-            } else {
-                pty_fd = p.running->pty_fd();
-                // Bounded drain: consume all readable output, but cap the number
-                // of budgeted passes so a truly endless stream can't starve the
-                // command loop (it just resumes next wakeup).
-                for (int passes = 0; passes < 64; ++passes) {
-                    p.running->pump_output();
-                    if (!p.running->output_pending()) break;
-                }
-            }
+            if (p.exited) { exited = true; exit_code = p.exited->code; }
+            else pty_fd = p.running->pty_fd();
         }
         if (exited) {
             to_gui_.post(TabExited{id_, exit_code});
             break;
+        }
+        // Bounded drain: consume all readable output, but re-acquire the lock
+        // PER PASS and yield between passes so the GUI thread (which also wants
+        // render_lock, to render + read animation state) is never starved by a
+        // flooding child. A hard pass cap bounds one wakeup's work.
+        for (int passes = 0; passes < 256; ++passes) {
+            bool more = false;
+            {
+                std::lock_guard lk(render_lock_);
+                auto p = term_.poll();
+                if (!p.running) break;
+                p.running->pump_output();
+                more = p.running->output_pending();
+            }
+            if (!more) break;
         }
 
         // --- 3. post CHANGE-ONLY status, RATE-LIMITED ------------------------
