@@ -42,6 +42,10 @@ int main() {
     // cursor can never be frame-skipped into invisibility).
     { auto n = k; n.cursor = 42; ck(g.should_present(n), "cursor move presents"); k = n; }
     { auto n = k; n.cursor = 43; ck(g.should_present(n), "cursor settle presents"); k = n; }
+    // A tab switch (focused tab id changes) must always present, even if the
+    // new tab's content folds to the same key (two fresh prompts collide).
+    { auto n = k; n.tab = 7; ck(g.should_present(n), "tab switch presents"); k = n; }
+    { auto n = k; n.tab = 3; ck(g.should_present(n), "switch back presents"); k = n; }
     ck(!g.should_present(k), "settled again -> skip");
 
     // invalidate() forces the next present even with an unchanged key.

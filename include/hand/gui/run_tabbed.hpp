@@ -178,6 +178,12 @@ template <class App>
         rk.generation = s->generation();
         rk.scroll = s->scroll_offset();
         rk.w = px.w; rk.h = px.h;
+        // Fold the FOCUSED TAB ID: switching tabs must always present, even if
+        // the new tab's (generation/scroll/cursor) folds to the same key as the
+        // last-presented one (two fresh prompts collide) — otherwise the switch
+        // is frame-skipped and you keep seeing the previous tab's framebuffer.
+        rk.tab = static_cast<std::uint32_t>(
+            static_cast<std::uint64_t>(rt_ptr->model().tabs().focus().id));
         rk.overlay = help.active() ? 1u : search.active() ? 2u : settings.panel_active() ? 3u : 0u;
         // Fold the frame index UNCONDITIONALLY: the loop only advances it (via
         // set_frame) while something animates, so it's constant on a static

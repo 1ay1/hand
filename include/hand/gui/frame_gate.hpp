@@ -35,6 +35,7 @@ struct RenderKey {
     std::uint32_t interaction = 0; // interaction revision (selection/scroll/hover)
     std::uint32_t cursor = 0;      // packed cursor row/col/visible — so a cursor
                                    // move or show/hide can never be frame-skipped
+    std::uint32_t tab = 0;         // focused tab id — a tab switch always presents
 
     [[nodiscard]] std::uint64_t fold() const noexcept {
         std::uint64_t k = 1469598103934665603ull; // FNV-1a offset
@@ -47,6 +48,7 @@ struct RenderKey {
         mix(anim_frame);
         mix(interaction);
         mix(cursor);
+        mix(tab);
         return k;
     }
 };

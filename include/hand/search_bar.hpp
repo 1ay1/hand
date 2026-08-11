@@ -47,6 +47,10 @@ public:
     [[nodiscard]] bool handle(const toe::win::Event &ev, toe::Session &session) {
         if (!active_) return false;
         if (const auto *k = std::get_if<toe::win::KeyPressed>(&ev)) {
+            // PRESS only — a key event fires twice (press + release), so acting
+            // on both would double-advance search (Enter/arrows jumping two
+            // matches). Swallow the release so it never reaches the child.
+            if (k->key.kind != toe::KeyEvent::Kind::press) return true;
             return handle_key(k->key, session);
         }
         if (const auto *t = std::get_if<toe::win::TextEntered>(&ev)) {
