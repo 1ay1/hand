@@ -322,6 +322,7 @@ template <class App>
     bool rail_moved = false;     // the rail press has moved past the click threshold
     int rail_press_y = 0;        // y of the rail mouse-down (click-vs-drag detection)
     bool running = true;
+    std::size_t themed_tab_count = 0; // tabs already given the full theme (see below)
     // Diagnostic: HAND_LOOP_HZ=1 prints GUI-loop iterations/sec to stderr.
     const bool loop_hz = std::getenv("HAND_LOOP_HZ") != nullptr;
     std::uint64_t loop_iters = 0, loop_win = start, anim_wakes = 0;
@@ -651,6 +652,20 @@ template <class App>
             settings_changed_this_frame = false;
             const toe::PixelSize px = app.pixel_size();
             rt.for_each_live_session([&](toe::Session &s) { settings.apply_to(s, px); });
+        }
+
+        // A freshly-spawned tab starts with the config's base colours (applied
+        // in Terminal::create) but NOT the 16-colour ANSI palette / cursor
+        // colour — those live only in the settings state. When the live tab
+        // count grows, apply the full settings to every tab so a new tab is
+        // themed identically from its first frame (no bg/colour "pop" later).
+        {
+            const std::size_t live = rt.model().tabs().size();
+            if (live != themed_tab_count) {
+                themed_tab_count = live;
+                const toe::PixelSize px = app.pixel_size();
+                rt.for_each_live_session([&](toe::Session &s) { settings.apply_to(s, px); });
+            }
         }
 
         // --- animation clock: advance only while something animates ---------
