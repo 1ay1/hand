@@ -140,7 +140,10 @@ public:
 
         buf.clear_alpha(0);
         const glyph::Rect card{card_x, card_y, card_w, card_h};
-        buf.set_alpha(card, 252);
+        // Fully opaque: a floating card must read as a SOLID panel regardless of
+        // the window's translucency (a partial alpha let the translucent bg
+        // bleed through and shift the card's colour).
+        buf.set_alpha(card, 255);
         // Soft shadow: one row below + one column left (the card hugs the right).
         buf.set_alpha(glyph::Rect{card_x, card_y + card_h, card_w, 1}, 70);
         buf.set_alpha(glyph::Rect{card_x - 1, card_y + 1, 1, card_h}, 55);
