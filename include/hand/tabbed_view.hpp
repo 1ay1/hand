@@ -39,12 +39,23 @@ public:
 
         buf_.clear(glyph::Style{});
         buf_.clear_alpha(0);
+        cell_w_ = cell.cols;
+        cell_h_ = cell.rows;
+        if (lay.hidden()) {
+            // Auto-hidden: only the window-controls patch (top-right) is drawn.
+            const RectC ctrl = lay.ctrl_cells();
+            if (show_ctrls && ctrl.w > 0) {
+                buf_.set_alpha({ctrl.x, ctrl.y, ctrl.w, ctrl.h}, 235);
+                chrome_.render_controls_only(buf_, ctrl);
+            }
+            s.render_overlay(rc, buf_.data(), buf_.width(), buf_.height(), px, 0, 0, 1.0f,
+                             buf_.alpha_data());
+            return;
+        }
         const RectC cr = lay.chrome_cells();
         buf_.set_alpha({cr.x, cr.y, cr.w, cr.h}, 255);
 
         chrome_.render_oriented(buf_, model, frame, cr, lay.side(), show_ctrls, show_plus);
-        cell_w_ = cell.cols;
-        cell_h_ = cell.rows;
 
         s.render_overlay(rc, buf_.data(), buf_.width(), buf_.height(), px, 0, 0, 1.0f,
                          buf_.alpha_data());

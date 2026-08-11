@@ -237,7 +237,7 @@ template <class App>
                 // own overlay — nothing to restart).
                 lay.set(px.w, px.h, std::max(1, cell.cols), std::max(1, cell.rows),
                         chrome_side_from(host_config().tab_position),
-                        host_config().tab_side_width);
+                        host_config().tab_side_width, host_config().tab_auto_hide);
                 const toe::PixelSize term_px{lay.term_px_w(), lay.term_px_h()};
 
                 // Keep the terminal sized to the viewport the tab bar leaves.
@@ -313,7 +313,7 @@ template <class App>
     // has a valid terminal-viewport size (present recomputes it each frame with
     // the real cell size).
     lay.set(px0.w, px0.h, 8, 16, chrome_side_from(host_config().tab_position),
-            host_config().tab_side_width);
+            host_config().tab_side_width, host_config().tab_auto_hide);
     // Derive the tab-bar palette from the active theme (the single source of
     // colour truth) and re-derive when it changes (live theme switch).
     std::string tab_theme_name;

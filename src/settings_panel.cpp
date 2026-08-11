@@ -97,6 +97,7 @@ Settings Settings::from(const HandConfig &c) {
     s.tab_side_width = c.tabs.side_width;
     s.tab_controls = c.tabs.show_window_controls;
     s.tab_plus = c.tabs.show_new_tab_button;
+    s.tab_auto_hide = c.tabs.auto_hide;
     // Scroll
     s.scrollback = c.scroll.scrollback_lines;
     s.scroll_mult = c.scroll.wheel_lines;
@@ -174,6 +175,7 @@ void Settings::into(HandConfig &c) const {
     c.tabs.side_width = tab_side_width;
     c.tabs.show_window_controls = tab_controls;
     c.tabs.show_new_tab_button = tab_plus;
+    c.tabs.auto_hide = tab_auto_hide;
     // Scroll
     c.scroll.scrollback_lines = scrollback;
     c.scroll.wheel_lines = scroll_mult;
@@ -359,7 +361,7 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
     // layout below; when it drifts the card either clips its last control or
     // floats in a band of empty space. Theme: dropdown + note + 4 colours +
     // "Save as" + button + status line.
-    static const int kSectionRows[] = {14, 8, 7, 15, 7, 5, 6, 3};
+    static const int kSectionRows[] = {14, 8, 7, 16, 7, 5, 6, 3};
     // STATIC PANEL: size the card once to the TALLEST section so switching
     // sections never resizes it, and an open dropdown renders WITHIN this fixed
     // area (the dropdown scrolls its list internally via dd_top_) instead of
@@ -492,6 +494,7 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
         changed |= ui.slider_int("Side width", &s_.tab_side_width, 8, 40, 1);
         changed |= ui.toggle("Window buttons", &s_.tab_controls);
         changed |= ui.toggle("New-tab button", &s_.tab_plus);
+        changed |= ui.toggle("Auto-hide bar", &s_.tab_auto_hide);
         break;
     case 4: // Scroll
         changed |= ui.slider_int("Scrollback", &s_.scrollback, 0, 100000, 1000);

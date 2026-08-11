@@ -306,6 +306,7 @@ private:
         host.tab_controls = s.tab_controls;
         host.tab_plus = s.tab_plus;
         host.tab_side_width = s.tab_side_width;
+        host.tab_auto_hide = s.tab_auto_hide;
         host.tab_position = s.tab_position == 1 ? "bottom"
                           : s.tab_position == 2 ? "left"
                           : s.tab_position == 3 ? "right" : "top";

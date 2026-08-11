@@ -36,14 +36,30 @@ public:
     // the tab-bar thickness: rows for top/bottom, columns for left/right (auto,
     // clamped by side_width for vertical). Safe with zero cell size.
     void set(int win_w_px, int win_h_px, int cell_w_px, int cell_h_px, ChromeSide side,
-             int side_width_cells) {
+             int side_width_cells, bool hidden = false) {
         win_w_px_ = std::max(1, win_w_px);
         win_h_px_ = std::max(1, win_h_px);
         cw_ = std::max(1, cell_w_px);
         ch_ = std::max(1, cell_h_px);
         side_ = side;
+        hidden_ = hidden;
         cols_ = std::max(1, win_w_px_ / cw_);
         rows_ = std::max(1, win_h_px_ / ch_);
+
+        if (hidden_) {
+            // Auto-hide: the terminal gets the WHOLE window; no strip reserved.
+            // Only a small window-controls patch floats in the top-right corner
+            // ("– □ ✕" = ~7 cells). The tab bar itself isn't drawn.
+            thick_cells_ = 0;
+            term_px_w_ = win_w_px_;
+            term_px_h_ = win_h_px_;
+            term_origin_x_px_ = 0;
+            term_origin_y_px_ = 0;
+            ctrl_ = {std::max(0, cols_ - 8), 0, 8, 1};
+            chrome_ = {0, 0, 0, 0};
+            return;
+        }
+        ctrl_ = {0, 0, 0, 0};
 
         if (side_ == ChromeSide::Top || side_ == ChromeSide::Bottom) {
             thick_cells_ = 1; // one row
@@ -69,6 +85,9 @@ public:
     }
 
     [[nodiscard]] ChromeSide side() const noexcept { return side_; }
+    [[nodiscard]] bool hidden() const noexcept { return hidden_; }
+    // The floating window-controls cell rect (top-right) when the bar is hidden.
+    [[nodiscard]] RectC ctrl_cells() const noexcept { return ctrl_; }
     [[nodiscard]] bool vertical() const noexcept {
         return side_ == ChromeSide::Left || side_ == ChromeSide::Right;
     }
@@ -92,6 +111,11 @@ public:
 
     // Is a window pixel inside the CHROME strip? (for pointer routing / cursor)
     [[nodiscard]] bool on_chrome_px(int px_x, int px_y) const noexcept {
+        if (hidden_) {
+            // Only the small top-right controls patch counts as chrome.
+            return px_x >= ctrl_.x * cw_ && px_x < (ctrl_.x + ctrl_.w) * cw_ &&
+                   px_y < ctrl_.h * ch_;
+        }
         switch (side_) {
         case ChromeSide::Top:    return px_y < thick_cells_ * ch_;
         case ChromeSide::Bottom: return px_y >= win_h_px_ - thick_cells_ * ch_;
@@ -112,7 +136,9 @@ private:
     int win_w_px_ = 1, win_h_px_ = 1, cw_ = 1, ch_ = 1;
     int cols_ = 1, rows_ = 1, thick_cells_ = 1;
     ChromeSide side_ = ChromeSide::Top;
+    bool hidden_ = false;
     RectC chrome_{};
+    RectC ctrl_{}; // top-right window-controls patch when hidden
     int term_px_w_ = 1, term_px_h_ = 1;
     int term_origin_x_px_ = 0, term_origin_y_px_ = 0;
 };

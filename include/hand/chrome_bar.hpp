@@ -46,6 +46,22 @@ class ChromeBar {
 public:
     // Set the tab palette (derived from the active theme). Call on theme change.
     void set_theme(const TabTheme &t) noexcept { tt_ = t; }
+
+    // Auto-hidden bar: draw ONLY the window controls (– □ ✕) in the given
+    // cell rect (top-right corner) over a translucent patch. Records hits.
+    void render_controls_only(glyph::Buffer &buf, RectC r) {
+        hits_.clear();
+        if (r.w < 6 || r.h < 1) return;
+        const glyph::Style base{.fg = tt_.inactive_fg, .bg = tt_.bar_bg};
+        buf.fill({r.x, r.y, r.w, 1}, base);
+        const int x = r.x + r.w - 6;
+        buf.put(x, r.y, U'\u2013', glyph::Style{.fg = tt_.btn_min, .bg = tt_.bar_bg});
+        buf.put(x + 2, r.y, U'\u25A1', glyph::Style{.fg = tt_.btn_max, .bg = tt_.bar_bg});
+        buf.put(x + 4, r.y, U'\u2715', glyph::Style{.fg = tt_.btn_close, .bg = tt_.bar_bg});
+        reg({ChromeHit::Kind::WinMinimize, 0}, x, r.y, x + 1, r.y);
+        reg({ChromeHit::Kind::WinMaximize, 0}, x + 2, r.y, x + 3, r.y);
+        reg({ChromeHit::Kind::WinClose, 0}, x + 4, r.y, x + 5, r.y);
+    }
     // The chrome occupies the top ROW of the grid (row 0). The terminal content
     // is offset down by this many rows by the host.
     static constexpr int kRows = 1;
