@@ -210,10 +210,18 @@ template <class App>
         // Fold the flyout's visibility so it can't be frame-skipped on the
         // frame it first appears (its content rides the interaction revision).
         if (flyout.active()) rk.overlay = rk.overlay ? rk.overlay : 4u;
+        // Fold window opacity (quantized) so a live opacity change repaints —
+        // set_opacity doesn't bump generation.
+        rk.interaction ^= static_cast<std::uint32_t>(s->opacity() * 255.0f) << 24;
         if (!gate.should_present(rk)) return;          // pixel-identical: no GPU work
         if (loop_hz_present) ++present_count;
 
-        app.begin_frame(px, 23, 23, 28, 1.0f); // clear; toe overdraws its own bg
+        // Clear to the terminal's OWN background colour at its configured
+        // opacity, so `opacity < 1` yields a translucent window (the compositor
+        // composites the alpha) and a theme's bg shows through the padding —
+        // not a hardcoded opaque grey. toe overdraws its cells on top.
+        const toe::Rgb cbg = s->default_bg();
+        app.begin_frame(px, cbg.r, cbg.g, cbg.b, s->opacity());
         {
             {
                 const toe::Extent cell = s->cell_size();
