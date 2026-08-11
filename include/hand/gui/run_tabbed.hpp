@@ -163,6 +163,8 @@ template <class App>
     TabbedView view;
     hand::HelpPanel help;   // Ctrl+Shift+?  (read-only cheatsheet)
     hand::SearchBar search; // Ctrl+Shift+F  (scrollback search, per focused tab)
+    hand::platform::SettingsHost settings; // Ctrl+Shift+,  (GLOBAL pane, all tabs)
+    settings.bind();        // config file + inotify watch, same as single-terminal
     glyph::Buffer overlay_buf; // cell buffer for the help/search overlays
 
     // SpawnFn: a new tab is a FRESH forkpty'd child (its own PTY + AdoptFd), so
@@ -192,6 +194,7 @@ template <class App>
     // places the terminal in the lower part = below the top chrome strip. The
     // terminal is resized to that reduced area so its grid fits exactly.
     GuiRuntime *rt_ptr = nullptr; // set below; present needs the frame counter
+    bool settings_changed_this_frame = false; // set by render_panel; fanned out below
     auto present = [&](TabActor &active) {
         const toe::PixelSize px = app.pixel_size();
         app.begin_frame(px, 23, 23, 28, 1.0f); // clear; toe overdraws its own bg
@@ -238,6 +241,12 @@ template <class App>
                                           overlay_buf.alpha_data());
                     }
                 }
+                // Settings panel: renders + applies to the focused tab; a change
+                // this frame is flagged so the loop fans it out to ALL tabs
+                // (below, after this tab's lock is released).
+                if (settings.panel_active()) {
+                    settings.render_panel(*s, px, settings_changed_this_frame);
+                }
             }
         }
         app.end_frame();
@@ -268,6 +277,13 @@ template <class App>
                 const bool press = k.kind == toe::KeyEvent::Kind::press;
                 const platform::Chord ch = platform::classify_chord(k);
                 // Toggle overlays on their chord (press only).
+                if (press && ch == platform::Chord::ToggleSettings) {
+                    help.close();
+                    if (search.active())
+                        rt.with_focus_session([&](toe::Session &s) { search.close(s); });
+                    settings.toggle_panel();
+                    return;
+                }
                 if (press && ch == platform::Chord::ToggleHelp) {
                     if (search.active()) rt.with_focus_session([&](toe::Session &s) { search.close(s); });
                     help.toggle();
@@ -281,13 +297,15 @@ template <class App>
                     return;
                 }
                 if (help.active()) { help.handle(ev); return; }
+                if (settings.panel_active()) { settings.panel_event(ev); return; }
                 if (search.active()) {
                     rt.with_focus_session([&](toe::Session &s) { search.handle(ev, s); });
                     return;
                 }
-            } else if (help.active() || search.active()) {
+            } else if (help.active() || search.active() || settings.panel_active()) {
                 // Swallow text/other input while an overlay is up.
                 if (std::get_if<toe::win::TextEntered>(&ev)) {
+                    if (settings.panel_active()) { settings.panel_event(ev); return; }
                     if (search.active())
                         rt.with_focus_session([&](toe::Session &s) { search.handle(ev, s); });
                     return;
@@ -322,6 +340,15 @@ template <class App>
 
         // Process everything (spawns, input routing, present).
         rt.pump();
+
+        // A global settings edit was applied to the focused tab during present;
+        // fan the new state out to every OTHER live tab so settings behave the
+        // same across all tabs.
+        if (settings_changed_this_frame) {
+            settings_changed_this_frame = false;
+            const toe::PixelSize px = app.pixel_size();
+            rt.for_each_live_session([&](toe::Session &s) { settings.apply_to(s, px); });
+        }
 
         // Block until the window has events OR an actor posted to the mailbox.
         // We reuse wait_readable, passing the GUI mailbox fd as the "pty" fd —

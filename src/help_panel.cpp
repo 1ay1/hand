@@ -18,6 +18,11 @@ void HelpPanel::render(glyph::Buffer &buf) {
     ui.kv_row("Ctrl+Shift+F", "Search scrollback");
     ui.kv_row("Esc", "Close a panel");
 
+    ui.heading("Tabs");
+    ui.kv_row("Ctrl+Shift+T", "New tab (in same dir)");
+    ui.kv_row("Ctrl+Shift+W", "Close tab");
+    ui.kv_row("Ctrl+Tab / Ctrl+Shift+Tab", "Next / previous tab");
+
     ui.heading("Search (while the bar is open)");
     ui.kv_row("Enter / Ctrl+G", "Next match");
     ui.kv_row("Shift+Enter / Ctrl+P", "Previous match");

@@ -154,6 +154,16 @@ public:
         return false;
     }
 
+    // Run `fn(toe::Session&)` on EVERY live tab, each under its own render_lock.
+    // Used to fan a global settings change out to all tabs.
+    template <class F>
+    void for_each_live_session(F &&fn) {
+        for (auto &[id, actor] : actors_) {
+            std::lock_guard lk(actor->render_lock());
+            if (auto *s = actor->terminal().poll().running) fn(*s);
+        }
+    }
+
 private:
     static TabId mint_first_() { return TabId{1}; }
 

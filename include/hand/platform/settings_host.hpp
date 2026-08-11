@@ -172,6 +172,37 @@ public:
                                 buf_.alpha_data());
     }
 
+    // --- tabbed-mode API (global settings pane over N tabs) ------------------
+    // Toggle just the settings PANEL (not help/search — the tabbed loop owns
+    // those separately). Seeds from the bound config.
+    void toggle_panel() { panel_.toggle(); }
+    [[nodiscard]] bool panel_active() const noexcept { return panel_.active(); }
+    // Feed one event to the settings panel while it's open. Returns consumed.
+    bool panel_event(const toe::win::Event &ev) {
+        if (!panel_.active()) return false;
+        return panel_.handle(ev);
+    }
+    // Render the settings panel over `session` and, if an edit changed the
+    // Settings this frame, set `changed` so the caller can fan the new state out
+    // to EVERY tab (apply_to). GL context must be current.
+    void render_panel(toe::Session &session, toe::PixelSize px, bool &changed) {
+        changed = false;
+        if (!panel_.active()) return;
+        const toe::Extent cell = session.cell_size();
+        if (cell.cols <= 0 || cell.rows <= 0) return;
+        const int cols = std::max(1, px.w / cell.cols);
+        const int rows = std::max(1, px.h / cell.rows);
+        if (buf_.width() != cols || buf_.height() != rows) buf_.resize(cols, rows);
+        panel_.render(buf_, changed);
+        if (changed) apply(session, panel_.state(), px); // focused tab immediately
+        auto rc = toe::gfx::RenderContext::adopt_current();
+        session.render_overlay(rc, buf_.data(), buf_.width(), buf_.height(), px, 0, 0, 1.0f,
+                               buf_.alpha_data());
+    }
+    // Apply the panel's CURRENT state to an arbitrary session (fan-out to the
+    // non-focused tabs so a settings change hits ALL of them).
+    void apply_to(toe::Session &session, toe::PixelSize px) { apply(session, panel_.state(), px); }
+
     // Render the scrollback search bar over the terminal. Reuses the same
     // overlay buffer + composite path as the panes, but draws only the one-line
     // bar (leaving the rest transparent so matches stay visible underneath).
