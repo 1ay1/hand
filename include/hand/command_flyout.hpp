@@ -113,9 +113,10 @@ public:
         const int card_h = shown + 4;
         const int card_w = std::clamp(longest_text() + 15, 24,
                                       std::min({W - 6, std::max(24, hc.flyout_width)}));
-        // Hug the rail: the card's right border sits one cell in from the edge,
-        // with the pointer triangle occupying that last cell toward the rail.
-        const int card_x = W - card_w - 1;
+        // Sit clear of the command rail on the right edge (the rail + its hover
+        // expansion occupy the last few cells). Leave a 3-cell gap so the card
+        // never overlaps it, and the pointer triangle bridges the gap.
+        const int card_x = W - card_w - 3;
 
         const int center = hover_idx_ >= 0 ? hover_idx_ : n_items - 1;
         const int first = std::clamp(center - shown / 2, 0, std::max(0, n_items - shown));
@@ -142,11 +143,9 @@ public:
         const glyph::Rect card{card_x, card_y, card_w, card_h};
         // Fully opaque: a floating card must read as a SOLID panel regardless of
         // the window's translucency (a partial alpha let the translucent bg
-        // bleed through and shift the card's colour).
+        // bleed through and shift the card's colour). No drop shadow — a clean
+        // flat card.
         buf.set_alpha(card, 255);
-        // Soft shadow: one row below + one column left (the card hugs the right).
-        buf.set_alpha(glyph::Rect{card_x, card_y + card_h, card_w, 1}, 70);
-        buf.set_alpha(glyph::Rect{card_x - 1, card_y + 1, 1, card_h}, 55);
 
         buf.fill(card, body);
         buf.frame(card, border, glyph::BoxStyle::Rounded);
