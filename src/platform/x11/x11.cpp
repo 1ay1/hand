@@ -117,6 +117,19 @@ public:
         XFlush(display_);
     }
     void set_clipboard(std::string_view utf8);
+    // Context-aware mouse pointer: 0 arrow, 1 text (I-beam), 2 pointer (hand).
+    // Uses core X font cursors (always available); cached per shape.
+    void set_pointer_shape(int shape) {
+        if (!display_ || !window_ || shape == cur_pointer_shape_) return;
+        cur_pointer_shape_ = shape;
+        unsigned int glyph = 68 /*XC_left_ptr*/;
+        if (shape == 1) glyph = 152; // XC_xterm (I-beam)
+        else if (shape == 2) glyph = 60; // XC_hand2 (pointing hand)
+        if (pointer_cursors_[shape] == 0)
+            pointer_cursors_[shape] = XCreateFontCursor(display_, glyph);
+        XDefineCursor(display_, static_cast<Window>(window_), pointer_cursors_[shape]);
+        XFlush(display_);
+    }
     [[nodiscard]] std::string get_clipboard();
     void open_url(std::string_view uri) { hand::open_url_xdg(uri); }
     // OverlayApp: settings/help panes (Ctrl+Shift+,) + search bar (Ctrl+Shift+F).
@@ -179,6 +192,9 @@ private:
     uint32_t last_click_time_ = 0;
     int16_t last_click_x_ = -1, last_click_y_ = -1;
     int click_count_ = 0;
+    // Context-aware mouse pointer (core X font cursors), cached per shape.
+    int cur_pointer_shape_ = -1;
+    Cursor pointer_cursors_[3] = {0, 0, 0};
 
     EGLDisplay egl_display_ = EGL_NO_DISPLAY;
     EGLContext egl_context_ = EGL_NO_CONTEXT;

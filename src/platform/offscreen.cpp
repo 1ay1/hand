@@ -116,6 +116,7 @@ public:
     void window_action(int) {}
     void window_move(int, int) {}
     void set_clipboard(std::string_view) {}
+    void set_pointer_shape(int) {} // headless: no OS pointer
     [[nodiscard]] std::string get_clipboard() { return {}; }
     void open_url(std::string_view) {}
     [[nodiscard]] bool overlay_active() const { return false; }

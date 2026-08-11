@@ -197,6 +197,41 @@ else()
       "${GEN}/text-input-unstable-v3-protocol.c")
   endif()
 
+  # cursor-shape-v1: request NAMED pointer shapes (default / text / pointer)
+  # from the compositor — no cursor-theme loading. Optional; a context-aware
+  # I-beam over text and hand over links depend on it. Also needs the
+  # wayland-cursor lib fallback? No — cursor-shape-v1 is server-side.
+  set(CS_XML "${WLPROTO_DIR}/staging/cursor-shape/cursor-shape-v1.xml")
+  set(TP_XML "${WLPROTO_DIR}/stable/tablet/tablet-v2.xml") # cursor-shape imports it
+  set(_cs_sources "")
+  if(EXISTS "${CS_XML}" AND EXISTS "${TP_XML}")
+    add_custom_command(
+      OUTPUT "${GEN}/tablet-v2-client-protocol.h"
+      COMMAND ${WAYLAND_SCANNER} client-header "${TP_XML}"
+              "${GEN}/tablet-v2-client-protocol.h"
+      DEPENDS "${TP_XML}" VERBATIM)
+    add_custom_command(
+      OUTPUT "${GEN}/tablet-v2-protocol.c"
+      COMMAND ${WAYLAND_SCANNER} private-code "${TP_XML}"
+              "${GEN}/tablet-v2-protocol.c"
+      DEPENDS "${TP_XML}" VERBATIM)
+    add_custom_command(
+      OUTPUT "${GEN}/cursor-shape-v1-client-protocol.h"
+      COMMAND ${WAYLAND_SCANNER} client-header "${CS_XML}"
+              "${GEN}/cursor-shape-v1-client-protocol.h"
+      DEPENDS "${CS_XML}" VERBATIM)
+    add_custom_command(
+      OUTPUT "${GEN}/cursor-shape-v1-protocol.c"
+      COMMAND ${WAYLAND_SCANNER} private-code "${CS_XML}"
+              "${GEN}/cursor-shape-v1-protocol.c"
+      DEPENDS "${CS_XML}" VERBATIM)
+    set(_cs_sources
+      "${GEN}/tablet-v2-client-protocol.h"
+      "${GEN}/tablet-v2-protocol.c"
+      "${GEN}/cursor-shape-v1-client-protocol.h"
+      "${GEN}/cursor-shape-v1-protocol.c")
+  endif()
+
   add_library(hand-platform STATIC
     src/platform/backend.cpp
     src/platform/posix_pty.cpp
@@ -213,11 +248,15 @@ else()
     src/theme/themes.cpp
     "${GEN}/xdg-shell-client-protocol.h"
     "${GEN}/xdg-shell-protocol.c"
-    ${_ti_sources})
+    ${_ti_sources}
+    ${_cs_sources})
   add_library(hand::platform ALIAS hand-platform)
 
   if(_ti_sources)
     target_compile_definitions(hand-platform PRIVATE TOE_HAVE_TEXT_INPUT_V3=1)
+  endif()
+  if(_cs_sources)
+    target_compile_definitions(hand-platform PRIVATE HAND_HAVE_CURSOR_SHAPE_V1=1)
   endif()
 
   target_include_directories(hand-platform

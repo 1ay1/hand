@@ -45,6 +45,9 @@
 #include <poll.h>
 
 #include "xdg-shell-client-protocol.h"
+#ifdef HAND_HAVE_CURSOR_SHAPE_V1
+#include "cursor-shape-v1-client-protocol.h"
+#endif
 
 namespace hand::platform {
 
@@ -103,6 +106,21 @@ public:
         if (toplevel_ && seat_ && last_serial_) xdg_toplevel_move(toplevel_, seat_, last_serial_);
     }
     void set_clipboard(std::string_view utf8);
+    // Context-aware mouse pointer via cursor-shape-v1: 0 arrow, 1 text (I-beam),
+    // 2 pointer (hand). Requires the compositor to advertise the protocol; a
+    // no-op otherwise (the compositor keeps its default cursor).
+    void set_pointer_shape(int shape) {
+#ifdef HAND_HAVE_CURSOR_SHAPE_V1
+        if (!cursor_shape_dev_ || shape == cur_pointer_shape_ || !ptr_enter_serial_) return;
+        cur_pointer_shape_ = shape;
+        uint32_t wp = WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT;
+        if (shape == 1) wp = WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_TEXT;
+        else if (shape == 2) wp = WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_POINTER;
+        wp_cursor_shape_device_v1_set_shape(cursor_shape_dev_, ptr_enter_serial_, wp);
+#else
+        (void)shape;
+#endif
+    }
     [[nodiscard]] std::string get_clipboard();
     void open_url(std::string_view uri) { hand::open_url_xdg(uri); }
     // OverlayApp: the in-terminal settings panel. toe::run_loop calls these to
@@ -270,6 +288,12 @@ private:
     uint32_t last_click_time_ = 0;
     std::int32_t last_click_x_ = -1, last_click_y_ = -1;
     int click_count_ = 0;
+    uint32_t ptr_enter_serial_ = 0; // serial of the last pointer enter (for set_cursor)
+    int cur_pointer_shape_ = -1;    // last requested shape (dedup)
+#ifdef HAND_HAVE_CURSOR_SHAPE_V1
+    wp_cursor_shape_manager_v1 *cursor_shape_mgr_ = nullptr;
+    wp_cursor_shape_device_v1 *cursor_shape_dev_ = nullptr;
+#endif
 
     // EGL.
     EGLDisplay egl_display_ = EGL_NO_DISPLAY;
@@ -380,6 +404,12 @@ void WaylandSurface::registry_global(void *data, wl_registry *reg, uint32_t name
             wl_registry_bind(reg, name, &zwp_text_input_manager_v3_interface, 1));
     }
 #endif
+#ifdef HAND_HAVE_CURSOR_SHAPE_V1
+    else if (std::strcmp(iface, wp_cursor_shape_manager_v1_interface.name) == 0) {
+        self->cursor_shape_mgr_ = static_cast<wp_cursor_shape_manager_v1 *>(
+            wl_registry_bind(reg, name, &wp_cursor_shape_manager_v1_interface, 1));
+    }
+#endif
 }
 
 // --- xdg -------------------------------------------------------------------
@@ -432,6 +462,11 @@ void WaylandSurface::seat_capabilities(void *data, wl_seat *seat, uint32_t caps)
     if (has_ptr && !self->pointer_) {
         self->pointer_ = wl_seat_get_pointer(seat);
         wl_pointer_add_listener(self->pointer_, &kPointerListener, self);
+#ifdef HAND_HAVE_CURSOR_SHAPE_V1
+        if (self->cursor_shape_mgr_ && !self->cursor_shape_dev_)
+            self->cursor_shape_dev_ =
+                wp_cursor_shape_manager_v1_get_pointer(self->cursor_shape_mgr_, self->pointer_);
+#endif
     } else if (!has_ptr && self->pointer_) {
         wl_pointer_destroy(self->pointer_);
         self->pointer_ = nullptr;
@@ -1065,8 +1100,14 @@ void WaylandSurface::ptr_enter(void *data, wl_pointer *, uint32_t serial, wl_sur
                                wl_fixed_t sx, wl_fixed_t sy) {
     auto *self = static_cast<WaylandSurface *>(data);
     self->last_serial_ = serial;
+    self->ptr_enter_serial_ = serial;
     self->ptr_x_ = wl_fixed_to_int(sx);
     self->ptr_y_ = wl_fixed_to_int(sy);
+    // Re-assert our cursor shape on (re-)entry: the compositor resets the
+    // pointer to a default when it enters our surface, so a client MUST set it.
+    const int want = self->cur_pointer_shape_ < 0 ? 1 : self->cur_pointer_shape_;
+    self->cur_pointer_shape_ = -1; // force re-apply
+    self->set_pointer_shape(want);
 }
 
 void WaylandSurface::ptr_motion(void *data, wl_pointer *, uint32_t, wl_fixed_t sx, wl_fixed_t sy) {

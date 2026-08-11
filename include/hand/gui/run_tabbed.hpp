@@ -405,6 +405,30 @@ template <class App>
             const int ch_h = view.chrome_px_h();
             toe::win::Event adj = detail::shift_pointer_y(ev, -ch_h);
 
+            // --- context-aware mouse pointer shape --------------------------
+            // I-beam over the terminal text, a pointing hand over the command
+            // rail and over hovered OSC-8 links, and the default arrow over the
+            // chrome strip / open overlays. Decided on every pointer motion.
+            if (const auto *pm = std::get_if<toe::win::MouseMove>(&ev)) {
+                int want = 1; // default: text (I-beam) over the grid
+                if (pm->y < ch_h || help.active() || search.active() ||
+                    settings.panel_active()) {
+                    want = 0; // chrome / overlay chrome -> arrow
+                } else {
+                    toe::PixelSize rpx = app.pixel_size();
+                    rpx.h = std::max(1, rpx.h - ch_h);
+                    const int gx = pm->x, gy = pm->y - ch_h;
+                    rt.with_focus_session([&](toe::Session &s) {
+                        if (s.on_rail(gx, rpx)) { want = 2; return; }
+                        const int cw = std::max(1, s.cell_width());
+                        const int chh = std::max(1, s.cell_height());
+                        if (!s.link_at(gy / chh, gx / cw).empty())
+                            want = 2; // hovered OSC-8 link -> pointing hand
+                    });
+                }
+                app.set_pointer_shape(want);
+            }
+
             // --- minimap rail scrub (scrollbar drag) ------------------------
             // A left press ON the rail begins a live scroll-scrub: the view
             // follows the pointer's rail row (and the command flyout tracks it).

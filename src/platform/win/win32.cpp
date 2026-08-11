@@ -168,6 +168,14 @@ public:
     }
 
     void set_clipboard(std::string_view utf8);
+    // Context-aware mouse pointer: 0 arrow, 1 text (I-beam), 2 pointer (hand).
+    void set_pointer_shape(int shape) {
+        if (shape == cur_pointer_shape_) return;
+        cur_pointer_shape_ = shape;
+        LPCWSTR id = shape == 1 ? IDC_IBEAM : shape == 2 ? IDC_HAND : IDC_ARROW;
+        pointer_cursor_ = ::LoadCursorW(nullptr, id);
+        ::SetCursor(pointer_cursor_);
+    }
     [[nodiscard]] std::string get_clipboard();
     void open_url(std::string_view uri);
 
@@ -210,6 +218,8 @@ private:
     int last_click_x_ = 0, last_click_y_ = 0;
     int clicks_ = 0;
     toe::MouseButton last_click_btn_ = toe::MouseButton::left;
+    int cur_pointer_shape_ = -1;      // last requested pointer shape (dedup)
+    HCURSOR pointer_cursor_ = nullptr; // current pointer cursor (re-set on WM_SETCURSOR)
 
     // Events produced by the wndproc are queued here, because a wndproc cannot
     // return values to poll_events' sink directly (Windows calls it re-entrantly

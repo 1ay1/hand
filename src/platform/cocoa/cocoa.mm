@@ -515,6 +515,7 @@ public:
     void window_action(int action); // 0=minimize, 1=toggle-maximize (Cocoa)
     void window_move(int, int) {}    // AppKit moves the window via title-bar drag natively
     void set_clipboard(std::string_view t);
+    void set_pointer_shape(int shape); // NSCursor arrow/IBeam/pointingHand
     [[nodiscard]] std::string get_clipboard();
     void open_url(std::string_view u);
 
@@ -967,6 +968,15 @@ void CocoaSurface::window_action(int action) {
         if (!window_) return;
         if (action == 0) [window_ miniaturize:nil];   // minimize
         else [window_ zoom:nil];                        // toggle-maximize (AppKit zoom)
+    }
+}
+
+void CocoaSurface::set_pointer_shape(int shape) {
+    @autoreleasepool {
+        NSCursor *c = shape == 1 ? [NSCursor IBeamCursor]
+                    : shape == 2 ? [NSCursor pointingHandCursor]
+                                 : [NSCursor arrowCursor];
+        [c set];
     }
 }
 

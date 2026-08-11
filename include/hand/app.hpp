@@ -76,6 +76,9 @@ public:
     // unsupported.
     void window_move(int root_x, int root_y) { impl_->window_move(root_x, root_y); }
     void set_clipboard(std::string_view t) { impl_->set_clipboard(t); }
+    // Context-aware mouse pointer shape. 0 = default arrow, 1 = text (I-beam),
+    // 2 = pointer (hand, for links/clickables). No-op on backends without it.
+    void set_pointer_shape(int shape) { impl_->set_pointer_shape(shape); }
     [[nodiscard]] std::string get_clipboard() { return impl_->get_clipboard(); }
     void open_url(std::string_view u) { impl_->open_url(u); }
     [[nodiscard]] bool overlay_active() const { return impl_->overlay_active(); }
