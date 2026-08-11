@@ -273,7 +273,9 @@ template <class App>
     bool drag_sel = false;   // left button held after a body mouse-down
     int drag_col = 0;        // last in-grid column the pointer was over
     int drag_dir = 0;        // -1 scroll up (pointer above), +1 down, 0 none
-    int drag_speed = 1;      // rows/frame, grows with distance past the edge
+    float drag_vel = 0.0f;   // autoscroll speed in ROWS PER SECOND (edge distance)
+    float drag_accum = 0.0f; // fractional-row accumulator (integrates vel*dt)
+    std::int64_t drag_last_ms = 0; // elapsed-ms of the last autoscroll step
     bool running = true;
     // Diagnostic: HAND_LOOP_HZ=1 prints GUI-loop iterations/sec to stderr.
     const bool loop_hz = std::getenv("HAND_LOOP_HZ") != nullptr;
@@ -412,14 +414,28 @@ template <class App>
                     const int cw = std::max(1, s.cell_width());
                     const int chh = std::max(1, s.cell_height());
                     drag_col = std::max(0, mm->x / cw);
+                    const int prev_dir = drag_dir;
+                    // Distance past the edge in CELLS maps to a velocity in ROWS
+                    // PER SECOND — a gentle ramp so it starts as a slow crawl
+                    // (~3 rows/s just past the edge) and accelerates smoothly to
+                    // a brisk-but-readable ceiling (~45 rows/s) when dragged far.
+                    const auto vel_for = [chh](int past_px) {
+                        const float cells = static_cast<float>(past_px) /
+                                            static_cast<float>(chh);
+                        return std::min(3.0f + cells * 12.0f, 45.0f);
+                    };
                     if (mm->y < 0) {
                         drag_dir = -1;                   // above the grid -> up
-                        drag_speed = std::min(1 + (-mm->y) / chh, 8);
+                        drag_vel = vel_for(-mm->y);
                     } else if (mm->y >= grid_px_h) {
                         drag_dir = +1;                   // below the grid -> down
-                        drag_speed = std::min(1 + (mm->y - grid_px_h) / chh, 8);
+                        drag_vel = vel_for(mm->y - grid_px_h);
                     } else {
                         drag_dir = 0;                    // inside: no autoscroll
+                    }
+                    if (drag_dir != 0 && prev_dir == 0) {
+                        drag_accum = 0.0f;               // fresh engagement
+                        drag_last_ms = static_cast<std::int64_t>(detail::now_ms_() - start);
                     }
                 });
                 rt.animator().set(Anim::Autoscroll, drag_dir != 0);
@@ -447,14 +463,23 @@ template <class App>
         // loop waking at ~60fps (see the animation clock below) and is cleared
         // on MouseUp or when the pointer re-enters the grid.
         if (drag_dir != 0) {
-            rt.with_focus_session([&](toe::Session &s) {
-                s.scroll(-drag_dir * drag_speed); // scroll(+n)=older; dir<0=up=older
-                const int rows = s.grid_size().rows;
-                const int edge_row = drag_dir < 0 ? 0 : std::max(0, rows - 1);
-                const int col = std::min(drag_col, std::max(0, s.grid_size().cols - 1));
-                s.select_extend(edge_row, col);
-            });
-            rt.request_present();
+            const std::int64_t now_e = static_cast<std::int64_t>(detail::now_ms_() - start);
+            const float dt = std::clamp(static_cast<float>(now_e - drag_last_ms), 0.0f, 100.0f) /
+                             1000.0f; // seconds since last step (clamped vs. stalls)
+            drag_last_ms = now_e;
+            drag_accum += drag_vel * dt;          // rows/sec * sec = rows (fractional)
+            const int step = static_cast<int>(drag_accum);
+            if (step > 0) {
+                drag_accum -= static_cast<float>(step);
+                rt.with_focus_session([&](toe::Session &s) {
+                    s.scroll(-drag_dir * step); // scroll(+n)=older; dir<0=up=older
+                    const int rows = s.grid_size().rows;
+                    const int edge_row = drag_dir < 0 ? 0 : std::max(0, rows - 1);
+                    const int col = std::min(drag_col, std::max(0, s.grid_size().cols - 1));
+                    s.select_extend(edge_row, col);
+                });
+                rt.request_present();
+            }
         }
 
         if (settings_changed_this_frame) {
