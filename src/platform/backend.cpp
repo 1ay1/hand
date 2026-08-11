@@ -184,7 +184,7 @@ int run(const toe::Config &cfg_in, const toe::WindowConfig &win, Backend force,
 #else
     case Backend::wayland: {
         const char *tabs = std::getenv("HAND_TABS");
-        const int rc = (tabs && *tabs) ? run_wayland_tabbed(cfg, win) : run_wayland(cfg, win);
+        const int rc = (tabs && *tabs) ? run_wayland_tabbed(cfg, win, sc) : run_wayland(cfg, win);
         if (rc >= 0) return rc; // else fall back
         [[fallthrough]];
     }
@@ -192,7 +192,7 @@ int run(const toe::Config &cfg_in, const toe::WindowConfig &win, Backend force,
         // HAND_TABS=1 selects the multi-terminal Activity-Tabs loop (Elm/actor
         // GUI); default is the tuned single-terminal loop.
         const char *tabs = std::getenv("HAND_TABS");
-        const int rc = (tabs && *tabs) ? run_x11_tabbed(cfg, win) : run_x11(cfg, win);
+        const int rc = (tabs && *tabs) ? run_x11_tabbed(cfg, win, sc) : run_x11(cfg, win);
         if (rc >= 0) return rc;
         [[fallthrough]];
     }

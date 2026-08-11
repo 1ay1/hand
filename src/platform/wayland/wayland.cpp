@@ -1212,10 +1212,11 @@ int run_wayland(const toe::Config &cfg, const toe::WindowConfig &win) {
 }
 
 // Tabbed entry: the multi-terminal Elm/actor loop (Activity Tabs) on Wayland.
-int run_wayland_tabbed(const toe::Config &cfg, const toe::WindowConfig &win) {
+int run_wayland_tabbed(const toe::Config &cfg, const toe::WindowConfig &win,
+                       const SpawnCommand &sc) {
     auto app = WaylandApp::open(win);
     if (!app) return -1;
-    return run_tabbed(*app, cfg);
+    return run_tabbed(*app, cfg, sc);
 }
 
 } // namespace hand

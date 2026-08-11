@@ -28,6 +28,7 @@
 #include "hand/actor/tab_actor.hpp"
 #include "hand/gui/message.hpp"
 #include "hand/gui/runtime.hpp"
+#include "hand/platform/posix_pty.hpp" // spawn_pty (fresh PTY per tab)
 #include "hand/platform/sokol_gl.hpp" // GL (glViewport) with prototypes
 #include "hand/tabbed_view.hpp"
 #include "toe/app.hpp"
@@ -42,6 +43,20 @@ inline std::uint64_t now_ms_() {
         std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now().time_since_epoch())
             .count());
+}
+
+// Turn an OSC 7 cwd ("file://host/abs/path" or a bare path) into a filesystem
+// path suitable for chdir(). Returns empty when it can't (=> don't chdir).
+inline std::string osc7_to_path(std::string_view cwd) {
+    if (cwd.empty()) return {};
+    constexpr std::string_view kFile = "file://";
+    if (cwd.substr(0, kFile.size()) == kFile) {
+        std::string_view rest = cwd.substr(kFile.size());
+        const auto slash = rest.find('/'); // skip the host component
+        if (slash == std::string_view::npos) return {};
+        return std::string{rest.substr(slash)};
+    }
+    return cwd.front() == '/' ? std::string{cwd} : std::string{};
 }
 } // namespace detail
 
@@ -95,18 +110,31 @@ inline void translate_event(Rt &rt, const toe::win::Event &ev) {
 }
 
 // Enter the tabbed loop. `app` is an opened backend; `cfg` is the terminal
-// config used to spawn each tab's Terminal.
+// config (its .source is IGNORED here — each tab spawns its own PTY); `base_sc`
+// carries argv/term/grid so every tab's child is spawned the same way.
 template <class App>
-[[nodiscard]] int run_tabbed(App &app, const toe::Config &cfg) {
+[[nodiscard]] int run_tabbed(App &app, const toe::Config &cfg, const SpawnCommand &base_sc) {
     const toe::PixelSize px0 = app.pixel_size();
 
     TabbedView view;
 
-    // SpawnFn: a new tab is a fresh toe::Terminal at the current window size.
-    // (The child inherits the process cwd; per-tab chdir is a later refinement.)
+    // SpawnFn: a new tab is a FRESH forkpty'd child (its own PTY + AdoptFd), so
+    // tabs never share an fd. `cwd` (from the focused tab's OSC 7) chdir's the
+    // child before exec, so a new tab opens in the same directory.
     auto spawn = [&](const std::string &cwd) -> std::optional<toe::Terminal> {
-        (void)cwd;
-        auto t = toe::Terminal::create(cfg, app.pixel_size());
+        SpawnCommand sc = base_sc;
+        const std::string dir = detail::osc7_to_path(cwd);
+        if (!dir.empty()) {
+            sc.pre_exec = [dir] {
+                // async-signal-safe: chdir is on the safe list.
+                if (::chdir(dir.c_str()) != 0) { /* ignore: keep inherited cwd */ }
+            };
+        }
+        auto fd = spawn_pty(sc);
+        if (!fd) return std::nullopt;
+        toe::Config c = cfg;
+        c.source = *fd;
+        auto t = toe::Terminal::create(c, app.pixel_size());
         if (!t) return std::nullopt;
         return std::move(*t);
     };

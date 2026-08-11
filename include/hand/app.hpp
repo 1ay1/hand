@@ -30,6 +30,10 @@
 #include "toe/terminal.hpp" // toe::Config
 
 namespace hand {
+struct SpawnCommand; // fwd (defined in platform/posix_pty.hpp); tabbed entries take it by ref
+}
+
+namespace hand {
 
 // One backend handle. `Impl` is the concrete surface type (incomplete here,
 // complete in its TU); the App owns it and forwards the toe::App contract to it
@@ -130,10 +134,13 @@ enum class Backend { automatic, wayland, x11, cocoa, win32, offscreen };
 // exit code, or <0 if the window couldn't be opened (so run() can fall back).
 [[nodiscard]] int run_wayland(const toe::Config &cfg, const toe::WindowConfig &win);
 // Multi-terminal (Activity Tabs) entry for Wayland — the Elm/actor GUI loop.
-[[nodiscard]] int run_wayland_tabbed(const toe::Config &cfg, const toe::WindowConfig &win);
+// `sc` is the base spawn command (argv/term/grid); each tab spawns a fresh PTY.
+[[nodiscard]] int run_wayland_tabbed(const toe::Config &cfg, const toe::WindowConfig &win,
+                                     const SpawnCommand &sc);
 [[nodiscard]] int run_x11(const toe::Config &cfg, const toe::WindowConfig &win);
 // Multi-terminal (Activity Tabs) entry for X11 — the Elm/actor GUI loop.
-[[nodiscard]] int run_x11_tabbed(const toe::Config &cfg, const toe::WindowConfig &win);
+[[nodiscard]] int run_x11_tabbed(const toe::Config &cfg, const toe::WindowConfig &win,
+                                 const SpawnCommand &sc);
 [[nodiscard]] int run_cocoa(const toe::Config &cfg, const toe::WindowConfig &win);
 [[nodiscard]] int run_win32(const toe::Config &cfg, const toe::WindowConfig &win);
 [[nodiscard]] int run_offscreen(const toe::Config &cfg, const toe::WindowConfig &win);

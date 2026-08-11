@@ -794,10 +794,11 @@ int run_x11(const toe::Config &cfg, const toe::WindowConfig &win) {
 // Tabbed entry: the multi-terminal Elm/actor loop (Activity Tabs). Opens the
 // same X11App, then drives GuiRuntime + TabbedView instead of the single-
 // terminal toe::run. Selected by hand::run when tabbed mode is on.
-int run_x11_tabbed(const toe::Config &cfg, const toe::WindowConfig &win) {
+int run_x11_tabbed(const toe::Config &cfg, const toe::WindowConfig &win,
+                   const SpawnCommand &sc) {
     auto app = X11App::open(win);
     if (!app) return -1;
-    return run_tabbed(*app, cfg);
+    return run_tabbed(*app, cfg, sc);
 }
 
 } // namespace hand
