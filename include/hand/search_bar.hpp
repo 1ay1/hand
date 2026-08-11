@@ -109,6 +109,16 @@ private:
                 else session.search_next();
                 cur_ = session.search_current();
                 return true;
+            // Arrows also step through matches (next = Down, prev = Up) — the
+            // common expectation alongside Enter / Shift+Enter.
+            case SK::Down:
+                session.search_next();
+                cur_ = session.search_current();
+                return true;
+            case SK::Up:
+                session.search_prev();
+                cur_ = session.search_current();
+                return true;
             case SK::Backspace:
                 if (!query_.empty()) {
                     pop_utf8();
