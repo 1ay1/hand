@@ -160,6 +160,12 @@ public:
     void window_action(int action) {
         ::ShowWindow(hwnd_, action == 0 ? SW_MINIMIZE : SW_MAXIMIZE);
     }
+    void window_move(int, int) {
+        // Release capture + tell the WM the click was on the caption, so it runs
+        // its own interactive move loop.
+        ::ReleaseCapture();
+        ::SendMessageW(hwnd_, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+    }
 
     void set_clipboard(std::string_view utf8);
     [[nodiscard]] std::string get_clipboard();

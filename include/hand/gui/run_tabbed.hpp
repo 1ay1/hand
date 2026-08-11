@@ -28,6 +28,7 @@
 #include "hand/actor/tab_actor.hpp"
 #include "hand/gui/message.hpp"
 #include "hand/gui/runtime.hpp"
+#include "hand/platform/sokol_gl.hpp" // GL (glViewport) with prototypes
 #include "hand/tabbed_view.hpp"
 #include "toe/app.hpp"
 #include "toe/gfx/render_target.hpp"
@@ -110,9 +111,11 @@ template <class App>
         return std::move(*t);
     };
 
-    // PresentFn: render the active tab's grid + chrome into the window. Runs on
-    // the GUI thread; takes the tab's render_lock so the actor isn't mutating
-    // the grid mid-draw (the one synchronized object, per-tab).
+    // PresentFn: render the active tab's grid + chrome into the window. The
+    // chrome occupies a reserved strip at the TOP; the terminal renders into the
+    // area below it. GL's origin is bottom-left, so glViewport(0,0,w,h-chrome)
+    // places the terminal in the lower part = below the top chrome strip. The
+    // terminal is resized to that reduced area so its grid fits exactly.
     GuiRuntime *rt_ptr = nullptr; // set below; present needs the frame counter
     auto present = [&](TabActor &active) {
         const toe::PixelSize px = app.pixel_size();
@@ -120,9 +123,23 @@ template <class App>
         {
             std::lock_guard lk(active.render_lock());
             if (auto *s = active.terminal().poll().running) {
+                const toe::Extent cell = s->cell_size();
+                const int chrome_h =
+                    (cell.rows > 0) ? ChromeBar::kRows * cell.rows : 0;
+                const toe::PixelSize term_px{px.w, std::max(1, px.h - chrome_h)};
+
+                // Keep the terminal sized to the area BELOW the chrome.
+                if (s->grid_size().cols * cell.cols != term_px.w ||
+                    s->grid_size().rows * cell.rows != term_px.h) {
+                    s->resize(term_px);
+                }
+
                 auto rc = toe::gfx::RenderContext::adopt_current();
-                s->render(rc, px);
-                // Chrome overlay from the GUI model (frame drives spinner/pulse).
+                // Terminal into the lower (h - chrome_h) region.
+                glViewport(0, 0, term_px.w, term_px.h);
+                s->render(rc, term_px);
+                // Chrome overlay across the FULL window (its own top row).
+                glViewport(0, 0, px.w, px.h);
                 view.render_chrome(rc, *s, rt_ptr->model(), px,
                                    static_cast<std::uint32_t>(rt_ptr->model().frame()));
             }
@@ -156,7 +173,15 @@ template <class App>
                 case ChromeHit::Kind::WinMinimize: rt.post(WinMinimize{}); return;
                 case ChromeHit::Kind::WinMaximize: rt.post(WinToggleMax{}); return;
                 case ChromeHit::Kind::WinClose: rt.post(WinCloseReq{}); return;
-                case ChromeHit::Kind::None: break; // click in the terminal body
+                case ChromeHit::Kind::None:
+                    // Empty area of the chrome row acts as a titlebar: a press
+                    // there starts an interactive window MOVE (the chrome row is
+                    // the top `view.chrome_px_h()` pixels).
+                    if (md->y >= 0 && md->y < view.chrome_px_h()) {
+                        app.window_move(md->x, md->y);
+                        return;
+                    }
+                    break; // click in the terminal body
                 }
             }
             translate_event(rt, ev);

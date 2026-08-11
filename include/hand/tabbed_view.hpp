@@ -58,6 +58,9 @@ public:
         return chrome_.hit_test(px_x / cell_w_, px_y / cell_h_);
     }
 
+    // Pixel height of the chrome strip (for hit-testing / the move region).
+    [[nodiscard]] int chrome_px_h() const noexcept { return ChromeBar::kRows * cell_h_; }
+
 private:
     ChromeBar chrome_{};
     glyph::Buffer buf_{};

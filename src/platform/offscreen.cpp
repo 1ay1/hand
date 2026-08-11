@@ -114,6 +114,7 @@ public:
     [[nodiscard]] PixelSize pixel_size() const { return size_; }
     void set_title(std::string_view) {}
     void window_action(int) {}
+    void window_move(int, int) {}
     void set_clipboard(std::string_view) {}
     [[nodiscard]] std::string get_clipboard() { return {}; }
     void open_url(std::string_view) {}

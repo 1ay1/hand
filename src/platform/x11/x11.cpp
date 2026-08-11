@@ -90,6 +90,32 @@ public:
                    SubstructureNotifyMask | SubstructureRedirectMask, &ev);
         XFlush(display_);
     }
+    // CSD interactive move: hand the drag to the WM via _NET_WM_MOVERESIZE. The
+    // press coordinates are window-relative; translate to root for the message.
+    void window_move(int win_x, int win_y) {
+        if (!display_ || !window_) return;
+        Window root = DefaultRootWindow(display_);
+        int root_x = 0, root_y = 0;
+        Window child;
+        XTranslateCoordinates(display_, static_cast<Window>(window_), root, win_x, win_y,
+                              &root_x, &root_y, &child);
+        // Release the implicit pointer grab so the WM can take over the drag.
+        XUngrabPointer(display_, CurrentTime);
+        const Atom moveresize = XInternAtom(display_, "_NET_WM_MOVERESIZE", False);
+        XEvent ev{};
+        ev.type = ClientMessage;
+        ev.xclient.window = static_cast<Window>(window_);
+        ev.xclient.message_type = moveresize;
+        ev.xclient.format = 32;
+        ev.xclient.data.l[0] = root_x;
+        ev.xclient.data.l[1] = root_y;
+        ev.xclient.data.l[2] = 8; // _NET_WM_MOVERESIZE_MOVE
+        ev.xclient.data.l[3] = 1; // button 1
+        ev.xclient.data.l[4] = 1; // source: application
+        XSendEvent(display_, root, False,
+                   SubstructureNotifyMask | SubstructureRedirectMask, &ev);
+        XFlush(display_);
+    }
     void set_clipboard(std::string_view utf8);
     [[nodiscard]] std::string get_clipboard();
     void open_url(std::string_view uri) { hand::open_url_xdg(uri); }

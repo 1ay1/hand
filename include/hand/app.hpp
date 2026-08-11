@@ -67,6 +67,10 @@ public:
     // CSD window control: 0 = minimize, 1 = toggle-maximize. No-op on backends
     // that don't implement it (the impl provides an empty default).
     void window_action(int action) { impl_->window_action(action); }
+    // CSD interactive move: start a WM-driven window drag from a press at the
+    // given ROOT pixel (the chrome empty area acts as a titlebar). No-op where
+    // unsupported.
+    void window_move(int root_x, int root_y) { impl_->window_move(root_x, root_y); }
     void set_clipboard(std::string_view t) { impl_->set_clipboard(t); }
     [[nodiscard]] std::string get_clipboard() { return impl_->get_clipboard(); }
     void open_url(std::string_view u) { impl_->open_url(u); }

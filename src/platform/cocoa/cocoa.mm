@@ -513,6 +513,7 @@ public:
 
     void set_title(std::string_view t);
     void window_action(int action); // 0=minimize, 1=toggle-maximize (Cocoa)
+    void window_move(int, int) {}    // AppKit moves the window via title-bar drag natively
     void set_clipboard(std::string_view t);
     [[nodiscard]] std::string get_clipboard();
     void open_url(std::string_view u);

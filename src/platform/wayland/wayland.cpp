@@ -97,6 +97,11 @@ public:
             maximized_ = !maximized_;
         }
     }
+    // CSD interactive move: Wayland's xdg_toplevel_move needs the seat + the
+    // serial of the triggering pointer-down (last_serial_, set in ptr_button).
+    void window_move(int, int) {
+        if (toplevel_ && seat_ && last_serial_) xdg_toplevel_move(toplevel_, seat_, last_serial_);
+    }
     void set_clipboard(std::string_view utf8);
     [[nodiscard]] std::string get_clipboard();
     void open_url(std::string_view uri) { hand::open_url_xdg(uri); }
