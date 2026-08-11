@@ -294,6 +294,8 @@ template <class App>
     float drag_accum = 0.0f; // fractional-row accumulator (integrates vel*dt)
     std::int64_t drag_last_ms = 0; // elapsed-ms of the last autoscroll step
     bool rail_scrubbing = false; // left button held on the minimap rail (scroll drag)
+    bool rail_moved = false;     // the rail press has moved past the click threshold
+    int rail_press_y = 0;        // y of the rail mouse-down (click-vs-drag detection)
     bool running = true;
     // Diagnostic: HAND_LOOP_HZ=1 prints GUI-loop iterations/sec to stderr.
     const bool loop_hz = std::getenv("HAND_LOOP_HZ") != nullptr;
@@ -402,19 +404,38 @@ template <class App>
                     if (md->button == toe::win::MouseButton::left) {
                         rt.with_focus_session([&](toe::Session &s) {
                             if (s.on_rail(md->x, rpx)) {
+                                // Arm a potential click; don't scroll yet. Just
+                                // update the hover so the flyout highlight shows
+                                // the command under the press. A subsequent move
+                                // promotes this to a live scrub (see below).
                                 rail_scrubbing = true;
-                                s.rail_scrub(md->x, md->y, rpx);
+                                rail_moved = false;
+                                rail_press_y = md->y;
+                                s.rail_hover(md->x, md->y, rpx);
                                 flyout.update(s);
                                 consumed = true;
                             }
                         });
                     }
-                } else if (std::holds_alternative<toe::win::MouseUp>(adj)) {
-                    if (rail_scrubbing) { rail_scrubbing = false; consumed = true; }
+                } else if (std::get_if<toe::win::MouseUp>(&adj)) {
+                    if (rail_scrubbing) {
+                        // A CLICK (no meaningful drag) jumps to the command the
+                        // flyout is highlighting — robust: it targets the listed
+                        // command, not a raw pixel. A drag was a live scrub, so
+                        // it just ends here.
+                        if (!rail_moved)
+                            rt.with_focus_session([&](toe::Session &s) { flyout.click(s); });
+                        rail_scrubbing = false;
+                        consumed = true;
+                    }
                 } else if (const auto *mm = std::get_if<toe::win::MouseMove>(&adj)) {
                     if (rail_scrubbing && mm->button_down) {
+                        // Promote to a scrub once the pointer moves past a small
+                        // threshold; below it, treat as a steady press (click).
+                        if (std::abs(mm->y - rail_press_y) > 3) rail_moved = true;
                         rt.with_focus_session([&](toe::Session &s) {
-                            s.rail_scrub(mm->x, mm->y, rpx);
+                            if (rail_moved) s.rail_scrub(mm->x, mm->y, rpx);
+                            else s.rail_hover(mm->x, mm->y, rpx);
                             flyout.update(s);
                         });
                         consumed = true;
