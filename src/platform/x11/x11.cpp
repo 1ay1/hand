@@ -471,24 +471,29 @@ void X11Surface::handle_key(xcb_keycode_t code, KeyEvent::Kind kind,
     // Ctrl+Shift+,  toggles the in-terminal settings panel (Linux analogue of
     // macOS ⌘,). Intercept on press before terminal routing; swallow the
     // matching release too so it never leaks to the terminal.
-    if (mods.ctrl && mods.shift && (sym == XKB_KEY_comma || sym == XKB_KEY_less)) {
-        if (kind == KeyEvent::Kind::press) settings_.toggle();
-        return;
-    }
-    // Ctrl+Shift+?  opens the keybinding help pane (`?` is Shift+/).
-    if (mods.ctrl && mods.shift && (sym == XKB_KEY_question || sym == XKB_KEY_slash)) {
-        if (kind == KeyEvent::Kind::press) settings_.toggle_help();
-        return;
-    }
-    // Ctrl+Shift+F  opens/closes the scrollback search bar.
-    if (mods.ctrl && mods.shift && (sym == XKB_KEY_f || sym == XKB_KEY_F)) {
-        if (kind == KeyEvent::Kind::press) {
-            if (auto *s = term_ ? term_->poll().running : nullptr) {
-                if (search_.active()) search_.close(*s);
-                else search_.open(*s);
-            }
+    // Reserved chords — handled INLINE only in single-terminal mode (term_
+    // bound). In tabbed mode term_ is null and these pass through to the sink,
+    // where the shared classify_chord + GUI runtime own them (one chord layer).
+    if (term_) {
+        if (mods.ctrl && mods.shift && (sym == XKB_KEY_comma || sym == XKB_KEY_less)) {
+            if (kind == KeyEvent::Kind::press) settings_.toggle();
+            return;
         }
-        return;
+        // Ctrl+Shift+?  opens the keybinding help pane (`?` is Shift+/).
+        if (mods.ctrl && mods.shift && (sym == XKB_KEY_question || sym == XKB_KEY_slash)) {
+            if (kind == KeyEvent::Kind::press) settings_.toggle_help();
+            return;
+        }
+        // Ctrl+Shift+F  opens/closes the scrollback search bar.
+        if (mods.ctrl && mods.shift && (sym == XKB_KEY_f || sym == XKB_KEY_F)) {
+            if (kind == KeyEvent::Kind::press) {
+                if (auto *s = term_->poll().running) {
+                    if (search_.active()) search_.close(*s);
+                    else search_.open(*s);
+                }
+            }
+            return;
+        }
     }
     // Ctrl +/- / Ctrl+0  font zoom (the universal keyboard gesture). '=' is the
     // unshifted '+' key; the numpad variants are handled too.

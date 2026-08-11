@@ -505,25 +505,32 @@ void WaylandSurface::emit_key(uint32_t key, KeyEvent::Kind kind) {
     // of macOS ⌘,). Intercept on press before any terminal routing; while the
     // panel is open its own key handling (via overlay_event) takes over. Also
     // swallow the matching release so it never leaks to the terminal.
-    if (mods.ctrl && mods.shift && (sym == XKB_KEY_comma || sym == XKB_KEY_less)) {
-        if (kind == KeyEvent::Kind::press) settings_.toggle();
-        return;
-    }
-    // Ctrl+Shift+?  opens the keybinding help pane. `?` is Shift+/, so match the
-    // question keysym (or slash while shift is held).
-    if (mods.ctrl && mods.shift && (sym == XKB_KEY_question || sym == XKB_KEY_slash)) {
-        if (kind == KeyEvent::Kind::press) settings_.toggle_help();
-        return;
-    }
-    // Ctrl+Shift+F  opens/closes the scrollback search bar.
-    if (mods.ctrl && mods.shift && (sym == XKB_KEY_f || sym == XKB_KEY_F)) {
-        if (kind == KeyEvent::Kind::press) {
-            if (auto *s = term_ ? term_->poll().running : nullptr) {
-                if (search_.active()) search_.close(*s);
-                else search_.open(*s);
-            }
+    // Reserved chords. These are handled INLINE only in single-terminal mode
+    // (term_ bound). In tabbed mode term_ is null and the events pass through to
+    // the sink, where the shared classify_chord + the GUI runtime own them — so
+    // there is ONE chord layer, not two. (Font zoom stays inline: it's a window
+    // event either way.)
+    if (term_) {
+        // Ctrl+Shift+,  toggles the in-terminal settings panel.
+        if (mods.ctrl && mods.shift && (sym == XKB_KEY_comma || sym == XKB_KEY_less)) {
+            if (kind == KeyEvent::Kind::press) settings_.toggle();
+            return;
         }
-        return;
+        // Ctrl+Shift+?  opens the keybinding help pane.
+        if (mods.ctrl && mods.shift && (sym == XKB_KEY_question || sym == XKB_KEY_slash)) {
+            if (kind == KeyEvent::Kind::press) settings_.toggle_help();
+            return;
+        }
+        // Ctrl+Shift+F  opens/closes the scrollback search bar.
+        if (mods.ctrl && mods.shift && (sym == XKB_KEY_f || sym == XKB_KEY_F)) {
+            if (kind == KeyEvent::Kind::press) {
+                if (auto *s = term_->poll().running) {
+                    if (search_.active()) search_.close(*s);
+                    else search_.open(*s);
+                }
+            }
+            return;
+        }
     }
     // Ctrl +/- / Ctrl+0  font zoom. '=' is the unshifted '+' key.
     if (mods.ctrl && kind == KeyEvent::Kind::press && sink_) {

@@ -61,9 +61,12 @@ inline void trace_event(const toe::win::Event &ev) {
             if constexpr (std::is_same_v<T, toe::win::KeyPressed>) {
                 const auto &k = e.key;
                 const char *kind = std::get_if<toe::TextInput>(&k.key) ? "text" : "special";
+                const char *tk = k.kind == toe::KeyEvent::Kind::press    ? "press"
+                                 : k.kind == toe::KeyEvent::Kind::repeat ? "repeat"
+                                                                         : "release";
                 std::string tx = std::get_if<toe::TextInput>(&k.key)
                                      ? std::get<toe::TextInput>(k.key).utf8 : std::string{};
-                std::fprintf(stderr, "[tabs] KeyPressed %s '%s' ctrl=%d shift=%d alt=%d\n", kind,
+                std::fprintf(stderr, "[tabs] Key(%s) %s '%s' ctrl=%d shift=%d alt=%d\n", tk, kind,
                              tx.c_str(), k.mods.ctrl, k.mods.shift, k.mods.alt);
             } else if constexpr (std::is_same_v<T, toe::win::TextEntered>) {
                 std::fprintf(stderr, "[tabs] TextEntered '%.*s'\n",
@@ -109,20 +112,34 @@ inline void translate_event(Rt &rt, const toe::win::Event &ev) {
             } else if constexpr (std::is_same_v<T, FocusChanged>) {
                 rt.post(WinFocus{e.focused});
             } else if constexpr (std::is_same_v<T, KeyPressed>) {
-                // ONE chord layer: classify the neutral key via the shared
-                // classifier (no per-backend, no per-loop chord logic). Tab
-                // chords become GuiMsgs; anything else is child input.
                 const auto &k = e.key;
-                switch (platform::classify_chord(k)) {
-                case platform::Chord::NewTab: rt.post(NewTab{}); return;
-                case platform::Chord::CloseTab: rt.post(CloseTab{}); return;
-                case platform::Chord::NextTab: rt.post(NextTab{}); return;
-                case platform::Chord::PrevTab: rt.post(PrevTab{}); return;
-                default: break; // ToggleSettings/Help/Search: handled elsewhere
+                // Only PRESS drives chords + input. Release/repeat of a chord
+                // must not re-fire it (that was the "events fire twice" bug);
+                // key REPEAT still forwards to the shell (held-key autorepeat).
+                const bool is_press = k.kind == toe::KeyEvent::Kind::press;
+                const bool is_repeat = k.kind == toe::KeyEvent::Kind::repeat;
+
+                // ONE chord layer via the shared classifier. A recognised chord
+                // is CONSUMED here (never forwarded to the shell), on press only.
+                const platform::Chord chord = platform::classify_chord(k);
+                if (chord != platform::Chord::None) {
+                    if (is_press) {
+                        switch (chord) {
+                        case platform::Chord::NewTab: rt.post(NewTab{}); break;
+                        case platform::Chord::CloseTab: rt.post(CloseTab{}); break;
+                        case platform::Chord::NextTab: rt.post(NextTab{}); break;
+                        case platform::Chord::PrevTab: rt.post(PrevTab{}); break;
+                        // Settings/Help/Search overlays aren't wired in tabbed
+                        // mode yet; consume them so they don't type into the
+                        // shell (a later pass opens the per-tab overlays).
+                        default: break;
+                        }
+                    }
+                    return; // consumed: never reaches the terminal
                 }
-                // Not a tab chord: hand the whole KeyEvent to the focused tab;
-                // its Session encodes it (send_key) with the right mode/flags.
-                rt.post(ForwardKey{k});
+                // Not a chord: forward the key to the focused tab on press OR
+                // repeat (so held keys autorepeat); drop bare releases.
+                if (is_press || is_repeat) rt.post(ForwardKey{k});
             } else if constexpr (std::is_same_v<T, TextEntered>) {
                 rt.post(ForwardText{std::string{e.utf8}});
             }
