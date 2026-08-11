@@ -74,6 +74,17 @@ struct ColorsConfig {
     // one you're ON uses the brighter `search_current`.
     toe::Rgb search_match = toe::rgb(120, 96, 40);
     toe::Rgb search_current = toe::rgb(255, 176, 32);
+    // --- selection fine-tuning (advanced) ------------------------------------
+    // Minimum WCAG contrast ratio the selected text must keep against the
+    // highlight; below it the glyph flips to black/white. Higher = crisper.
+    float selection_contrast = 3.0f;
+    // Selection corner rounding as a fraction of the cell's smaller extent
+    // (0 = square corners, ~0.5 = pill). Clamped to a sane pixel range.
+    float selection_radius = 0.28f;
+    // How close (0..1 luma) a selection colour may sit to the background before
+    // it's nudged to stay visible (both the auto-visible solid colour and the
+    // inverted-block fallback use this).
+    float selection_min_visibility = 0.11f;
     // The 16 ANSI palette colors (0-7 normal, 8-15 bright). Empty vector = use
     // toe's built-in palette; a full 16 overrides it.
     std::vector<toe::Rgb> palette{};
@@ -100,6 +111,11 @@ struct ChromeConfig {
     int flyout_rows = 12;        // max command rows the flyout shows at once
     int flyout_width = 44;       // max flyout card width in cells
     toe::Rgb flyout_accent = toe::rgb(122, 168, 255); // title / pointer / bar
+    toe::Rgb flyout_bg = toe::rgb(22, 24, 33);        // card background
+    toe::Rgb flyout_border = toe::rgb(58, 64, 90);    // card frame
+    // Rail segment opacity (0..255): resting vs. the hovered segment's halo.
+    int rail_alpha = 210;
+    int rail_hover_halo = 90;
 };
 
 struct ScrollConfig {
@@ -200,6 +216,11 @@ struct HandConfig {
         c.rail_ok = chrome.rail_ok;
         c.rail_failed = chrome.rail_failed;
         c.rail_running = chrome.rail_running;
+        c.rail_alpha = std::clamp(chrome.rail_alpha, 0, 255);
+        c.rail_hover_halo = std::clamp(chrome.rail_hover_halo, 0, 255);
+        c.selection_contrast = colors.selection_contrast;
+        c.selection_radius = colors.selection_radius;
+        c.selection_min_visibility = colors.selection_min_visibility;
         return c;
     }
 };

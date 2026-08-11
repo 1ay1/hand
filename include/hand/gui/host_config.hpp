@@ -31,6 +31,8 @@ struct HostConfig {
     int flyout_rows = 12;   // max command rows shown at once
     int flyout_width = 44;  // max card width in cells
     std::uint32_t flyout_accent = 0x7aa8ff; // 0xRRGGBB
+    std::uint32_t flyout_bg = 0x161821;     // card background
+    std::uint32_t flyout_border = 0x3a405a; // card frame
 };
 
 // The single process-wide instance, filled by main() from the vibe config.

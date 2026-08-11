@@ -126,13 +126,16 @@ public:
         const int card_y = std::clamp(hover_y - card_h / 2, 0, std::max(0, H - card_h));
 
         // Palette: a dark frosted card with a cool accent.
-        const glyph::Rgb bg     = glyph::rgb(22, 24, 33);
+        const glyph::Rgb bg     = glyph::rgb((hc.flyout_bg >> 16) & 0xFF,
+                                             (hc.flyout_bg >> 8) & 0xFF, hc.flyout_bg & 0xFF);
         const glyph::Rgb bg_alt = glyph::rgb(28, 31, 42);   // zebra / header
         const glyph::Rgb acc    = glyph::rgb((hc.flyout_accent >> 16) & 0xFF,
                                              (hc.flyout_accent >> 8) & 0xFF,
                                              hc.flyout_accent & 0xFF);
         const glyph::Style body{glyph::rgb(220, 224, 236), bg};
-        const glyph::Style border{glyph::rgb(58, 64, 90), bg};
+        const glyph::Style border{glyph::rgb((hc.flyout_border >> 16) & 0xFF,
+                                             (hc.flyout_border >> 8) & 0xFF,
+                                             hc.flyout_border & 0xFF), bg};
         const glyph::Style dim{glyph::rgb(112, 118, 138), bg};
 
         buf.clear_alpha(0);

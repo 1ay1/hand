@@ -69,6 +69,12 @@ int main(int argc, char **argv) {
         host.flyout_accent = (static_cast<std::uint32_t>(hc.chrome.flyout_accent.r) << 16) |
                              (static_cast<std::uint32_t>(hc.chrome.flyout_accent.g) << 8) |
                              static_cast<std::uint32_t>(hc.chrome.flyout_accent.b);
+        auto pack = [](toe::Rgb c) {
+            return (static_cast<std::uint32_t>(c.r) << 16) |
+                   (static_cast<std::uint32_t>(c.g) << 8) | static_cast<std::uint32_t>(c.b);
+        };
+        host.flyout_bg = pack(hc.chrome.flyout_bg);
+        host.flyout_border = pack(hc.chrome.flyout_border);
     }
     const std::vector<std::string> child = child_argv_from(argc, argv);
     // Tabs come from config (default on) OR the HAND_TABS env var. Tabbed mode

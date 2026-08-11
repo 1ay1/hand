@@ -193,6 +193,12 @@ HandConfig load_hand_config(std::string_view path) {
     B("colors.selection_invert", cfg.colors.selection_invert);
     load_color(r, "colors.search_match", cfg.colors.search_match);
     load_color(r, "colors.search_current", cfg.colors.search_current);
+    cfg.colors.selection_contrast = static_cast<float>(
+        vibe_get_float_or(r, "colors.selection_contrast", cfg.colors.selection_contrast));
+    cfg.colors.selection_radius = static_cast<float>(
+        vibe_get_float_or(r, "colors.selection_radius", cfg.colors.selection_radius));
+    cfg.colors.selection_min_visibility = static_cast<float>(vibe_get_float_or(
+        r, "colors.selection_min_visibility", cfg.colors.selection_min_visibility));
 
     // chrome: command-minimap rail + hover flyout
     B("chrome.rail", cfg.chrome.rail);
@@ -204,6 +210,10 @@ HandConfig load_hand_config(std::string_view path) {
     I("chrome.flyout_rows", cfg.chrome.flyout_rows);
     I("chrome.flyout_width", cfg.chrome.flyout_width);
     load_color(r, "chrome.flyout_accent", cfg.chrome.flyout_accent);
+    load_color(r, "chrome.flyout_bg", cfg.chrome.flyout_bg);
+    load_color(r, "chrome.flyout_border", cfg.chrome.flyout_border);
+    I("chrome.rail_alpha", cfg.chrome.rail_alpha);
+    I("chrome.rail_hover_halo", cfg.chrome.rail_hover_halo);
 
     // scroll
     I("scroll.scrollback", cfg.scroll.scrollback_lines);
@@ -290,6 +300,9 @@ bool save_hand_config(const HandConfig &cfg, std::string_view path) {
     vibe_object_set_string(col, "search_match", hex_of(cfg.colors.search_match).c_str());
     vibe_object_set_string(col, "search_current", hex_of(cfg.colors.search_current).c_str());
     vibe_object_set_bool(col, "selection_invert", cfg.colors.selection_invert);
+    vibe_object_set_float(col, "selection_contrast", cfg.colors.selection_contrast);
+    vibe_object_set_float(col, "selection_radius", cfg.colors.selection_radius);
+    vibe_object_set_float(col, "selection_min_visibility", cfg.colors.selection_min_visibility);
 
     VibeObject *chr = obj("chrome");
     vibe_object_set_bool(chr, "rail", cfg.chrome.rail);
@@ -301,6 +314,10 @@ bool save_hand_config(const HandConfig &cfg, std::string_view path) {
     vibe_object_set_int(chr, "flyout_rows", cfg.chrome.flyout_rows);
     vibe_object_set_int(chr, "flyout_width", cfg.chrome.flyout_width);
     vibe_object_set_string(chr, "flyout_accent", hex_of(cfg.chrome.flyout_accent).c_str());
+    vibe_object_set_string(chr, "flyout_bg", hex_of(cfg.chrome.flyout_bg).c_str());
+    vibe_object_set_string(chr, "flyout_border", hex_of(cfg.chrome.flyout_border).c_str());
+    vibe_object_set_int(chr, "rail_alpha", cfg.chrome.rail_alpha);
+    vibe_object_set_int(chr, "rail_hover_halo", cfg.chrome.rail_hover_halo);
 
     VibeObject *scr = obj("scroll");
     vibe_object_set_int(scr, "scrollback", cfg.scroll.scrollback_lines);
