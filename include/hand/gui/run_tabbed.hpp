@@ -33,6 +33,7 @@
 #include "hand/gui/runtime.hpp"
 #include "hand/help_panel.hpp"
 #include "hand/command_flyout.hpp"
+#include "hand/gui/host_config.hpp"
 #include "hand/search_bar.hpp"
 #include "hand/platform/backend_base.hpp" // Chord + classify_chord (shared, one place)
 #include "hand/platform/posix_pty.hpp" // spawn_pty (fresh PTY per tab)
@@ -423,7 +424,9 @@ template <class App>
                 rt.for_each_live_session([&](toe::Session &s) {
                     const int px = fz->absolute >= 0
                                        ? fz->absolute
-                                       : std::clamp(s.font_pixel_size() + fz->delta * 2, 6, 96);
+                                       : std::clamp(s.font_pixel_size() +
+                                                        fz->delta * host_config().font_zoom_step,
+                                                    6, 96);
                     s.set_font_pixel_size(px, fpx);
                 });
                 rt.request_present();
@@ -434,7 +437,7 @@ template <class App>
             // I-beam over the terminal text, a pointing hand over the command
             // rail and over hovered OSC-8 links, and the default arrow over the
             // chrome strip / open overlays. Decided on every pointer motion.
-            if (const auto *pm = std::get_if<toe::win::MouseMove>(&ev)) {
+            if (const auto *pm = std::get_if<toe::win::MouseMove>(&ev); pm && host_config().pointer_shapes) {
                 int want = 1; // default: text (I-beam) over the grid
                 if (pm->y < ch_h || help.active() || search.active() ||
                     settings.panel_active()) {
@@ -520,7 +523,8 @@ template <class App>
                 // by the router's rail_click (snaps to the block under the
                 // pointer) — exactly the flyout row the user sees highlighted.
                 const bool was = flyout.active();
-                flyout.update(s);
+                if (host_config().flyout) flyout.update(s);
+                else flyout.hide();
                 // Repaint on any flyout change: appear/disappear OR the hovered
                 // row moving. A bare hover (MouseMove w/o button) isn't in the
                 // pixel_affecting set below, so request here while it's live.
@@ -573,7 +577,9 @@ template <class App>
                     const auto vel_for = [chh](int past_px) {
                         const float cells = static_cast<float>(past_px) /
                                             static_cast<float>(chh);
-                        return std::min(3.0f + cells * 12.0f, 45.0f);
+                        const auto &hc = host_config();
+                        return std::min(hc.autoscroll_min + cells * (hc.autoscroll_max * 0.27f),
+                                        hc.autoscroll_max);
                     };
                     if (mm->y < 0) {
                         drag_dir = -1;                   // above the grid -> up

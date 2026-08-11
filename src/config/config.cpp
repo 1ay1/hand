@@ -187,12 +187,35 @@ HandConfig load_hand_config(std::string_view path) {
     B("cursor.animate", cfg.cursor.animate);
     I("cursor.animate_ms", cfg.cursor.animate_ms);
     B("cursor.animate_trail", cfg.cursor.animate_trail);
+    I("cursor.animate_trail_len", cfg.cursor.animate_trail_len);
+
+    // colors: selection + search highlights
+    B("colors.selection_invert", cfg.colors.selection_invert);
+    load_color(r, "colors.search_match", cfg.colors.search_match);
+    load_color(r, "colors.search_current", cfg.colors.search_current);
+
+    // chrome: command-minimap rail + hover flyout
+    B("chrome.rail", cfg.chrome.rail);
+    I("chrome.rail_width", cfg.chrome.rail_width);
+    load_color(r, "chrome.rail_ok", cfg.chrome.rail_ok);
+    load_color(r, "chrome.rail_failed", cfg.chrome.rail_failed);
+    load_color(r, "chrome.rail_running", cfg.chrome.rail_running);
+    B("chrome.flyout", cfg.chrome.flyout);
+    I("chrome.flyout_rows", cfg.chrome.flyout_rows);
+    I("chrome.flyout_width", cfg.chrome.flyout_width);
+    load_color(r, "chrome.flyout_accent", cfg.chrome.flyout_accent);
 
     // scroll
     I("scroll.scrollback", cfg.scroll.scrollback_lines);
     I("scroll.wheel_lines", cfg.scroll.wheel_lines);
     B("scroll.on_output", cfg.scroll.scroll_on_output);
     B("scroll.on_keystroke", cfg.scroll.scroll_on_keystroke);
+    cfg.scroll.autoscroll_min =
+        static_cast<float>(vibe_get_float_or(r, "scroll.autoscroll_min", cfg.scroll.autoscroll_min));
+    cfg.scroll.autoscroll_max =
+        static_cast<float>(vibe_get_float_or(r, "scroll.autoscroll_max", cfg.scroll.autoscroll_max));
+    I("scroll.font_zoom_step", cfg.scroll.font_zoom_step);
+    B("scroll.pointer_shapes", cfg.scroll.pointer_shapes);
 
     // behavior
     S("behavior.shell", cfg.behavior.shell);
@@ -262,12 +285,32 @@ bool save_hand_config(const HandConfig &cfg, std::string_view path) {
     vibe_object_set_bool(cur, "animate", cfg.cursor.animate);
     vibe_object_set_int(cur, "animate_ms", cfg.cursor.animate_ms);
     vibe_object_set_bool(cur, "animate_trail", cfg.cursor.animate_trail);
+    vibe_object_set_int(cur, "animate_trail_len", cfg.cursor.animate_trail_len);
+
+    vibe_object_set_string(col, "search_match", hex_of(cfg.colors.search_match).c_str());
+    vibe_object_set_string(col, "search_current", hex_of(cfg.colors.search_current).c_str());
+    vibe_object_set_bool(col, "selection_invert", cfg.colors.selection_invert);
+
+    VibeObject *chr = obj("chrome");
+    vibe_object_set_bool(chr, "rail", cfg.chrome.rail);
+    vibe_object_set_int(chr, "rail_width", cfg.chrome.rail_width);
+    vibe_object_set_string(chr, "rail_ok", hex_of(cfg.chrome.rail_ok).c_str());
+    vibe_object_set_string(chr, "rail_failed", hex_of(cfg.chrome.rail_failed).c_str());
+    vibe_object_set_string(chr, "rail_running", hex_of(cfg.chrome.rail_running).c_str());
+    vibe_object_set_bool(chr, "flyout", cfg.chrome.flyout);
+    vibe_object_set_int(chr, "flyout_rows", cfg.chrome.flyout_rows);
+    vibe_object_set_int(chr, "flyout_width", cfg.chrome.flyout_width);
+    vibe_object_set_string(chr, "flyout_accent", hex_of(cfg.chrome.flyout_accent).c_str());
 
     VibeObject *scr = obj("scroll");
     vibe_object_set_int(scr, "scrollback", cfg.scroll.scrollback_lines);
     vibe_object_set_int(scr, "wheel_lines", cfg.scroll.wheel_lines);
     vibe_object_set_bool(scr, "on_output", cfg.scroll.scroll_on_output);
     vibe_object_set_bool(scr, "on_keystroke", cfg.scroll.scroll_on_keystroke);
+    vibe_object_set_float(scr, "autoscroll_min", cfg.scroll.autoscroll_min);
+    vibe_object_set_float(scr, "autoscroll_max", cfg.scroll.autoscroll_max);
+    vibe_object_set_int(scr, "font_zoom_step", cfg.scroll.font_zoom_step);
+    vibe_object_set_bool(scr, "pointer_shapes", cfg.scroll.pointer_shapes);
 
     VibeObject *beh = obj("behavior");
     if (!cfg.behavior.shell.empty()) vibe_object_set_string(beh, "shell", cfg.behavior.shell.c_str());

@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "hand/glyph/buffer.hpp"
+#include "hand/gui/host_config.hpp"
 #include "toe/terminal.hpp"
 
 namespace hand {
@@ -106,10 +107,12 @@ public:
         // The list occupies rows [card_y+3, card_y+3+list_rows), so card_h MUST
         // be list_rows+4 or the last item overwrites the bottom border (the
         // "list overflows the box" bug).
+        const auto &hc = host_config();
         const int list_rows = std::min(n_items, std::max(1, H - 6));
-        const int shown = std::min(list_rows, 12);
+        const int shown = std::min(list_rows, std::max(1, hc.flyout_rows));
         const int card_h = shown + 4;
-        const int card_w = std::clamp(longest_text() + 15, 24, std::min(W - 6, 44));
+        const int card_w = std::clamp(longest_text() + 15, 24,
+                                      std::min({W - 6, std::max(24, hc.flyout_width)}));
         // Hug the rail: the card's right border sits one cell in from the edge,
         // with the pointer triangle occupying that last cell toward the rail.
         const int card_x = W - card_w - 1;
@@ -125,7 +128,9 @@ public:
         // Palette: a dark frosted card with a cool accent.
         const glyph::Rgb bg     = glyph::rgb(22, 24, 33);
         const glyph::Rgb bg_alt = glyph::rgb(28, 31, 42);   // zebra / header
-        const glyph::Rgb acc    = glyph::rgb(122, 168, 255);
+        const glyph::Rgb acc    = glyph::rgb((hc.flyout_accent >> 16) & 0xFF,
+                                             (hc.flyout_accent >> 8) & 0xFF,
+                                             hc.flyout_accent & 0xFF);
         const glyph::Style body{glyph::rgb(220, 224, 236), bg};
         const glyph::Style border{glyph::rgb(58, 64, 90), bg};
         const glyph::Style dim{glyph::rgb(112, 118, 138), bg};

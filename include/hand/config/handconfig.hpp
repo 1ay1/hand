@@ -70,6 +70,10 @@ struct ColorsConfig {
     // Reverse-video selection: swap each selected cell's fg/bg (classic terminal
     // look) instead of a coloured highlight. On by default — the crisp default.
     bool selection_invert = true;
+    // Scrollback-search match highlights: every match uses `search_match`, the
+    // one you're ON uses the brighter `search_current`.
+    toe::Rgb search_match = toe::rgb(120, 96, 40);
+    toe::Rgb search_current = toe::rgb(255, 176, 32);
     // The 16 ANSI palette colors (0-7 normal, 8-15 bright). Empty vector = use
     // toe's built-in palette; a full 16 overrides it.
     std::vector<toe::Rgb> palette{};
@@ -82,6 +86,20 @@ struct CursorConfig {
     bool animate = true;         // smoothly glide the caret to its new cell
     int animate_ms = 55;         // glide time constant (smaller = snappier)
     bool animate_trail = true;   // fading comet trail on long jumps
+    int animate_trail_len = 3;   // number of trail ghosts on a long jump (0..6)
+};
+
+// The command minimap rail + its hover flyout (OSC-133 shell integration).
+struct ChromeConfig {
+    bool rail = true;            // show the command-minimap rail on the right edge
+    int rail_width = 7;          // rail width in px (expands ~1.6x on hover)
+    toe::Rgb rail_ok = toe::rgb(80, 200, 130);      // succeeded command segment
+    toe::Rgb rail_failed = toe::rgb(235, 90, 90);   // failed command segment
+    toe::Rgb rail_running = toe::rgb(240, 190, 70); // in-flight command segment
+    bool flyout = true;          // show the command-list flyout on rail hover
+    int flyout_rows = 12;        // max command rows the flyout shows at once
+    int flyout_width = 44;       // max flyout card width in cells
+    toe::Rgb flyout_accent = toe::rgb(122, 168, 255); // title / pointer / bar
 };
 
 struct ScrollConfig {
@@ -89,6 +107,14 @@ struct ScrollConfig {
     int wheel_lines = 3;          // rows per wheel notch
     bool scroll_on_output = false; // jump to bottom when new output arrives
     bool scroll_on_keystroke = true; // jump to bottom when you type
+    // Drag-selection autoscroll: when you drag a selection past the top/bottom
+    // edge the view scrolls so you can select across scrollback. Speed ramps
+    // from `autoscroll_min` (just past the edge) to `autoscroll_max` rows/sec.
+    float autoscroll_min = 3.0f;
+    float autoscroll_max = 45.0f;
+    int font_zoom_step = 2;        // px added/removed per Ctrl+= / Ctrl+- notch
+    // Context-aware mouse pointer (I-beam over text, hand over links/rail).
+    bool pointer_shapes = true;
 };
 
 struct BehaviorConfig {
@@ -115,6 +141,7 @@ struct HandConfig {
     FontConfig font{};
     ColorsConfig colors{};
     CursorConfig cursor{};
+    ChromeConfig chrome{};
     ScrollConfig scroll{};
     BehaviorConfig behavior{};
 
@@ -163,6 +190,16 @@ struct HandConfig {
         c.cursor_anim.enabled = cursor.animate;
         c.cursor_anim.time_ms = cursor.animate_ms;
         c.cursor_anim.trail = cursor.animate_trail;
+        c.cursor_anim.trail_len = std::clamp(cursor.animate_trail_len, 0, 6);
+        // Search-match highlight colours (all matches / current match).
+        c.search_match_bg = colors.search_match;
+        c.search_current_bg = colors.search_current;
+        // Command-minimap rail + flyout.
+        c.rail_enabled = chrome.rail;
+        c.rail_width = std::clamp(chrome.rail_width, 3, 24);
+        c.rail_ok = chrome.rail_ok;
+        c.rail_failed = chrome.rail_failed;
+        c.rail_running = chrome.rail_running;
         return c;
     }
 };

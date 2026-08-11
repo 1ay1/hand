@@ -18,6 +18,7 @@
 
 #include "hand/app.hpp"
 #include "hand/config/config.hpp"
+#include "hand/gui/host_config.hpp"
 #include "hand/settings_panel.hpp"
 
 // Parse the child command from argv:
@@ -54,6 +55,21 @@ int main(int argc, char **argv) {
     hand::set_settings_source(hc, cfg_path);
 
     const toe::Config cfg = hc.to_toe();
+    // Host-side (hand-only) runtime knobs the GUI loop reads (autoscroll, font
+    // zoom, pointer shapes, flyout) — filled once, read process-wide.
+    {
+        auto &host = hand::host_config();
+        host.autoscroll_min = hc.scroll.autoscroll_min;
+        host.autoscroll_max = hc.scroll.autoscroll_max;
+        host.font_zoom_step = hc.scroll.font_zoom_step;
+        host.pointer_shapes = hc.scroll.pointer_shapes;
+        host.flyout = hc.chrome.flyout;
+        host.flyout_rows = hc.chrome.flyout_rows;
+        host.flyout_width = hc.chrome.flyout_width;
+        host.flyout_accent = (static_cast<std::uint32_t>(hc.chrome.flyout_accent.r) << 16) |
+                             (static_cast<std::uint32_t>(hc.chrome.flyout_accent.g) << 8) |
+                             static_cast<std::uint32_t>(hc.chrome.flyout_accent.b);
+    }
     const std::vector<std::string> child = child_argv_from(argc, argv);
     // Tabs come from config (default on) OR the HAND_TABS env var. Tabbed mode
     // draws its OWN chrome, so it turns off the server titlebar.
