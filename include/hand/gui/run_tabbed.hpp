@@ -255,7 +255,11 @@ template <class App>
 
     std::uint64_t frame = 0;
     const std::uint64_t start = detail::now_ms_();
-    std::uint64_t last_anim_ms = start; // last time an animation frame was posted
+    // Elapsed-ms baseline: the loop compares against `now = now_ms_() - start`
+    // (elapsed), so this MUST be 0, not the absolute `start` — otherwise
+    // `now - last_anim_ms` is permanently a huge negative number and the
+    // animation branch never fires (the caret glide limps, its trail freezes).
+    std::int64_t last_anim_ms = 0; // last elapsed-ms an animation frame was posted
     bool running = true;
     // Diagnostic: HAND_LOOP_HZ=1 prints GUI-loop iterations/sec to stderr.
     const bool loop_hz = std::getenv("HAND_LOOP_HZ") != nullptr;
@@ -378,8 +382,8 @@ template <class App>
         const int dl_ms = rt.animation_deadline_ms();
         if (dl_ms > 0) {
             const std::int64_t now = static_cast<std::int64_t>(detail::now_ms_() - start);
-            if (now - static_cast<std::int64_t>(last_anim_ms) >= dl_ms) {
-                last_anim_ms = static_cast<std::uint64_t>(now);
+            if (now - last_anim_ms >= dl_ms) {
+                last_anim_ms = now;
                 if (loop_hz_present && dl_ms == 16) ++anim_wakes;
                 rt.set_frame(FrameGate::frame_index(now)); // time-derived spinner phase
                 rt.present_focused();                       // direct present; FrameGate skips if static
