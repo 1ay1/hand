@@ -293,6 +293,7 @@ template <class App>
     float drag_vel = 0.0f;   // autoscroll speed in ROWS PER SECOND (edge distance)
     float drag_accum = 0.0f; // fractional-row accumulator (integrates vel*dt)
     std::int64_t drag_last_ms = 0; // elapsed-ms of the last autoscroll step
+    bool rail_scrubbing = false; // left button held on the minimap rail (scroll drag)
     bool running = true;
     // Diagnostic: HAND_LOOP_HZ=1 prints GUI-loop iterations/sec to stderr.
     const bool loop_hz = std::getenv("HAND_LOOP_HZ") != nullptr;
@@ -386,6 +387,42 @@ template <class App>
             // grid's top cell maps right.
             const int ch_h = view.chrome_px_h();
             toe::win::Event adj = detail::shift_pointer_y(ev, -ch_h);
+
+            // --- minimap rail scrub (scrollbar drag) ------------------------
+            // A left press ON the rail begins a live scroll-scrub: the view
+            // follows the pointer's rail row (and the command flyout tracks it).
+            // We handle it BEFORE the EventRouter and CONSUME the event so a
+            // rail drag never starts a text selection. A press off the rail
+            // leaves scrubbing off and the router handles it normally.
+            {
+                toe::PixelSize rpx = app.pixel_size();
+                rpx.h = std::max(1, rpx.h - ch_h);
+                bool consumed = false;
+                if (const auto *md = std::get_if<toe::win::MouseDown>(&adj)) {
+                    if (md->button == toe::win::MouseButton::left) {
+                        rt.with_focus_session([&](toe::Session &s) {
+                            if (s.on_rail(md->x, rpx)) {
+                                rail_scrubbing = true;
+                                s.rail_scrub(md->x, md->y, rpx);
+                                flyout.update(s);
+                                consumed = true;
+                            }
+                        });
+                    }
+                } else if (std::holds_alternative<toe::win::MouseUp>(adj)) {
+                    if (rail_scrubbing) { rail_scrubbing = false; consumed = true; }
+                } else if (const auto *mm = std::get_if<toe::win::MouseMove>(&adj)) {
+                    if (rail_scrubbing && mm->button_down) {
+                        rt.with_focus_session([&](toe::Session &s) {
+                            s.rail_scrub(mm->x, mm->y, rpx);
+                            flyout.update(s);
+                        });
+                        consumed = true;
+                    }
+                }
+                if (consumed) { rt.request_present(); return; }
+            }
+
             rt.with_focus_session([&](toe::Session &s) {
                 toe::PixelSize tpx = app.pixel_size();
                 tpx.h = std::max(1, tpx.h - ch_h);

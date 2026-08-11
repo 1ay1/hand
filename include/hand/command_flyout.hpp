@@ -124,8 +124,14 @@ public:
             const int y = card_y + 1 + r;
             const bool hot = i == hover_idx_;
             const glyph::Style rs =
-                hot ? glyph::Style{glyph::rgb(242, 244, 255), glyph::rgb(50, 58, 92)} : body;
-            if (hot) buf.fill(glyph::Rect{card_x + 1, y, card_w - 2, 1}, rs);
+                hot ? glyph::Style{glyph::rgb(245, 247, 255), glyph::rgb(56, 66, 104)} : body;
+            if (hot) {
+                buf.fill(glyph::Rect{card_x + 1, y, card_w - 2, 1}, rs);
+                // Bright left accent bar + caret so the hovered command reads as
+                // SELECTED, not merely tinted.
+                buf.put(card_x + 1, y, U'\u2590',
+                        glyph::Style{glyph::rgb(120, 170, 255), rs.bg});
+            }
 
             const int status = !it.finished ? 0 : (it.succeeded() ? 1 : 2);
             const char32_t pip = status == 0 ? U'\u25D0' : U'\u25CF';
