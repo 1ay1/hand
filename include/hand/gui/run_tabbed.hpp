@@ -34,6 +34,7 @@
 #include "hand/help_panel.hpp"
 #include "hand/command_flyout.hpp"
 #include "hand/gui/host_config.hpp"
+#include "hand/gui/chrome_layout.hpp"
 #include "hand/search_bar.hpp"
 #include "hand/platform/backend_base.hpp" // Chord + classify_chord (shared, one place)
 #include "hand/platform/posix_pty.hpp" // spawn_pty (fresh PTY per tab)
@@ -102,17 +103,20 @@ inline std::string osc7_to_path(std::string_view cwd) {
 // Return a copy of `ev` with any pointer Y coordinate shifted by `dy` (used to
 // map window-space clicks into the terminal viewport, which sits below the
 // chrome strip). Non-pointer events are returned unchanged.
-inline toe::win::Event shift_pointer_y(const toe::win::Event &ev, int dy) {
+inline toe::win::Event shift_pointer(const toe::win::Event &ev, int dx, int dy) {
     if (auto *e = std::get_if<toe::win::MouseDown>(&ev)) {
-        auto c = *e; c.y += dy; return c;
+        auto c = *e; c.x += dx; c.y += dy; return c;
     }
     if (auto *e = std::get_if<toe::win::MouseUp>(&ev)) {
-        auto c = *e; c.y += dy; return c;
+        auto c = *e; c.x += dx; c.y += dy; return c;
     }
     if (auto *e = std::get_if<toe::win::MouseMove>(&ev)) {
-        auto c = *e; c.y += dy; return c;
+        auto c = *e; c.x += dx; c.y += dy; return c;
     }
     return ev;
+}
+inline toe::win::Event shift_pointer_y(const toe::win::Event &ev, int dy) {
+    return shift_pointer(ev, 0, dy);
 }
 
 } // namespace detail
@@ -125,6 +129,11 @@ template <class App>
     const toe::PixelSize px0 = app.pixel_size();
 
     TabbedView view;
+    ChromeLayout lay; // tab-bar placement + terminal viewport geometry (per frame)
+    const ChromeSide tab_side = chrome_side_from(host_config().tab_position);
+    const int tab_side_w = host_config().tab_side_width;
+    const bool tab_ctrls = host_config().tab_controls;
+    const bool tab_plus = host_config().tab_plus;
     hand::HelpPanel help;   // Ctrl+Shift+?  (read-only cheatsheet)
     hand::SearchBar search; // Ctrl+Shift+F  (scrollback search, per focused tab)
     hand::CommandFlyout flyout; // rail-hover command list (click to jump)
@@ -225,27 +234,28 @@ template <class App>
         {
             {
                 const toe::Extent cell = s->cell_size();
-                const int chrome_h =
-                    (cell.rows > 0) ? ChromeBar::kRows * cell.rows : 0;
-                const toe::PixelSize term_px{px.w, std::max(1, px.h - chrome_h)};
+                // Recompute tab-bar + terminal geometry for this frame from the
+                // window size, cell size, and configured placement.
+                lay.set(px.w, px.h, std::max(1, cell.cols), std::max(1, cell.rows), tab_side,
+                        tab_side_w);
+                const toe::PixelSize term_px{lay.term_px_w(), lay.term_px_h()};
 
-                // Keep the terminal sized to the area BELOW the chrome.
+                // Keep the terminal sized to the viewport the tab bar leaves.
                 if (s->grid_size().cols * cell.cols != term_px.w ||
                     s->grid_size().rows * cell.rows != term_px.h) {
                     s->resize(term_px);
                 }
 
                 auto rc = toe::gfx::RenderContext::adopt_current();
-                // Terminal into the lower (h - chrome_h) region.
-                glViewport(0, 0, term_px.w, term_px.h);
+                // Terminal into the viewport carved out by the layout.
+                glViewport(lay.gl_viewport_x(), lay.gl_viewport_y(), term_px.w, term_px.h);
                 s->render(rc, term_px);
                 // Publish the caret-glide state NOW — render() just updated it.
-                // This is what keeps the loop waking at 60fps until the glide
-                // settles (the fix for the choppy cursor).
                 rt_ptr->set_focus_animating(s->cursor_animating());
-                // Chrome overlay across the FULL window (its own top row).
+                // Chrome overlay across the FULL window (tab bar at its edge).
                 glViewport(0, 0, px.w, px.h);
-                view.render_chrome(rc, *s, rt_ptr->model(), px, chrome_frame);
+                view.render_chrome(rc, *s, rt_ptr->model(), px, chrome_frame, lay, tab_ctrls,
+                                   tab_plus);
                 // Help / search overlays (full-window cell buffer over the grid).
                 if (help.active() || search.active()) {
                     const int cols = std::max(1, px.w / std::max(1, cell.cols));
@@ -406,23 +416,25 @@ template <class App>
                 case ChromeHit::Kind::WinMinimize: rt.post(WinMinimize{}); return;
                 case ChromeHit::Kind::WinMaximize: rt.post(WinToggleMax{}); return;
                 case ChromeHit::Kind::WinClose: rt.post(WinCloseReq{}); return;
+                case ChromeHit::Kind::ScrollLeft: rt.post(PrevTab{}); return;
+                case ChromeHit::Kind::ScrollRight: rt.post(NextTab{}); return;
                 case ChromeHit::Kind::None:
-                    if (md->y >= 0 && md->y < view.chrome_px_h()) {
+                    if (lay.on_chrome_px(md->x, md->y)) {
                         app.window_move(md->x, md->y);
                         return;
                     }
                     break; // click in the terminal body -> falls through
+                default: break;
                 }
             }
 
             // --- 4. everything else = terminal input for the FOCUSED tab ------
-            // Reuse toe's EventRouter (the SAME input policy as single-terminal
-            // mode) so scroll, wheel, selection, copy/paste, OSC-8 links,
-            // command-block nav and focus all Just Work — no reimplementation.
-            // Pointer Y is shifted down by the chrome strip; correct it so the
-            // grid's top cell maps right.
-            const int ch_h = view.chrome_px_h();
-            toe::win::Event adj = detail::shift_pointer_y(ev, -ch_h);
+            // Reuse toe's EventRouter (same input policy as single-terminal
+            // mode). Pointer coords are shifted by the tab-bar strip origin so
+            // the grid's top-left cell maps right for ANY placement.
+            const int ox = lay.term_origin_x_px(), oy = lay.term_origin_y_px();
+            toe::win::Event adj = detail::shift_pointer(ev, -ox, -oy);
+            toe::PixelSize gpx{lay.term_px_w(), lay.term_px_h()};
 
             // --- font zoom (Ctrl +/- / Ctrl+0): a GLOBAL setting -----------
             // Apply to EVERY tab (font size is not per-tab) instead of only the
@@ -448,18 +460,16 @@ template <class App>
             // chrome strip / open overlays. Decided on every pointer motion.
             if (const auto *pm = std::get_if<toe::win::MouseMove>(&ev); pm && host_config().pointer_shapes) {
                 int want = 1; // default: text (I-beam) over the grid
-                if (pm->y < ch_h || help.active() || search.active() ||
+                if (lay.on_chrome_px(pm->x, pm->y) || help.active() || search.active() ||
                     settings.panel_active()) {
                     want = 0; // chrome / overlay chrome -> arrow
                 } else {
-                    toe::PixelSize rpx = app.pixel_size();
-                    rpx.h = std::max(1, rpx.h - ch_h);
-                    const int gx = pm->x, gy = pm->y - ch_h;
+                    const int gx = lay.to_term_px_x(pm->x), gy = lay.to_term_px_y(pm->y);
                     rt.with_focus_session([&](toe::Session &s) {
-                        if (s.on_rail(gx, rpx)) { want = 2; return; }
+                        if (s.on_rail(gx, gpx)) { want = 2; return; }
                         const int cw = std::max(1, s.cell_width());
                         const int chh = std::max(1, s.cell_height());
-                        if (!s.link_at(gy / chh, gx / cw).empty())
+                        if (gx >= 0 && gy >= 0 && !s.link_at(gy / chh, gx / cw).empty())
                             want = 2; // hovered OSC-8 link -> pointing hand
                     });
                 }
@@ -473,17 +483,12 @@ template <class App>
             // rail drag never starts a text selection. A press off the rail
             // leaves scrubbing off and the router handles it normally.
             {
-                toe::PixelSize rpx = app.pixel_size();
-                rpx.h = std::max(1, rpx.h - ch_h);
+                const toe::PixelSize rpx = gpx; // terminal-viewport size
                 bool consumed = false;
                 if (const auto *md = std::get_if<toe::win::MouseDown>(&adj)) {
                     if (md->button == toe::win::MouseButton::left) {
                         rt.with_focus_session([&](toe::Session &s) {
                             if (s.on_rail(md->x, rpx)) {
-                                // Arm a potential click; don't scroll yet. Just
-                                // update the hover so the flyout highlight shows
-                                // the command under the press. A subsequent move
-                                // promotes this to a live scrub (see below).
                                 rail_scrubbing = true;
                                 rail_moved = false;
                                 rail_press_y = md->y;
@@ -521,9 +526,7 @@ template <class App>
             }
 
             rt.with_focus_session([&](toe::Session &s) {
-                toe::PixelSize tpx = app.pixel_size();
-                tpx.h = std::max(1, tpx.h - ch_h);
-                toe::EventRouter<App> router{s, app, tpx, running};
+                toe::EventRouter<App> router{s, app, gpx, running};
                 std::visit(router, adj);
                 // The router just updated the rail-hover row (mouse-move) and
                 // may have jumped on a rail click. Refresh the command-list
@@ -573,7 +576,7 @@ template <class App>
                 rt.animator().set(Anim::Autoscroll, false);
             } else if (const auto *mm = std::get_if<toe::win::MouseMove>(&adj);
                        mm && drag_sel && mm->button_down) {
-                const int grid_px_h = std::max(1, app.pixel_size().h - ch_h);
+                const int grid_px_h = std::max(1, gpx.h);
                 rt.with_focus_session([&](toe::Session &s) {
                     const int cw = std::max(1, s.cell_width());
                     const int chh = std::max(1, s.cell_height());

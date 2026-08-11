@@ -14,6 +14,7 @@
 #define HAND_GUI_HOST_CONFIG_HPP
 
 #include <cstdint>
+#include <string>
 
 namespace hand {
 
@@ -33,6 +34,11 @@ struct HostConfig {
     std::uint32_t flyout_accent = 0x7aa8ff; // 0xRRGGBB
     std::uint32_t flyout_bg = 0x161821;     // card background
     std::uint32_t flyout_border = 0x3a405a; // card frame
+    // Tab-bar placement + chrome toggles (GUI layout — host-only).
+    std::string tab_position = "top"; // top | bottom | left | right
+    int tab_side_width = 18;           // column width (cells) for left/right
+    bool tab_controls = true;          // window min/max/close buttons
+    bool tab_plus = true;              // the + new-tab button
 };
 
 // The single process-wide instance, filled by main() from the vibe config.

@@ -17,6 +17,7 @@
 
 #include "hand/chrome_bar.hpp"
 #include "hand/glyph/buffer.hpp"
+#include "hand/gui/chrome_layout.hpp"
 #include "hand/gui/model.hpp"
 #include "toe/gfx/render_target.hpp"
 #include "toe/terminal.hpp"
@@ -25,10 +26,11 @@ namespace hand {
 
 class TabbedView {
 public:
-    // Paint the ChromeBar (built from the GUI model's tabs) as a translucent
-    // top-row overlay over the already-rendered terminal grid of `s`.
+    // Paint the ChromeBar (built from the GUI model's tabs) as an overlay at the
+    // configured edge (top/bottom/left/right) over the already-rendered grid.
     void render_chrome(toe::gfx::RenderContext &rc, toe::Session &s, const GuiModel &model,
-                       toe::PixelSize px, std::uint32_t frame) {
+                       toe::PixelSize px, std::uint32_t frame, const ChromeLayout &lay,
+                       bool show_ctrls, bool show_plus) {
         const toe::Extent cell = s.cell_size();
         if (cell.cols <= 0 || cell.rows <= 0) return;
         const int cols = std::max(1, px.w / cell.cols);
@@ -37,9 +39,10 @@ public:
 
         buf_.clear(glyph::Style{});
         buf_.clear_alpha(0);
-        buf_.set_alpha({0, 0, cols, ChromeBar::kRows}, 255);
+        const RectC cr = lay.chrome_cells();
+        buf_.set_alpha({cr.x, cr.y, cr.w, cr.h}, 255);
 
-        chrome_.render_model(buf_, model, frame);
+        chrome_.render_oriented(buf_, model, frame, cr, lay.side(), show_ctrls, show_plus);
         cell_w_ = cell.cols;
         cell_h_ = cell.rows;
 
@@ -52,14 +55,11 @@ public:
     }
 
     // Resolve a PIXEL click to a chrome action using the last-rendered cell
-    // size. Returns Kind::None when the click isn't on the chrome row.
+    // size. Returns Kind::None when the click isn't on a chrome control.
     [[nodiscard]] ChromeHit hit_test_px(int px_x, int px_y) const {
         if (cell_w_ <= 0 || cell_h_ <= 0) return {};
         return chrome_.hit_test(px_x / cell_w_, px_y / cell_h_);
     }
-
-    // Pixel height of the chrome strip (for hit-testing / the move region).
-    [[nodiscard]] int chrome_px_h() const noexcept { return ChromeBar::kRows * cell_h_; }
 
 private:
     ChromeBar chrome_{};

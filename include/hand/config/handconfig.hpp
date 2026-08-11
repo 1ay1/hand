@@ -100,6 +100,16 @@ struct CursorConfig {
     int animate_trail_len = 3;   // number of trail ghosts on a long jump (0..6)
 };
 
+struct TabsConfig {
+    // Where the tab bar sits: "top" (default), "bottom", "left", "right".
+    std::string position = "top";
+    // Width of the tab column for left/right placement, in cells (auto-fit but
+    // clamped to this max so it never eats too much of the screen).
+    int side_width = 18;
+    bool show_window_controls = true; // the min/max/close buttons on the bar
+    bool show_new_tab_button = true;  // the + button
+};
+
 // The command minimap rail + its hover flyout (OSC-133 shell integration).
 struct ChromeConfig {
     bool rail = true;            // show the command-minimap rail on the right edge
@@ -158,6 +168,7 @@ struct HandConfig {
     ColorsConfig colors{};
     CursorConfig cursor{};
     ChromeConfig chrome{};
+    TabsConfig tabs{};
     ScrollConfig scroll{};
     BehaviorConfig behavior{};
 

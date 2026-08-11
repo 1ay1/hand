@@ -75,6 +75,10 @@ int main(int argc, char **argv) {
         };
         host.flyout_bg = pack(hc.chrome.flyout_bg);
         host.flyout_border = pack(hc.chrome.flyout_border);
+        host.tab_position = hc.tabs.position;
+        host.tab_side_width = hc.tabs.side_width;
+        host.tab_controls = hc.tabs.show_window_controls;
+        host.tab_plus = hc.tabs.show_new_tab_button;
     }
     const std::vector<std::string> child = child_argv_from(argc, argv);
     // Tabs come from config (default on) OR the HAND_TABS env var. Tabbed mode

@@ -215,6 +215,12 @@ HandConfig load_hand_config(std::string_view path) {
     I("chrome.rail_alpha", cfg.chrome.rail_alpha);
     I("chrome.rail_hover_halo", cfg.chrome.rail_hover_halo);
 
+    // tabs: the tab-bar position + look
+    S("tabs.position", cfg.tabs.position);
+    I("tabs.side_width", cfg.tabs.side_width);
+    B("tabs.window_controls", cfg.tabs.show_window_controls);
+    B("tabs.new_tab_button", cfg.tabs.show_new_tab_button);
+
     // scroll
     I("scroll.scrollback", cfg.scroll.scrollback_lines);
     I("scroll.wheel_lines", cfg.scroll.wheel_lines);
@@ -318,6 +324,12 @@ bool save_hand_config(const HandConfig &cfg, std::string_view path) {
     vibe_object_set_string(chr, "flyout_border", hex_of(cfg.chrome.flyout_border).c_str());
     vibe_object_set_int(chr, "rail_alpha", cfg.chrome.rail_alpha);
     vibe_object_set_int(chr, "rail_hover_halo", cfg.chrome.rail_hover_halo);
+
+    VibeObject *tb = obj("tabs");
+    vibe_object_set_string(tb, "position", cfg.tabs.position.c_str());
+    vibe_object_set_int(tb, "side_width", cfg.tabs.side_width);
+    vibe_object_set_bool(tb, "window_controls", cfg.tabs.show_window_controls);
+    vibe_object_set_bool(tb, "new_tab_button", cfg.tabs.show_new_tab_button);
 
     VibeObject *scr = obj("scroll");
     vibe_object_set_int(scr, "scrollback", cfg.scroll.scrollback_lines);
