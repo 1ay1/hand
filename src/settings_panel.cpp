@@ -68,18 +68,37 @@ Settings Settings::from(const HandConfig &c) {
     s.animate_cursor = c.cursor.animate;
     s.animate_ms = c.cursor.animate_ms;
     s.animate_trail = c.cursor.animate_trail;
+    s.animate_trail_len = c.cursor.animate_trail_len;
     // Colors
     s.fg = hex(c.colors.foreground);
     s.bg = hex(c.colors.background);
     s.cursor_color = hex(c.colors.cursor);
     s.selection = hex(c.colors.selection_bg);
+    s.selection_invert = c.colors.selection_invert;
+    s.search_match = hex(c.colors.search_match);
+    s.search_current = hex(c.colors.search_current);
+    s.selection_contrast = static_cast<int>(c.colors.selection_contrast * 10.0f + 0.5f);
+    s.selection_radius = static_cast<int>(c.colors.selection_radius * 100.0f + 0.5f);
     s.palette.clear();
     for (toe::Rgb col : c.colors.palette) s.palette.push_back(hex(col));
+    // Chrome (rail + flyout)
+    s.rail = c.chrome.rail;
+    s.rail_width = c.chrome.rail_width;
+    s.rail_ok = hex(c.chrome.rail_ok);
+    s.rail_failed = hex(c.chrome.rail_failed);
+    s.rail_running = hex(c.chrome.rail_running);
+    s.rail_alpha = c.chrome.rail_alpha;
+    s.flyout = c.chrome.flyout;
+    s.flyout_rows = c.chrome.flyout_rows;
+    s.flyout_accent = hex(c.chrome.flyout_accent);
     // Scroll
     s.scrollback = c.scroll.scrollback_lines;
     s.scroll_mult = c.scroll.wheel_lines;
     s.scroll_on_output = c.scroll.scroll_on_output;
     s.scroll_on_keystroke = c.scroll.scroll_on_keystroke;
+    s.autoscroll_max = static_cast<int>(c.scroll.autoscroll_max + 0.5f);
+    s.font_zoom_step = c.scroll.font_zoom_step;
+    s.pointer_shapes = c.scroll.pointer_shapes;
     // Behavior
     s.audible_bell = c.behavior.audible_bell;
     s.visual_bell = c.behavior.visual_bell;
@@ -117,6 +136,7 @@ void Settings::into(HandConfig &c) const {
     c.cursor.animate = animate_cursor;
     c.cursor.animate_ms = animate_ms;
     c.cursor.animate_trail = animate_trail;
+    c.cursor.animate_trail_len = animate_trail_len;
     // Colors — preserve the existing config colour when a field holds an
     // invalid/empty hex string, rather than stamping in a placeholder that
     // would then be persisted on the next save.
@@ -124,14 +144,32 @@ void Settings::into(HandConfig &c) const {
     if (auto v = try_unhex(bg)) c.colors.background = *v;
     if (auto v = try_unhex(cursor_color)) c.colors.cursor = *v;
     if (auto v = try_unhex(selection)) c.colors.selection_bg = *v;
+    c.colors.selection_invert = selection_invert;
+    if (auto v = try_unhex(search_match)) c.colors.search_match = *v;
+    if (auto v = try_unhex(search_current)) c.colors.search_current = *v;
+    c.colors.selection_contrast = static_cast<float>(selection_contrast) / 10.0f;
+    c.colors.selection_radius = static_cast<float>(selection_radius) / 100.0f;
     c.colors.palette.clear();
     for (const auto &h : palette)
         if (auto v = try_unhex(h)) c.colors.palette.push_back(*v);
+    // Chrome (rail + flyout)
+    c.chrome.rail = rail;
+    c.chrome.rail_width = rail_width;
+    if (auto v = try_unhex(rail_ok)) c.chrome.rail_ok = *v;
+    if (auto v = try_unhex(rail_failed)) c.chrome.rail_failed = *v;
+    if (auto v = try_unhex(rail_running)) c.chrome.rail_running = *v;
+    c.chrome.rail_alpha = rail_alpha;
+    c.chrome.flyout = flyout;
+    c.chrome.flyout_rows = flyout_rows;
+    if (auto v = try_unhex(flyout_accent)) c.chrome.flyout_accent = *v;
     // Scroll
     c.scroll.scrollback_lines = scrollback;
     c.scroll.wheel_lines = scroll_mult;
     c.scroll.scroll_on_output = scroll_on_output;
     c.scroll.scroll_on_keystroke = scroll_on_keystroke;
+    c.scroll.autoscroll_max = static_cast<float>(autoscroll_max);
+    c.scroll.font_zoom_step = font_zoom_step;
+    c.scroll.pointer_shapes = pointer_shapes;
     // Behavior
     c.behavior.audible_bell = audible_bell;
     c.behavior.visual_bell = visual_bell;
@@ -285,7 +323,7 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
     ensure_themes();
 
     static const std::vector<std::string> kSections = {
-        "Theme", "Font", "Cursor", "Scroll", "Behavior", "Window", "Advanced"};
+        "Theme", "Font", "Cursor", "Chrome", "Scroll", "Behavior", "Window", "Advanced"};
     const int nsec = static_cast<int>(kSections.size());
 
     // Tab / Shift-Tab switch SECTIONS (unless a dropdown is capturing input).
@@ -309,14 +347,17 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
     // layout below; when it drifts the card either clips its last control or
     // floats in a band of empty space. Theme: dropdown + note + 4 colours +
     // "Save as" + button + status line.
-    static const int kSectionRows[] = {9, 8, 6, 4, 4, 6, 3};
-    const int rows = kSectionRows[std::clamp(section_, 0, nsec - 1)];
+    static const int kSectionRows[] = {14, 8, 5, 9, 7, 4, 6, 3};
+    // STATIC PANEL: size the card once to the TALLEST section so switching
+    // sections never resizes it, and an open dropdown renders WITHIN this fixed
+    // area (the dropdown scrolls its list internally via dd_top_) instead of
+    // growing the panel. The result: the panel frame stays put; only the
+    // dropdown list scrolls.
+    int max_rows = 0;
+    for (int rr : kSectionRows) max_rows = std::max(max_rows, rr);
     // header band(1)+rule(1) + tab row(1)+rule(1) + content + footer rule(1)+
-    // text(1) + frame(2). Previously this budgeted two extra spacer rows that
-    // nothing drew into, so every section floated in a band of empty card.
-    int panel_h = 2 + 2 + rows + 2 + 2;
-    // A dropdown open in this section needs extra room for the popup below it.
-    if (dd_open_ >= 0) panel_h += 9;
+    // text(1) + frame(2).
+    int panel_h = 2 + 2 + max_rows + 2 + 2;
     panel_h = std::clamp(panel_h, 12, buf.height() - 2);
 
     // Width must fit the WHOLE tab strip so no tab is clipped off. Each tab
@@ -378,6 +419,11 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
         changed |= ui.color("Background", &s_.bg);
         changed |= ui.color("Cursor", &s_.cursor_color);
         changed |= ui.color("Selection", &s_.selection);
+        changed |= ui.toggle("Invert selection", &s_.selection_invert);
+        changed |= ui.slider_int("Sel contrast x10", &s_.selection_contrast, 10, 70, 1);
+        changed |= ui.slider_int("Sel corner %", &s_.selection_radius, 0, 50, 1);
+        changed |= ui.color("Search match", &s_.search_match);
+        changed |= ui.color("Search current", &s_.search_current);
         // Author a THEME from the current colours: name it + save. It lands in
         // ~/.config/hand/themes/<slug>.vibe and instantly joins the picker above
         // (and is shareable — just send the file).
@@ -412,20 +458,35 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
         changed |= ui.toggle("Animate (glide)", &s_.animate_cursor);
         changed |= ui.slider_int("Glide ms", &s_.animate_ms, 10, 300, 5);
         changed |= ui.toggle("Comet trail", &s_.animate_trail);
+        changed |= ui.slider_int("Trail length", &s_.animate_trail_len, 0, 6, 1);
         break;
-    case 3: // Scroll
+    case 3: // Chrome (command minimap rail + hover flyout)
+        changed |= ui.toggle("Command rail", &s_.rail);
+        changed |= ui.slider_int("Rail width px", &s_.rail_width, 3, 24, 1);
+        changed |= ui.slider_int("Rail opacity", &s_.rail_alpha, 40, 255, 5);
+        changed |= ui.color("Rail ok", &s_.rail_ok);
+        changed |= ui.color("Rail failed", &s_.rail_failed);
+        changed |= ui.color("Rail running", &s_.rail_running);
+        changed |= ui.toggle("Hover flyout", &s_.flyout);
+        changed |= ui.slider_int("Flyout rows", &s_.flyout_rows, 4, 24, 1);
+        changed |= ui.color("Flyout accent", &s_.flyout_accent);
+        break;
+    case 4: // Scroll
         changed |= ui.slider_int("Scrollback", &s_.scrollback, 0, 100000, 1000);
         changed |= ui.slider_int("Wheel lines", &s_.scroll_mult, 1, 20, 1);
         changed |= ui.toggle("Scroll on output", &s_.scroll_on_output);
         changed |= ui.toggle("Scroll on keystroke", &s_.scroll_on_keystroke);
+        changed |= ui.slider_int("Autoscroll max", &s_.autoscroll_max, 5, 120, 5);
+        changed |= ui.slider_int("Font zoom step", &s_.font_zoom_step, 1, 6, 1);
+        changed |= ui.toggle("Pointer shapes", &s_.pointer_shapes);
         break;
-    case 4: // Behavior
+    case 5: // Behavior
         changed |= ui.toggle("Audible bell", &s_.audible_bell);
         changed |= ui.toggle("Visual bell", &s_.visual_bell);
         changed |= ui.toggle("Copy on select", &s_.copy_on_select);
         changed |= ui.toggle("Confirm on close", &s_.confirm_close);
         break;
-    case 5: { // Window
+    case 6: { // Window
         changed |= ui.text_input("Title", &s_.title);
         changed |= ui.slider_int("Padding", &s_.padding, 0, 64, 1);
         int op = static_cast<int>(s_.opacity * 100.0f + 0.5f);
@@ -446,7 +507,7 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
         changed |= ui.toggle("Decorations", &s_.decorations);
         break;
     }
-    case 6: // Advanced
+    case 7: // Advanced
         ui.note("Shell / TERM take effect on the NEXT window.");
         changed |= ui.text_input("Shell (empty = $SHELL)", &s_.shell);
         changed |= ui.text_input("TERM", &s_.term_env);

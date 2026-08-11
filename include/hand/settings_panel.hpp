@@ -57,6 +57,7 @@ struct Settings {
     bool animate_cursor = true;
     int animate_ms = 55;
     bool animate_trail = true;
+    int animate_trail_len = 3;
 
     // Colors (hex "#rrggbb")
     std::string fg = "#dcdcdc";
@@ -64,15 +65,33 @@ struct Settings {
     std::string cursor_color = "#dcdcdc";
     std::string selection = "#3c466e";
     bool selection_invert = true; // reverse-video selection (swap fg/bg)
+    std::string search_match = "#786028";   // all search matches
+    std::string search_current = "#ffb020";  // the match you're on
+    int selection_contrast = 30;   // WCAG floor x10 (30 = 3.0:1)
+    int selection_radius = 28;     // corner rounding, % of cell
     // The 16 ANSI palette (hex), from the active theme or explicit overrides.
     // Empty => toe's built-in palette. Drives live recolour on theme switch.
     std::vector<std::string> palette{};
+
+    // Chrome (command minimap rail + hover flyout)
+    bool rail = true;
+    int rail_width = 7;
+    std::string rail_ok = "#50c882";
+    std::string rail_failed = "#eb5a5a";
+    std::string rail_running = "#f0be46";
+    int rail_alpha = 210;
+    bool flyout = true;
+    int flyout_rows = 12;
+    std::string flyout_accent = "#7aa8ff";
 
     // Scroll
     int scrollback = 10000;  // lines
     int scroll_mult = 3;     // lines per wheel notch
     bool scroll_on_output = false;
     bool scroll_on_keystroke = true;
+    int autoscroll_max = 45;   // drag-select autoscroll ceiling (rows/sec)
+    int font_zoom_step = 2;     // px per Ctrl+= / Ctrl+- notch
+    bool pointer_shapes = true; // context-aware mouse cursor
 
     // Behavior
     bool audible_bell = false;
