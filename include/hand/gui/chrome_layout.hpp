@@ -36,14 +36,27 @@ public:
     // the tab-bar thickness: rows for top/bottom, columns for left/right (auto,
     // clamped by side_width for vertical). Safe with zero cell size.
     void set(int win_w_px, int win_h_px, int cell_w_px, int cell_h_px, ChromeSide side,
-             int side_width_cells) {
+             int side_width_cells, bool show = true) {
         win_w_px_ = std::max(1, win_w_px);
         win_h_px_ = std::max(1, win_h_px);
         cw_ = std::max(1, cell_w_px);
         ch_ = std::max(1, cell_h_px);
         side_ = side;
+        show_ = show;
         cols_ = std::max(1, win_w_px_ / cw_);
         rows_ = std::max(1, win_h_px_ / ch_);
+
+        if (!show_) {
+            // No tab bar (e.g. a single tab): the terminal fills the WHOLE
+            // window; no strip is reserved and nothing is drawn.
+            thick_cells_ = 0;
+            term_px_w_ = win_w_px_;
+            term_px_h_ = win_h_px_;
+            term_origin_x_px_ = 0;
+            term_origin_y_px_ = 0;
+            chrome_ = {0, 0, 0, 0};
+            return;
+        }
 
         if (side_ == ChromeSide::Top || side_ == ChromeSide::Bottom) {
             thick_cells_ = 1; // one row
@@ -69,6 +82,7 @@ public:
     }
 
     [[nodiscard]] ChromeSide side() const noexcept { return side_; }
+    [[nodiscard]] bool shown() const noexcept { return show_; }
     [[nodiscard]] bool vertical() const noexcept {
         return side_ == ChromeSide::Left || side_ == ChromeSide::Right;
     }
@@ -92,6 +106,7 @@ public:
 
     // Is a window pixel inside the CHROME strip? (for pointer routing / cursor)
     [[nodiscard]] bool on_chrome_px(int px_x, int px_y) const noexcept {
+        if (!show_) return false;
         switch (side_) {
         case ChromeSide::Top:    return px_y < thick_cells_ * ch_;
         case ChromeSide::Bottom: return px_y >= win_h_px_ - thick_cells_ * ch_;
@@ -112,6 +127,7 @@ private:
     int win_w_px_ = 1, win_h_px_ = 1, cw_ = 1, ch_ = 1;
     int cols_ = 1, rows_ = 1, thick_cells_ = 1;
     ChromeSide side_ = ChromeSide::Top;
+    bool show_ = true;
     RectC chrome_{};
     int term_px_w_ = 1, term_px_h_ = 1;
     int term_origin_x_px_ = 0, term_origin_y_px_ = 0;

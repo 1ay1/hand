@@ -72,6 +72,10 @@ public:
     }
 
     void hide() noexcept { active_ = false; }
+    // The rail's right edge in CELLS is inset from the window by this many cells
+    // (a right-side tab bar). The card positions against that edge, not the
+    // window edge, so it never slides under the tab bar. Set each frame.
+    void set_right_margin(int cells) noexcept { right_margin_ = cells < 0 ? 0 : cells; }
 
     // Test seam: inject list + hover state directly (bypassing a live Session)
     // so the RENDER path can be exercised in isolation.
@@ -103,7 +107,11 @@ public:
     void render(glyph::Buffer &buf) const {
         if (!active()) return;
         const int W = buf.width(), H = buf.height();
-        if (W < 28 || H < 6) return;
+        // The rail sits at the terminal viewport's right edge, which is inset
+        // from the window by the tab strip (right-side bar). Position against
+        // that edge so the card never slides under the tab bar.
+        const int rail_edge = W - right_margin_;
+        if (rail_edge < 28 || H < 6) return;
 
         const int n_items = static_cast<int>(items_.size());
         // Card chrome is 4 rows: top border, header, divider, bottom border.
@@ -115,11 +123,11 @@ public:
         const int shown = std::min(list_rows, std::max(1, hc.flyout_rows));
         const int card_h = shown + 4;
         const int card_w = std::clamp(longest_text() + 15, 24,
-                                      std::min({W - 6, std::max(24, hc.flyout_width)}));
+                                      std::min({rail_edge - 6, std::max(24, hc.flyout_width)}));
         // Sit clear of the command rail on the right edge (the rail + its hover
         // expansion occupy the last few cells). Leave a 3-cell gap so the card
         // never overlaps it, and the pointer triangle bridges the gap.
-        const int card_x = W - card_w - 3;
+        const int card_x = std::max(0, rail_edge - card_w - 3);
 
         const int center = hover_idx_ >= 0 ? hover_idx_ : n_items - 1;
         const int first = std::clamp(center - shown / 2, 0, std::max(0, n_items - shown));
@@ -261,6 +269,7 @@ private:
     std::int64_t hover_row_ = -1;
     std::int64_t total_rows_ = 1;
     int hover_idx_ = -1;
+    int right_margin_ = 0; // cells the rail edge is inset from the window (right tab bar)
     std::vector<toe::CommandView> items_;
 };
 

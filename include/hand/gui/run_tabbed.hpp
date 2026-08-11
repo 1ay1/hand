@@ -237,7 +237,7 @@ template <class App>
                 // own overlay — nothing to restart).
                 lay.set(px.w, px.h, std::max(1, cell.cols), std::max(1, cell.rows),
                         chrome_side_from(host_config().tab_position),
-                        host_config().tab_side_width);
+                        host_config().tab_side_width, rt_ptr->model().tabs().size() > 1);
                 const toe::PixelSize term_px{lay.term_px_w(), lay.term_px_h()};
 
                 // Keep the terminal sized to the viewport the tab bar leaves.
@@ -285,6 +285,12 @@ template <class App>
                     if (overlay_buf.width() != cols || overlay_buf.height() != rows)
                         overlay_buf.resize(cols, rows);
                     overlay_buf.clear(glyph::Style{});
+                    // When the tab bar is on the RIGHT, the rail sits at the
+                    // terminal viewport's right edge — inset from the window by
+                    // the tab strip. Tell the flyout so it positions against the
+                    // rail, not the window edge (else it slides under the bar).
+                    const int rail_inset_px = px.w - lay.term_px_w() - lay.term_origin_x_px();
+                    flyout.set_right_margin(std::max(0, rail_inset_px) / std::max(1, cell.cols));
                     flyout.render(overlay_buf);
                     s->render_overlay(rc, overlay_buf.data(), cols, rows, px, 0, 0, 1.0f,
                                       overlay_buf.alpha_data());
