@@ -486,7 +486,7 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
         changed |= ui.toggle("Hover flyout", &s_.flyout);
         changed |= ui.slider_int("Flyout rows", &s_.flyout_rows, 4, 24, 1);
         changed |= ui.color("Flyout accent", &s_.flyout_accent);
-        ui.note("Tab bar (restart to move):");
+        ui.note("Tab bar:");
         changed |= ui.select("Tab position", &s_.tab_position,
                              {"top", "bottom", "left", "right"});
         changed |= ui.slider_int("Side width", &s_.tab_side_width, 8, 40, 1);

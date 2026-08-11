@@ -130,7 +130,6 @@ template <class App>
 
     TabbedView view;
     ChromeLayout lay; // tab-bar placement + terminal viewport geometry (per frame)
-    const ChromeSide tab_side = chrome_side_from(host_config().tab_position);
     hand::HelpPanel help;   // Ctrl+Shift+?  (read-only cheatsheet)
     hand::SearchBar search; // Ctrl+Shift+F  (scrollback search, per focused tab)
     hand::CommandFlyout flyout; // rail-hover command list (click to jump)
@@ -232,8 +231,12 @@ template <class App>
             {
                 const toe::Extent cell = s->cell_size();
                 // Recompute tab-bar + terminal geometry for this frame from the
-                // window size, cell size, and configured placement.
-                lay.set(px.w, px.h, std::max(1, cell.cols), std::max(1, cell.rows), tab_side,
+                // window size, cell size, and configured placement. All of
+                // position/side-width/controls are read LIVE from host_config so
+                // a settings edit re-lays-out the tab bar immediately (it's our
+                // own overlay — nothing to restart).
+                lay.set(px.w, px.h, std::max(1, cell.cols), std::max(1, cell.rows),
+                        chrome_side_from(host_config().tab_position),
                         host_config().tab_side_width);
                 const toe::PixelSize term_px{lay.term_px_w(), lay.term_px_h()};
 
@@ -309,7 +312,8 @@ template <class App>
     // Seed the layout so any pointer/font-zoom event before the first present
     // has a valid terminal-viewport size (present recomputes it each frame with
     // the real cell size).
-    lay.set(px0.w, px0.h, 8, 16, tab_side, host_config().tab_side_width);
+    lay.set(px0.w, px0.h, 8, 16, chrome_side_from(host_config().tab_position),
+            host_config().tab_side_width);
     // Derive the tab-bar palette from the active theme (the single source of
     // colour truth) and re-derive when it changes (live theme switch).
     std::string tab_theme_name;
