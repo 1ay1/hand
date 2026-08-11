@@ -84,13 +84,16 @@ public:
         active_ = true;
     }
 
-    // A left-click landed on the rail while the flyout is up. If a command is
-    // under the pointer, jump the view to it and return true (consumed).
+    // A left-click on the rail: scroll the view so the START of the command
+    // under the pointer is at the top of the viewport. Read-only scroll (no
+    // focus/gutter side effects). Returns true if it scrolled.
     [[nodiscard]] bool click(toe::Session &s) {
         if (!active_ || hover_idx_ < 0 ||
             hover_idx_ >= static_cast<int>(items_.size()))
             return false;
-        return s.jump_to_command(items_[static_cast<std::size_t>(hover_idx_)].id);
+        const std::int64_t row = items_[static_cast<std::size_t>(hover_idx_)].prompt_row;
+        if (row < 0) return false;
+        return s.scroll_to_row(row);
     }
 
     // Paint the flyout card into `buf` (sized to the terminal grid in cells).
@@ -121,10 +124,17 @@ public:
         const int center = hover_idx_ >= 0 ? hover_idx_ : n_items - 1;
         const int first = std::clamp(center - shown / 2, 0, std::max(0, n_items - shown));
 
-        // Follow the mouse: center the card on the hovered rail pixel row.
-        const int hover_y = static_cast<int>(hover_row_ * H /
-                                             std::max<std::int64_t>(1, total_rows_));
-        const int card_y = std::clamp(hover_y - card_h / 2, 0, std::max(0, H - card_h));
+        // Smart + STILL position: anchor the card on the hovered command's rail
+        // position (quantised to the command, so it doesn't jitter per pixel as
+        // you move within one command), then clamp fully on-screen. The pointer
+        // triangle marks the exact hovered row, so the card can stay put while
+        // only the highlight + scroll window move.
+        const int anchor_row = hover_idx_ >= 0 && hover_idx_ < n_items
+                                   ? static_cast<int>(items_[static_cast<std::size_t>(hover_idx_)]
+                                                          .prompt_row *
+                                                      H / std::max<std::int64_t>(1, total_rows_))
+                                   : H / 2;
+        const int card_y = std::clamp(anchor_row - 2, 0, std::max(0, H - card_h));
 
         // Palette: a dark frosted card with a cool accent.
         const glyph::Rgb bg     = glyph::rgb((hc.flyout_bg >> 16) & 0xFF,

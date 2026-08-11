@@ -520,13 +520,14 @@ template <class App>
                     }
                 } else if (const auto *mu = std::get_if<toe::win::MouseUp>(&adj)) {
                     if (rail_scrubbing) {
-                        // A CLICK (no drag) just scrolls the view to the clicked
-                        // rail row — the same read-only scroll a drag does, no
-                        // command-jump / focus side effects (clicking the rail
-                        // must ONLY move the scrollback, like scrolling).
+                        // A CLICK (no drag) JUMPS to the start of the command
+                        // under the pointer — scroll its prompt row to the top.
+                        // A read-only scroll (no focus/gutter side effects), and
+                        // it snaps to the command boundary, not a raw pixel row.
+                        // A drag was a live scrub, so it just ends here.
                         if (!rail_moved)
                             rt.with_focus_session([&](toe::Session &s) {
-                                s.rail_scrub(mu->x, mu->y, rpx);
+                                if (!flyout.click(s)) s.rail_scrub(mu->x, mu->y, rpx);
                             });
                         rail_scrubbing = false;
                         consumed = true;
