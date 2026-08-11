@@ -369,7 +369,8 @@ public:
     // A plain full-width text line (non-focusable), dimmed — for notes/footers
     // inside a pane.
     void note(std::string_view text) {
-        buf_.text(content_.x + 1, cursor_y_, text, Style{theme_.dim, theme_.panel_bg});
+        buf_.text(content_.x + 1, cursor_y_, text, Style{theme_.dim, theme_.panel_bg},
+                  content_.w - 1);
         cursor_y_ += 1;
     }
 
@@ -691,10 +692,12 @@ public:
         if (hit) consumed_ = true;
         const std::string lbl = "  " + std::string(text) + "  ";
         const int bw = Buffer::text_width(lbl);
-        const int bx = content_.x + (content_.w - bw) / 2;
+        // Centre within the content pane, but never spill left of it (a wide
+        // label on a narrow pane clamps to the left edge + clips to width).
+        const int bx = content_.x + std::max(0, (content_.w - bw) / 2);
         Style bs = foc ? Style{theme_.accent_fg, theme_.accent, Attr::Bold}
                        : Style{theme_.fg, theme_.border};
-        buf_.text(bx, cursor_y_, lbl, bs);
+        buf_.text(bx, cursor_y_, lbl, bs, content_.right() - bx);
         end_row();
         return hit;
     }

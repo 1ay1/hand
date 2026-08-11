@@ -367,7 +367,10 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
     for (const auto &t : kSections)
         side_w = std::max(side_w, static_cast<int>(t.size()));
     side_w += 4;
-    const int panel_w = std::clamp(side_w + 3 + 48, 40, buf.width() - 2);
+    // Content pane must fit the WIDEST control: the "Save current colours as a
+    // theme" button is ~35 cells incl. padding. Give the pane 52 so nothing
+    // overflows into the sidebar/divider.
+    const int panel_w = std::clamp(side_w + 3 + 52, 40, buf.width() - 2);
 
     // Overlay translucency comes from the config (Window tab): the scrim dims
     // the terminal lightly, the panel card stays near-opaque and readable.
