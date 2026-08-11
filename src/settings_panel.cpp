@@ -537,7 +537,7 @@ void SettingsPanel::render(glyph::Buffer &buf, bool &changed) {
         static const std::vector<std::string> kShellPaths = installed_shells();
         static const std::vector<std::string> kShellOpts = [] {
             std::vector<std::string> o{"$SHELL (default)"};
-            for (const auto &p : kShellPaths) o.push_back(shell_name(p) + "  " + p);
+            for (const auto &p : kShellPaths) o.push_back(shell_name(p));
             return o;
         }();
         int si = 0;

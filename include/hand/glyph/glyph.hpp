@@ -455,11 +455,16 @@ public:
         *index = n > 0 ? std::clamp(*index, 0, n - 1) : 0;
         const std::string val = n > 0 ? opts[static_cast<std::size_t>(*index)] : "";
         const int vx = value_x();
-        Style vs{theme_.fg, foc ? theme_.focus_bg : theme_.panel_bg, Attr::Bold};
-        buf_.text(vx, cursor_y_, "‹ ", Style{theme_.dim, foc ? theme_.focus_bg : theme_.panel_bg});
-        buf_.text(vx + 2, cursor_y_, val, vs);
-        buf_.text(vx + 2 + Buffer::text_width(val), cursor_y_, " ›",
-                  Style{theme_.dim, foc ? theme_.focus_bg : theme_.panel_bg});
+        const Rgb rowbg = foc ? theme_.focus_bg : theme_.panel_bg;
+        Style vs{theme_.fg, rowbg, Attr::Bold};
+        // Clip the whole ‹ value › to the content pane so a long option (e.g. a
+        // full shell path) never spills past the panel. Reserve 4 cells for the
+        // chevrons + padding and truncate the value with an ellipsis.
+        const int avail = content_.right() - vx - 4;
+        buf_.text(vx, cursor_y_, "\u2039 ", Style{theme_.dim, rowbg});
+        buf_.text(vx + 2, cursor_y_, val, vs, std::max(1, avail));
+        const int vw = std::min(Buffer::text_width(val), std::max(1, avail));
+        buf_.text(vx + 2 + vw, cursor_y_, " \u203a", Style{theme_.dim, rowbg});
         end_row();
         return changed;
     }
