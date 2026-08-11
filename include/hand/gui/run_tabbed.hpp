@@ -30,6 +30,8 @@
 #include "hand/actor/tab_actor.hpp"
 #include "hand/gui/message.hpp"
 #include "hand/gui/runtime.hpp"
+#include "hand/help_panel.hpp"
+#include "hand/search_bar.hpp"
 #include "hand/platform/backend_base.hpp" // Chord + classify_chord (shared, one place)
 #include "hand/platform/posix_pty.hpp" // spawn_pty (fresh PTY per tab)
 #include "hand/platform/sokol_gl.hpp" // GL (glViewport) with prototypes
@@ -122,10 +124,6 @@ inline void translate_event(Rt &rt, const toe::win::Event &ev) {
                 // ONE chord layer via the shared classifier. A recognised chord
                 // is CONSUMED here (never forwarded to the shell), on press only.
                 const platform::Chord chord = platform::classify_chord(k);
-                if (detail::trace_on() && chord != platform::Chord::None) {
-                    std::fprintf(stderr, "[tabs]   -> chord=%d press=%d\n",
-                                 static_cast<int>(chord), is_press);
-                }
                 if (chord != platform::Chord::None) {
                     if (is_press) {
                         switch (chord) {
@@ -163,6 +161,9 @@ template <class App>
     const toe::PixelSize px0 = app.pixel_size();
 
     TabbedView view;
+    hand::HelpPanel help;   // Ctrl+Shift+?  (read-only cheatsheet)
+    hand::SearchBar search; // Ctrl+Shift+F  (scrollback search, per focused tab)
+    glyph::Buffer overlay_buf; // cell buffer for the help/search overlays
 
     // SpawnFn: a new tab is a FRESH forkpty'd child (its own PTY + AdoptFd), so
     // tabs never share an fd. `cwd` (from the focused tab's OSC 7) chdir's the
@@ -216,6 +217,27 @@ template <class App>
                 glViewport(0, 0, px.w, px.h);
                 view.render_chrome(rc, *s, rt_ptr->model(), px,
                                    static_cast<std::uint32_t>(rt_ptr->model().frame()));
+                // Help / search overlays (full-window cell buffer over the grid).
+                if (help.active() || search.active()) {
+                    const int cols = std::max(1, px.w / std::max(1, cell.cols));
+                    const int rows = std::max(1, px.h / std::max(1, cell.rows));
+                    if (overlay_buf.width() != cols || overlay_buf.height() != rows)
+                        overlay_buf.resize(cols, rows);
+                    if (help.active()) {
+                        overlay_buf.clear(glyph::Style{});
+                        overlay_buf.clear_alpha(220);
+                        help.render(overlay_buf);
+                        s->render_overlay(rc, overlay_buf.data(), cols, rows, px, 0, 0, 0.86f,
+                                          overlay_buf.alpha_data());
+                    } else { // search: one-line bar, rest transparent
+                        overlay_buf.clear(glyph::Style{});
+                        overlay_buf.clear_alpha(0);
+                        if (rows > 0) overlay_buf.set_alpha({0, rows - 1, cols, 1}, 255);
+                        search.render(overlay_buf);
+                        s->render_overlay(rc, overlay_buf.data(), cols, rows, px, 0, 0, 1.0f,
+                                          overlay_buf.alpha_data());
+                    }
+                }
             }
         }
         app.end_frame();
@@ -238,7 +260,40 @@ template <class App>
         // chrome row is resolved here (needs the view's cell size); everything
         // else goes through translate_event.
         app.poll_events([&](const toe::win::Event &ev) {
-            if (detail::trace_on()) detail::trace_event(ev);
+            // --- overlay (help/search) input routing --------------------------
+            // While an overlay is open it OWNS the keyboard. Handle its keys +
+            // the chords that open/close overlays here, before tab routing.
+            if (const auto *kp = std::get_if<toe::win::KeyPressed>(&ev)) {
+                const auto &k = kp->key;
+                const bool press = k.kind == toe::KeyEvent::Kind::press;
+                const platform::Chord ch = platform::classify_chord(k);
+                // Toggle overlays on their chord (press only).
+                if (press && ch == platform::Chord::ToggleHelp) {
+                    if (search.active()) rt.with_focus_session([&](toe::Session &s) { search.close(s); });
+                    help.toggle();
+                    return;
+                }
+                if (press && ch == platform::Chord::OpenSearch) {
+                    rt.with_focus_session([&](toe::Session &s) {
+                        if (search.active()) search.close(s);
+                        else { help.close(); search.open(s); }
+                    });
+                    return;
+                }
+                if (help.active()) { help.handle(ev); return; }
+                if (search.active()) {
+                    rt.with_focus_session([&](toe::Session &s) { search.handle(ev, s); });
+                    return;
+                }
+            } else if (help.active() || search.active()) {
+                // Swallow text/other input while an overlay is up.
+                if (std::get_if<toe::win::TextEntered>(&ev)) {
+                    if (search.active())
+                        rt.with_focus_session([&](toe::Session &s) { search.handle(ev, s); });
+                    return;
+                }
+            }
+
             if (const auto *md = std::get_if<toe::win::MouseDown>(&ev)) {
                 const ChromeHit hit = view.hit_test_px(md->x, md->y);
                 switch (hit.kind) {

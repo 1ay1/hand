@@ -136,6 +136,25 @@ private:
         if (auto it = actors_.find(fid); it != actors_.end()) present_(*it->second);
     }
 
+public:
+    // Run `fn(toe::Session&)` on the FOCUSED tab's live terminal, holding that
+    // tab's render_lock (the actor may be mutating its grid). Returns false if
+    // the focused tab has no live session. Used by the overlay input routing so
+    // search's screen mutations are race-free.
+    template <class F>
+    bool with_focus_session(F &&fn) {
+        const TabId fid = model_.tabs().focus().id;
+        auto it = actors_.find(fid);
+        if (it == actors_.end()) return false;
+        std::lock_guard lk(it->second->render_lock());
+        if (auto *s = it->second->terminal().poll().running) {
+            fn(*s);
+            return true;
+        }
+        return false;
+    }
+
+private:
     static TabId mint_first_() { return TabId{1}; }
 
 public:
