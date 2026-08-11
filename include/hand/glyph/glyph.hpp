@@ -279,15 +279,21 @@ public:
 
     // --- key/value info row (non-focusable) --------------------------------
     // A two-column line: `key` in the accent colour on the left, `desc` in the
-    // normal fg on the right. Used by read-only panes (the help pane) to list
-    // keybindings without any interactive widget.
-    void kv_row(std::string_view key, std::string_view desc) {
+    // A read-only two-column row: a key/chord on the left (accent), its
+    // description on the right (normal fg). The description column is passed in
+    // (kv_col) so a whole list ALIGNS and long keys never overrun into the
+    // description — a key wider than the column is clipped with an ellipsis.
+    // Default column width auto-fits typical chords; the help pane measures its
+    // widest key and passes an exact value.
+    void kv_row(std::string_view key, std::string_view desc, int kv_col = 18) {
         const int y = cursor_y_;
-        buf_.text(content_.x + 1, y, key,
-                  Style{theme_.accent, theme_.panel_bg, Attr::Bold});
-        // Align descriptions to a fixed column so they line up.
-        const int desc_x = content_.x + 18;
-        buf_.text(desc_x, y, desc, Style{theme_.fg, theme_.panel_bg});
+        const int avail = content_.w - 2;
+        kv_col = std::clamp(kv_col, 6, avail - 8);
+        const int key_w = std::min<int>(Buffer::text_width(key), kv_col - 1);
+        buf_.text(content_.x + 1, y, key, Style{theme_.accent, theme_.panel_bg, Attr::Bold},
+                  key_w);
+        const int desc_x = content_.x + 1 + kv_col;
+        buf_.text(desc_x, y, desc, Style{theme_.fg, theme_.panel_bg}, content_.right() - desc_x);
         cursor_y_ += 1;
     }
 
