@@ -81,16 +81,29 @@ void TabActor::run() {
             if (!more) break;
         }
 
-        // --- 3. post CHANGE-ONLY status, RATE-LIMITED ------------------------
+        // --- 3. post CHANGE-ONLY status, RATE-LIMITED (latency-preserving) --
         // A chatty child (an agent, a build) bumps the grid many times per
-        // millisecond; notifying the GUI on every bump would peg a core. Coalesce
-        // to at most ~1 output notification per frame (16ms) — the GUI can't
-        // show more than that anyway. Title/dir/command changes are posted
-        // immediately (they're rare).
+        // millisecond; notifying the GUI on every bump would peg a core. So we
+        // coalesce to at most ~1 output notification per ~8ms (120Hz) — tight
+        // enough that echoed keystrokes feel instant, loose enough to cap a
+        // flooding child's wakeups.
+        //
+        // CRUCIAL for INPUT LATENCY: when a change lands inside the window we
+        // must NOT drop it (that made every echoed keystroke wait a full frame,
+        // the "keys don't respond immediately" bug). Instead we mark it PENDING
+        // and, in step 4, wake at the EXACT remaining time to the deadline so
+        // it's posted ~immediately after the window, not a flat frame late.
+        constexpr std::int64_t kCoalesceMs = 8;
         const std::int64_t now = now_ms_actor();
-        const bool due = (now - last_notify_ms_) >= 16;
-        publish_status(due);
-        if (due) last_notify_ms_ = now;
+        const std::int64_t since = now - last_notify_ms_;
+        const bool due = since >= kCoalesceMs;
+        publish_status(/*post_output=*/due);
+        if (due) {
+            last_notify_ms_ = now;
+            pending_output_ = false;
+        } else if (grid_generation() != last_gen_) {
+            pending_output_ = true; // deferred; step 4 wakes us at the deadline
+        }
 
         // --- 4. block until the PTY or an inbound command is ready -----------
         struct pollfd fds[2];
@@ -107,15 +120,28 @@ void TabActor::run() {
             ++n;
         }
         if (n == 0) break; // nothing to wait on: bail rather than spin
-        // Timeout policy: while draining a flood (fd stays readable) pace to
-        // ~60fps; while a command is RUNNING, wake every 100ms so its elapsed
-        // clock in the chrome ticks; otherwise (idle at a prompt) block
-        // INDEFINITELY — zero wakeups until real PTY/inbox activity.
+        // Timeout policy:
+        //  * a change is PENDING (coalesced within the window) -> wake at the
+        //    EXACT remaining ms to the 16ms deadline so the deferred echo is
+        //    flushed with minimal latency (typically 1-15ms, not a flat 16);
+        //  * a command is RUNNING -> wake every 100ms so its elapsed clock in
+        //    the chrome ticks;
+        //  * otherwise (idle at a prompt) -> block INDEFINITELY: zero wakeups
+        //    until real PTY/inbox activity.
         int timeout = -1;
-        if (!due) timeout = 16;          // mid-flood: pace the drain
-        else if (last_running_) timeout = 100; // running command: tick its clock
+        if (pending_output_) {
+            timeout = static_cast<int>(std::max<std::int64_t>(1, kCoalesceMs - since));
+        } else if (last_running_) {
+            timeout = 100;
+        }
         ::poll(fds, static_cast<nfds_t>(n), timeout);
     }
+}
+
+std::uint64_t TabActor::grid_generation() {
+    std::lock_guard lk(render_lock_);
+    auto *s = term_.poll().running;
+    return s ? s->generation() : 0;
 }
 
 void TabActor::publish_status(bool post_output) {
