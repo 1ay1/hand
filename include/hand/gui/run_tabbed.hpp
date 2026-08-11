@@ -162,7 +162,10 @@ template <class App>
         if (!fd) return std::nullopt;
         toe::Config c = cfg;
         c.source = *fd;
-        auto t = toe::Terminal::create(c, app.pixel_size());
+        // Size the new terminal to the TAB-BAR-REDUCED viewport, not the full
+        // window, so a right/left/bottom bar doesn't create the grid too wide
+        // (which put the scrollbar rail under the bar until the first resize).
+        auto t = toe::Terminal::create(c, toe::PixelSize{lay.term_px_w(), lay.term_px_h()});
         if (!t) return std::nullopt;
         return std::move(*t);
     };
@@ -335,12 +338,11 @@ template <class App>
     rt.window_ctl_ = [&](WinCtl a) {
         app.window_action(a == WinCtl::minimize ? 0 : 1); // 0=minimize, 1=toggle-max
     };
-    rt.start(); // spawn the first tab's actor
-    // Seed the layout so any pointer/font-zoom event before the first present
-    // has a valid terminal-viewport size (present recomputes it each frame with
-    // the real cell size).
+    // Seed the layout BEFORE the first spawn so Terminal::create sizes the grid
+    // to the tab-bar-reduced viewport from the start (a single tab hides the bar
+    // -> full window). Present recomputes it each frame with the real cell size.
     lay.set(px0.w, px0.h, 8, 16, chrome_side_from(host_config().tab_position),
-            host_config().tab_side_width);
+            host_config().tab_side_width, /*show=*/false);
     // Derive the tab-bar palette from the active theme (the single source of
     // colour truth) and re-derive when it changes (live theme switch).
     std::string tab_theme_name;
@@ -352,6 +354,7 @@ template <class App>
         else view.set_tab_theme(default_tab_theme());
     };
     refresh_tab_theme();
+    rt.start(); // spawn only after layout and chrome theme are fully initialized
 
     const std::uint64_t start = detail::now_ms_();
     // Elapsed-ms baseline: the loop compares against `now = now_ms_() - start`
