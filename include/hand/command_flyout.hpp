@@ -103,49 +103,52 @@ public:
 
         const int n_items = static_cast<int>(items_.size());
         const int list_rows = std::min(n_items, std::min(12, H - 5));
-        const int card_h = list_rows + 3;               // header + divider + list + pad
-        const int card_w = std::clamp(longest_text() + 16, 26, std::min(W - 8, 48));
-        const int card_x = W - card_w - 4;              // leave room for the rail + notch
+        const int card_h = list_rows + 3;               // header + divider + list
+        const int card_w = std::clamp(longest_text() + 15, 24, std::min(W - 6, 44));
+        // Hug the rail: the card's right border sits one cell in from the edge,
+        // with the pointer triangle occupying that last cell toward the rail.
+        const int card_x = W - card_w - 1;
 
-        // Scroll the list so the hovered row is centered in the window.
         const int center = hover_idx_ >= 0 ? hover_idx_ : n_items - 1;
         const int first = std::clamp(center - list_rows / 2, 0, std::max(0, n_items - list_rows));
 
         // Follow the mouse: center the card on the hovered rail pixel row.
         const int hover_y = static_cast<int>(hover_row_ * H /
                                              std::max<std::int64_t>(1, total_rows_));
-        const int card_y = std::clamp(hover_y - card_h / 2, 1, std::max(1, H - card_h - 1));
+        const int card_y = std::clamp(hover_y - card_h / 2, 0, std::max(0, H - card_h));
 
-        // Palette (self-contained; a dark frosted card with a cool accent).
-        const glyph::Rgb bg   = glyph::rgb(24, 26, 36);
-        const glyph::Rgb bg2  = glyph::rgb(30, 33, 46);   // header band
-        const glyph::Rgb acc  = glyph::rgb(120, 165, 255);
-        const glyph::Style body{glyph::rgb(224, 227, 238), bg};
-        const glyph::Style border{glyph::rgb(70, 78, 110), bg};
-        const glyph::Style dim{glyph::rgb(120, 125, 145), bg};
+        // Palette: a dark frosted card with a cool accent.
+        const glyph::Rgb bg     = glyph::rgb(22, 24, 33);
+        const glyph::Rgb bg_alt = glyph::rgb(28, 31, 42);   // zebra / header
+        const glyph::Rgb acc    = glyph::rgb(122, 168, 255);
+        const glyph::Style body{glyph::rgb(220, 224, 236), bg};
+        const glyph::Style border{glyph::rgb(58, 64, 90), bg};
+        const glyph::Style dim{glyph::rgb(112, 118, 138), bg};
 
         buf.clear_alpha(0);
         const glyph::Rect card{card_x, card_y, card_w, card_h};
-        buf.set_alpha(card, 250);
-        // Two-step soft shadow down-right.
-        buf.set_alpha(glyph::Rect{card_x + 1, card_y + card_h, card_w, 1}, 90);
-        buf.set_alpha(glyph::Rect{card_x + 2, card_y + card_h + 1, card_w - 2, 1}, 45);
-        buf.set_alpha(glyph::Rect{card_x + card_w, card_y + 1, 1, card_h}, 60);
+        buf.set_alpha(card, 252);
+        // Soft shadow: one row below + one column left (the card hugs the right).
+        buf.set_alpha(glyph::Rect{card_x, card_y + card_h, card_w, 1}, 70);
+        buf.set_alpha(glyph::Rect{card_x - 1, card_y + 1, 1, card_h}, 55);
 
         buf.fill(card, body);
         buf.frame(card, border, glyph::BoxStyle::Rounded);
 
-        // Header band: title + count, then a divider rule.
-        buf.fill(glyph::Rect{card_x + 1, card_y + 1, card_w - 2, 1}, glyph::Style{acc, bg2});
-        buf.text(card_x + 2, card_y + 1, "COMMANDS", glyph::Style{acc, bg2});
+        // Header row: accent title + count on a slightly lighter band.
+        buf.fill(glyph::Rect{card_x + 1, card_y + 1, card_w - 2, 1}, glyph::Style{acc, bg_alt});
+        buf.text(card_x + 2, card_y + 1, "Commands",
+                 glyph::Style{acc, bg_alt, glyph::Attr::Bold});
         {
             const std::string cnt = std::to_string(n_items);
             buf.text(card_x + card_w - 2 - static_cast<int>(cnt.size()), card_y + 1, cnt,
-                     glyph::Style{glyph::rgb(150, 156, 180), bg2});
+                     glyph::Style{glyph::rgb(140, 146, 168), bg_alt});
         }
-        // Divider under the header.
+        // Divider tucked between the header band and the list, joined to the frame.
+        buf.put(card_x, card_y + 2, U'\u251C', border);
         for (int c = card_x + 1; c < card_x + card_w - 1; ++c)
             buf.put(c, card_y + 2, U'\u2500', border);
+        buf.put(card_x + card_w - 1, card_y + 2, U'\u2524', border);
 
         const int list_y0 = card_y + 3;
         for (int r = 0; r < list_rows; ++r) {
@@ -156,17 +159,18 @@ public:
             const bool hot = i == hover_idx_;
 
             const int status = !it.finished ? 0 : (it.succeeded() ? 1 : 2);
-            const glyph::Rgb pc = status == 1 ? glyph::rgb(90, 214, 140)
-                                : status == 2 ? glyph::rgb(240, 96, 96)
-                                              : glyph::rgb(242, 194, 74);
+            const glyph::Rgb pc = status == 1 ? glyph::rgb(96, 216, 148)
+                                : status == 2 ? glyph::rgb(242, 100, 100)
+                                              : glyph::rgb(244, 198, 82);
 
-            // Selected row: a status-tinted fill + bright left accent bar so it
-            // pops, and a caret linking it to the connector notch on the right.
-            const glyph::Rgb row_bg = hot ? blend(bg, pc, 0.22f) : bg;
-            const glyph::Style rs{hot ? glyph::rgb(248, 249, 255) : body.fg, row_bg};
+            // Row background: hovered = a strong status-tinted fill edge-to-edge
+            // with a bright left accent bar; others = subtle zebra striping.
+            const glyph::Rgb row_bg =
+                hot ? blend(bg, pc, 0.30f) : (r & 1 ? bg_alt : bg);
+            const glyph::Style rs{hot ? glyph::rgb(250, 251, 255) : body.fg, row_bg};
             buf.fill(glyph::Rect{card_x + 1, y, card_w - 2, 1}, rs);
-            if (hot)
-                buf.put(card_x + 1, y, U'\u2590', glyph::Style{pc, row_bg});
+            buf.put(card_x + 1, y, hot ? U'\u2590' : U' ',
+                    glyph::Style{hot ? pc : row_bg, row_bg});
 
             // Status pip.
             const char32_t pip = status == 0 ? U'\u25D0' : U'\u25CF';
@@ -175,23 +179,20 @@ public:
             // Command text, then a right-aligned duration in a muted tone.
             const std::string dur = it.duration_ms > 0 ? fmt_dur(it.duration_ms) : std::string{};
             const int dur_w = dur.empty() ? 0 : static_cast<int>(dur.size()) + 1;
-            const int text_x = card_x + 5;
-            const int text_max = card_w - 7 - dur_w;
-            buf.text(text_x, y, first_line(it.command), rs, std::max(1, text_max));
+            buf.text(card_x + 5, y, first_line(it.command), rs,
+                     std::max(1, card_w - 7 - dur_w));
             if (dur_w > 0)
                 buf.text(card_x + card_w - 1 - static_cast<int>(dur.size()), y, dur,
-                         hot ? glyph::Style{glyph::rgb(210, 214, 230), row_bg} : dim);
+                         hot ? glyph::Style{glyph::rgb(220, 224, 236), row_bg} : dim);
         }
 
-        // Connector notch: a caret on the card's right edge at the hovered
-        // row's height, pointing toward the rail so the card reads as attached
-        // to the exact command under the pointer.
+        // Pointer triangle: replaces the right border cell at the hovered
+        // row's height so the card reads as pinned to that command (points at
+        // the rail). Coloured by the accent.
         if (hover_idx_ >= 0) {
             const int hy = std::clamp(list_y0 + (hover_idx_ - first), card_y + 1,
                                       card_y + card_h - 2);
-            buf.put(card_x + card_w - 1, hy, U'\u25B8', glyph::Style{acc, bg});
-            buf.put(card_x + card_w, hy, U'\u25B8', glyph::Style{acc, bg});
-            buf.set_alpha(glyph::Rect{card_x + card_w, hy, 1, 1}, 250);
+            buf.put(card_x + card_w - 1, hy, U'\u25B6', glyph::Style{acc, bg});
         }
     }
 
