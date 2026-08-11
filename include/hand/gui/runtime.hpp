@@ -165,25 +165,25 @@ public:
         }
     }
 
-    // Time-driven repaint need, split by cadence:
-    //   fast (16ms): a running-command spinner, a done-attention pulse.
-    //   slow (blink half-period): the focused terminal's steady cursor blink.
-    // Returns the wait deadline in ms, or -1 to block FOREVER (zero idle CPU).
-    // LOCK-FREE: reads only the pure model (TabModel status/attention) + a
-    // cached blink period — never acquires an actor's render_lock, so it can't
-    // be starved by a busy actor thread mid-drain (that was the freeze).
-    [[nodiscard]] int animation_deadline_ms() const {
+    // A running-command spinner or a done-attention pulse needs ~60fps repaints.
+    // Pure model read (TabModel status/attention) — no lock, no engine call.
+    [[nodiscard]] bool has_fast_animation() const {
         bool fast = false;
         model_.tabs().for_each_ordered([&](const TabEntry &e, bool, std::size_t) {
             if (e.model.status() == TabStatus::Running ||
                 e.model.attention() != TabAttention::None)
                 fast = true;
         });
-        if (fast) return 16;
-        // The focused terminal's caret is mid-glide (or a bell is fading): keep
-        // rendering at ~60fps. This flag is published by present() under the
-        // render_lock it already holds, and read here LOCK-FREE.
-        if (focus_animating_.load(std::memory_order_relaxed)) return 16;
+        return fast;
+    }
+
+    // The wait deadline in ms, or -1 to block FOREVER (zero idle CPU). LOCK-FREE:
+    //   16ms  while a spinner/pulse animates OR the focused caret is gliding;
+    //   blink half-period for the steady cursor blink;
+    //   -1     when nothing moves.
+    [[nodiscard]] int animation_deadline_ms() const {
+        if (has_fast_animation() || focus_animating_.load(std::memory_order_relaxed))
+            return 16;
         return focus_blink_ms_ > 0 ? focus_blink_ms_ : -1;
     }
     // Cache the focused tab's cursor-blink period (call when focus changes /
@@ -194,6 +194,14 @@ public:
     void set_focus_animating(bool a) noexcept {
         focus_animating_.store(a, std::memory_order_relaxed);
     }
+    // Set the animation frame index (time-derived; drives the chrome spinner /
+    // pulse phase). Also refreshes the focused tab's derived state.
+    void set_frame(std::uint32_t f) {
+        model_.set_frame_index(f);
+        model_.refresh(model_.tabs().focus(), /*active=*/true);
+    }
+    // Present the focused tab now (the loop's direct-present path for animation).
+    void present_focused() { present_active(); }
 
 private:
     static TabId mint_first_() { return TabId{1}; }

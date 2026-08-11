@@ -28,6 +28,7 @@
 #include <variant>
 
 #include "hand/actor/tab_actor.hpp"
+#include "hand/gui/frame_gate.hpp"
 #include "hand/gui/message.hpp"
 #include "hand/gui/runtime.hpp"
 #include "hand/help_panel.hpp"
@@ -156,7 +157,7 @@ template <class App>
     // terminal is resized to that reduced area so its grid fits exactly.
     GuiRuntime *rt_ptr = nullptr; // set below; present needs the frame counter
     bool settings_changed_this_frame = false; // set by render_panel; fanned out below
-    std::uint64_t last_render_key = ~0ull;    // skip the GPU frame when unchanged
+    FrameGate gate;                          // frame-skip decision (render key)
     const bool loop_hz_present = std::getenv("HAND_LOOP_HZ") != nullptr;
     std::uint64_t present_count = 0;
     auto present = [&](TabActor &active) {
@@ -165,31 +166,22 @@ template <class App>
         auto *s = active.terminal().poll().running;
         if (!s) return;
 
-        // Render key: fold everything that affects the pixels into one value. If
-        // it matches the last presented frame, the image is identical — skip the
-        // whole clear/render/swap and don't touch the GPU at all. This is what
-        // keeps a static screen at zero GPU cost.
-        const std::uint32_t chrome_frame = static_cast<std::uint32_t>(rt_ptr->model().frame());
-        // Is the caret gliding / a bell fading? While it is, the pixels change
-        // every frame even though generation() doesn't — so fold the frame
-        // counter into the key (forces a fresh render) AND publish the flag so
-        // the loop keeps waking at 60fps.
+        // The caret glide / bell fade changes the pixels every frame even when
+        // generation() doesn't; publish it (lock-free read by the loop) and fold
+        // it into the key so those frames aren't skipped.
         const bool caret_anim = s->cursor_animating();
         rt_ptr->set_focus_animating(caret_anim);
-        std::uint64_t key = s->generation();
-        key = key * 1099511628211ull + static_cast<std::uint64_t>(s->scroll_offset() + 1);
-        key = key * 1099511628211ull + (static_cast<std::uint64_t>(px.w) << 16 | px.h);
-        key = key * 1099511628211ull +
-              (help.active() ? 1u : search.active() ? 2u : settings.panel_active() ? 3u : 0u);
-        // Fold the frame counter whenever ANYTHING animates — chrome spinner /
-        // pulse (deadline>=0) OR the caret glide OR an open overlay — so a live
-        // animation always renders a fresh frame; a fully static screen keeps a
-        // stable key and skips the GPU.
-        if (caret_anim || rt_ptr->animation_deadline_ms() >= 0 || help.active() ||
-            search.active() || settings.panel_active())
-            key = key * 1099511628211ull + chrome_frame;
-        if (key == last_render_key) return; // nothing changed — no GPU work
-        last_render_key = key;
+        const std::uint32_t chrome_frame = static_cast<std::uint32_t>(rt_ptr->model().frame());
+        const bool animating = caret_anim || rt_ptr->has_fast_animation() || help.active() ||
+                               search.active() || settings.panel_active();
+
+        RenderKey rk;
+        rk.generation = s->generation();
+        rk.scroll = s->scroll_offset();
+        rk.w = px.w; rk.h = px.h;
+        rk.overlay = help.active() ? 1u : search.active() ? 2u : settings.panel_active() ? 3u : 0u;
+        rk.anim_frame = animating ? chrome_frame : 0u; // stable when static -> skips GPU
+        if (!gate.should_present(rk)) return;          // pixel-identical: no GPU work
         if (loop_hz_present) ++present_count;
 
         app.begin_frame(px, 23, 23, 28, 1.0f); // clear; toe overdraws its own bg
@@ -371,28 +363,26 @@ template <class App>
         }
 
         // --- animation clock: advance only while something animates ---------
-        // A running-command spinner / done-attention pulse / cursor glide runs
-        // at ~60fps; a steady cursor blink at its half-period. When nothing
-        // animates the deadline is -1 and the wait below blocks FOREVER.
+        // A spinner / done-attention pulse / caret glide runs at ~60fps; a
+        // steady cursor blink at its half-period; nothing animating -> block
+        // FOREVER. The frame index is derived from ELAPSED TIME (not a per-loop
+        // counter), and we present DIRECTLY — no Tick round-trip through the
+        // mailbox (that indirection was the earlier busy-loop hazard).
         const int dl_ms = rt.animation_deadline_ms();
         if (dl_ms > 0) {
-            // Advance the frame + repaint only when the animation cadence is
-            // actually DUE (elapsed >= dl_ms) — NOT every loop iteration. Posting
-            // a Tick every iteration would re-signal the mailbox and spin the
-            // loop (the bug this replaces).
-            const std::uint64_t now = detail::now_ms_();
-            if (now - last_anim_ms >= static_cast<std::uint64_t>(dl_ms)) {
-                last_anim_ms = now;
-                rt.post(Tick{++frame});
-                rt.pump(); // Tick -> present (advances spinner / pulse / blink)
+            const std::int64_t now = static_cast<std::int64_t>(detail::now_ms_() - start);
+            if (now - static_cast<std::int64_t>(last_anim_ms) >= dl_ms) {
+                last_anim_ms = static_cast<std::uint64_t>(now);
+                rt.set_frame(FrameGate::frame_index(now)); // time-derived spinner phase
+                rt.present_focused();                       // direct present; FrameGate skips if static
             }
         }
 
         // --- ONE blocking wait: window fd + GUI mailbox fd ------------------
         // Zero idle CPU: with nothing animating and no input, this blocks until
         // the compositor sends an event OR an actor posts to the mailbox (its
-        // wakeup fd is passed as the "pty" fd; wait_readable folds in the window
-        // fd). Deadline: the animation cadence, else forever.
+        // wakeup fd is the "pty" fd; wait_readable folds in the window fd).
+        // Deadline: the animation cadence, else forever.
         const toe::WaitDeadline wd =
             dl_ms < 0 ? toe::WaitDeadline::forever() : toe::WaitDeadline::millis(dl_ms);
         app.wait_readable(rt.mailbox().wait_fd(), wd);

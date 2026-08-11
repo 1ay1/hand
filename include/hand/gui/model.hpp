@@ -61,6 +61,8 @@ public:
     [[nodiscard]] const Zipper<TabEntry> &tabs() const noexcept { return tabs_; }
     [[nodiscard]] bool quitting() const noexcept { return quitting_; }
     [[nodiscard]] std::uint64_t frame() const noexcept { return frame_; }
+    // Set the animation frame index (time-derived by the loop).
+    void set_frame_index(std::uint64_t f) noexcept { frame_ = f; }
 
     // Allocate a fresh, never-reused TabId (for the runtime to spawn an actor).
     [[nodiscard]] TabId mint_id() noexcept { return TabId{next_raw_++}; }

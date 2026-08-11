@@ -387,6 +387,12 @@ if(HAND_BUILD_TESTS)
   target_link_libraries(chord_test PRIVATE hand::platform toe::toe)
   add_test(NAME chord COMMAND chord_test)
 
+  # Render-decision core: FrameGate (frame-skip key + time-derived frame index).
+  # Pure, no engine/threads — the efficiency logic proven in isolation.
+  add_executable(frame_gate_test tests/frame_gate_test.cpp)
+  target_include_directories(frame_gate_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+  add_test(NAME frame_gate COMMAND frame_gate_test)
+
   # Config watcher: pure filesystem-watch logic (inotify on Linux, kqueue on
   # macOS/BSD), no GL / no deps. Guards live config hot-reload on every OS.
   add_executable(config_watch_test tests/config_watch_test.cpp)
