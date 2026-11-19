@@ -109,6 +109,50 @@ int script(auto& rt) {
     rt.press_key(Key::escape);
     ok(!M().settings_open, "esc closes");
 
+    // ── the pointer's shape follows what is under it ─────────────────────
+    const auto cursor_over = [&](Vec2 p) {
+        rt.window().move_to(p);
+        rt.tick();
+        return static_cast<CursorShape>(rt.window().cursor());
+    };
+    const auto center = [&](std::uint64_t id) { return rt.center_of(id); };
+    ok(cursor_over(center(dsl::part_id("tabs", 1))) == CursorShape::pointer, "pointer over a tab");
+    ok(cursor_over(center(dsl::part_id("tabs", dsl::part_bar))) == CursorShape::grab, "grab over the empty strip");
+    ok(cursor_over(center(dsl::node_id("pane.1.grid"))) == CursorShape::text, "I-beam over a terminal grid");
+    ok(cursor_over(center(dsl::part_id("split.0", dsl::part_bar))) == CursorShape::resize_h,
+       "resize arrows over a vertical divider");
+    ok(cursor_over(center(dsl::node_id("win.close"))) == CursorShape::pointer, "pointer over a window button");
+    ok(cursor_over(center(dsl::part_id("status", 102))) == CursorShape::arrow, "arrow over a plain status readout");
+    ok(cursor_over(center(dsl::part_id("status", 100))) == CursorShape::pointer, "pointer over a clickable segment");
+
+    // dragging a divider keeps its cursor even off the 5px strip
+    const Vec2 bar = center(dsl::part_id("split.0", dsl::part_bar));
+    rt.window().move_to(bar);
+    rt.window().press(bar);
+    rt.tick();
+    rt.window().move_to(Vec2{bar.x + 60.0f, bar.y});
+    rt.tick();
+    ok(static_cast<CursorShape>(rt.window().cursor()) == CursorShape::resize_h, "a held divider keeps resize arrows");
+    rt.window().release(Vec2{bar.x + 60.0f, bar.y});
+    rt.tick();
+
+    // over a modal, its own cursors; behind it, an arrow
+    rt.press_key(Key::comma, Mods{.ctrl = true});
+    ok(cursor_over(center(dsl::part_id("tabs", 1))) == CursorShape::arrow, "behind a modal: arrow, not a dead hand");
+    rt.press_key(Key::escape);
+
+    // window actions from the chrome
+    const int moves = rt.window().moves();
+    const Vec2 g = center(dsl::part_id("tabs", dsl::part_bar));
+    rt.window().press(g);
+    rt.window().move_to(Vec2{g.x + 30.0f, g.y + 10.0f});
+    rt.tick();
+    ok(rt.window().moves() == moves + 1, "dragging the strip asks the compositor to move the window");
+    rt.window().release(Vec2{g.x + 30.0f, g.y + 10.0f});
+    rt.tick();
+    rt.click(dsl::node_id("win.max"));
+    ok(rt.window().maximized(), "the maximise button maximises");
+
     std::printf("%s\n", fails == 0 ? "PASS" : "FAIL");
     return fails;
 }
@@ -130,7 +174,9 @@ int main(int argc, char** argv) {
 
     const Fonts fonts = load_fonts(system_fonts);
     Hand::fonts = &fonts;
-    AppConfig cfg{.title = "hand", .size = size, .theme = hand::theme_of(hand::Appearance{}), .fonts = fonts.stack};
+    // hand draws its own title bar (the tab strip): no server decorations.
+    AppConfig cfg{.title = "hand", .size = size, .decorated = false,
+                  .theme = hand::theme_of(hand::Appearance{}), .fonts = fonts.stack};
 
     switch (mode) {
         case Mode::window:
