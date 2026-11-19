@@ -39,7 +39,7 @@ struct Line { std::string_view markup; TermMark mark = TermMark::none; };
     switch (which) {
         case Screen::shell:
             return grid({
-                {"{b}{B}~/src/hand{0} {d}on{0} {m}\u2387 main{0} {d}[!2]{0}", M::ok},
+                {"{4}{k}{B} \uF31B {0}{4}{k}~/src/hand {9}{b}\uE0B0{0} {m}\uE0A0 main{0} {y}!2{0} {d}via{0} {b}\uE61D clang 23{0}", M::ok},
                 {"{g}{B}\u276F{0} git log --oneline -6"},
                 {"{y}a1f3c9e{0} {c}(HEAD -> main){0} settings view generated from the typed table"},
                 {"{y}7be20d4{0} workspace: mayag pane_split + pane_frame + terminal_view"},
@@ -48,21 +48,21 @@ struct Line { std::string_view markup; TermMark mark = TermMark::none; };
                 {"{y}5d11b70{0} scheme: sixteen slots, contrast checked at compile time"},
                 {"{y}0c4e8a2{0} initial commit"},
                 {""},
-                {"{b}{B}~/src/hand{0} {d}on{0} {m}\u2387 main{0} {d}[!2]{0}", M::ok},
-                {"{g}{B}\u276F{0} eza -l --git include/hand"},
-                {"{b}{B}d{0}{y}r{0}{r}w{0}{g}x{0}{y}r{0}{d}-{0}{g}x{0}{y}r{0}{d}-{0}{g}x{0}  {d}-{0}  {y}ayush{0} {d}19 Nov 07:12{0}  {d}--{0} {b}{B}core{0}"},
-                {"{b}{B}d{0}{y}r{0}{r}w{0}{g}x{0}{y}r{0}{d}-{0}{g}x{0}{y}r{0}{d}-{0}{g}x{0}  {d}-{0}  {y}ayush{0} {d}19 Nov 07:40{0}  {g}-M{0} {b}{B}widget{0}"},
-                {".{y}r{0}{r}w{0}{d}-{0}{y}r{0}{d}--{0}{y}r{0}{d}--{0}  {G}6.1k{0} {y}ayush{0} {d}19 Nov 07:41{0}  {g}-M{0} app.hpp"},
-                {".{y}r{0}{r}w{0}{d}-{0}{y}r{0}{d}--{0}{y}r{0}{d}--{0}  {G}3.4k{0} {y}ayush{0} {d}19 Nov 07:38{0}  {g}N-{0} demo.hpp"},
+                {"{4}{k}{B} \uF31B {0}{4}{k}~/src/hand {9}{b}\uE0B0{0} {m}\uE0A0 main{0} {y}!2{0} {d}via{0} {b}\uE61D clang 23{0}", M::ok},
+                {"{g}{B}\u276F{0} eza -l --git --icons include/hand"},
+                {"{b}{B}d{0}{y}r{0}{r}w{0}{g}x{0}{y}r{0}{d}-{0}{g}x{0}{y}r{0}{d}-{0}{g}x{0}  {d}-{0}  {y}ayush{0} {d}19 Nov 07:12{0}  {d}--{0} {b}\uF07B {B}core{0}"},
+                {"{b}{B}d{0}{y}r{0}{r}w{0}{g}x{0}{y}r{0}{d}-{0}{g}x{0}{y}r{0}{d}-{0}{g}x{0}  {d}-{0}  {y}ayush{0} {d}19 Nov 07:40{0}  {g}-M{0} {b}\uF07B {B}widget{0}"},
+                {".{y}r{0}{r}w{0}{d}-{0}{y}r{0}{d}--{0}{y}r{0}{d}--{0}  {G}6.1k{0} {y}ayush{0} {d}19 Nov 07:41{0}  {g}-M{0} {m}\uF0FD{0} app.hpp"},
+                {".{y}r{0}{r}w{0}{d}-{0}{y}r{0}{d}--{0}{y}r{0}{d}--{0}  {G}3.4k{0} {y}ayush{0} {d}19 Nov 07:38{0}  {g}N-{0} {m}\uF0FD{0} demo.hpp"},
                 {""},
-                {"{b}{B}~/src/hand{0} {d}on{0} {m}\u2387 main{0} {d}[!2]{0}", M::ok},
+                {"{4}{k}{B} \uF31B {0}{4}{k}~/src/hand {9}{b}\uE0B0{0} {m}\uE0A0 main{0} {y}!2{0} {d}via{0} {b}\uE61D clang 23{0}", M::ok},
                 {"{g}{B}\u276F{0} cmake --build build -j"},
                 {"{d}[42/118]{0} Building CXX object {c}src/main.cpp.o{0}"},
                 {"{d}[43/118]{0} Building CXX object {c}tests/theme_test.cpp.o{0}"},
                 {"{Y}{B}warning:{0} unused variable {B}'gutter'{0} {d}[-Wunused-variable]{0}"},
                 {"{d}[44/118]{0} Linking CXX executable {g}{B}hand{0}"},
                 {""},
-                {"{b}{B}~/src/hand{0} {d}on{0} {m}\u2387 main{0} {d}took 41s{0}", M::prompt},
+                {"{4}{k}{B} \uF31B {0}{4}{k}~/src/hand {9}{b}\uE0B0{0} {m}\uE0A0 main{0} {y}took 41s{0}", M::prompt},
                 {"{g}{B}\u276F{0} hand --dev"},
             }, s, 24, 13);
         case Screen::editor:

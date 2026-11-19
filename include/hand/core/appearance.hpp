@@ -50,6 +50,7 @@ struct Appearance {
     Bounded<float, 9.0f, 22.0f>  font_size{13.0f};
     Bounded<float, 1.0f, 1.7f>   line_height{1.3f};
     Bounded<float, 0.7f, 1.3f>   ui_scale{1.0f};        ///< mayag Seed::type
+    bool                         nerd_icons = true;     ///< Nerd Font devicons (mayag IconSet::nerd)
 
     // shape
     Bounded<float, 0.0f, 1.6f>   roundness{0.0f};       ///< mayag Seed::roundness

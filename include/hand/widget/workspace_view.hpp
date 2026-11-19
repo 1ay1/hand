@@ -13,6 +13,7 @@
 #include "prelude.hpp"
 #include "../core/theme.hpp"
 #include "../core/workspace.hpp"
+#include "editor_view.hpp"
 
 #include <mayag/app/handlers.hpp>
 #include <mayag/widget/pane.hpp>
@@ -28,7 +29,8 @@ using namespace mayag::dsl;
 /// What one pane shows.
 struct PaneView {
     std::string               title;
-    const TermGrid*           grid = nullptr;
+    const TermGrid*           grid = nullptr;   ///< a terminal...
+    const Doc*                doc = nullptr;    ///< ...or a file being edited
     bool                      exited = false;
     int                       exit_code = 0;
 };
@@ -55,10 +57,19 @@ template <class Model>
     const PaneView pv = m.pane_view(id);
     const bool focused = t.focus == id && window_focused;
     const std::string key = pane_key(id);
+    const bool cursor_on = !a.cursor_blink || std::fmod(time, 1.1) < 0.65;
+    if (pv.doc != nullptr) {
+        // An editor pane: its own header strip replaces the pane title.
+        Node ed = editor_view<Model>(c, *pv.doc, a, {.pane = id, .focused = focused, .cursor_on = cursor_on});
+        mayag::dsl::PaneInfo info{.title = pv.title, .focused = focused, .zoomed = t.zoom == id, .show_title = false};
+        return (pane_frame(c, key, info, std::move(ed))
+                | selected(focused && many)
+                | on_press([id] { return mayag::Edit<Model>{[id](Model& mm) { mm.focus(id); }}; })).build();
+    }
     const TermTheme th = term_theme_of(a, c.theme);
     TermViewOptions o{
         .font_size = a.font_size.get(), .line_height = a.line_height.get(), .padding = a.padding.get(),
-        .focused = focused, .cursor_on = !a.cursor_blink || std::fmod(time, 1.1) < 0.65,
+        .focused = focused, .cursor_on = cursor_on,
         .dim_unfocused = many ? a.dim_unfocused.get() : 0.0f, .marks = a.marks, .opacity = a.opacity.get(),
         .family = mayag::custom_family(a.mono.v)};
     TermGrid g = pv.grid ? *pv.grid : TermGrid{};

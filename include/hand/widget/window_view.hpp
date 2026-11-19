@@ -15,6 +15,7 @@
 // message on the control itself.
 
 #include "prelude.hpp"
+#include "files_view.hpp"
 #include "workspace_view.hpp"
 
 #include <mayag/app/effects.hpp>
@@ -34,6 +35,7 @@ struct Minimize {};
 struct Close {};
 struct OpenPalette {};
 struct OpenSettings {};
+struct ToggleFiles {};
 }  // namespace on_window
 
 struct WindowViewProps {
@@ -66,9 +68,10 @@ template <class Msg>
 }  // namespace detail
 
 template <class Model>
-    requires HasWorkspace<Model>
+    requires HasWorkspace<Model> && HasFiles<Model>
 [[nodiscard]] Node window_view(const mayag::Ctx& c, const Model& m, const WindowViewProps& p) {
     const mayag::Theme& t = c.theme;
+    const bool nerd = t.icons == mayag::IconSet::nerd;
 
     // The tab strip; dragging its empty grab handle moves the window (on
     // DRAG, not press, so a double click there can still maximise), and
@@ -80,8 +83,10 @@ template <class Model>
                               return std::nullopt;
                           }));
 
-    auto actions = h(node(detail::chrome_button(c, "win.palette", "\u2315", "command palette", on_window::OpenPalette{})),
-                     node(detail::chrome_button(c, "win.settings", "\u2699", "appearance", on_window::OpenSettings{})),
+    auto actions = h(node(detail::chrome_button(c, "win.files", nerd ? (m.files_open ? "\uF07C" : "\uF07B") : "\u2630",
+                                                "files", on_window::ToggleFiles{})),
+                     node(detail::chrome_button(c, "win.palette", nerd ? "\uF120" : "\u2315", "command palette", on_window::OpenPalette{})),
+                     node(detail::chrome_button(c, "win.settings", nerd ? "\uF013" : "\u2699", "appearance", on_window::OpenSettings{})),
                      when(p.window_controls, node((box() | size(1, 16) | bg(var::border) | margin(0, t.spaced(6))).build())),
                      when(p.window_controls, node(detail::chrome_button(c, "win.min", "\u2013", "minimise", on_window::Minimize{}, false, 40.0f))),
                      when(p.window_controls, node(detail::chrome_button(c, "win.max", "\u25A1", "maximise", on_window::ToggleMaximize{}, false, 40.0f))),
@@ -91,8 +96,25 @@ template <class Model>
     auto top = h(node(std::move(tabs)) | grow() | min_size(0, 0), std::move(actions))
              | width(pct(100)) | height(34.0f) | align(mayag::Align::stretch);
 
+    // Body: the files panel (when open) | splitter | the panes.
+    using E = mayag::Edit<Model>;
+    Node panes = workspace_view(c, m, p.focused, p.time);
+    Node body = m.files_open
+        ? (h(node(files_view(c, m)),
+             node(split_handle(c, "files.split", mayag::Axis::horizontal))
+                 | on_drag([](const mayag::Dragged& d) {
+                       return E{[dx = d.delta.x](Model& mm) { mm.files_width = std::clamp(mm.files_width + dx, 160.0f, 560.0f); }};
+                   })
+                 | on_click([](const mayag::Clicked& k) -> std::optional<E> {
+                       if (k.count != 2) return std::nullopt;
+                       return E{[](Model& mm) { mm.files_width = 260.0f; }};
+                   }),
+             node(std::move(panes)) | grow() | height(pct(100)) | min_size(0, 0))
+           | width(pct(100)) | height(pct(100))).build()
+        : std::move(panes);
+
     return (v(std::move(top),
-              node(workspace_view(c, m, p.focused, p.time)) | grow() | width(pct(100)) | min_size(0, 0),
+              node(std::move(body)) | grow() | width(pct(100)) | min_size(0, 0),
               node(status_bar(c, "status", p.status_left, p.status_right)))
             | fill_both() | bg(var::background) | opacity(p.focused ? 1.0f : 0.94f) | transition()).build();
 }

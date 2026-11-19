@@ -84,8 +84,8 @@ int script(auto& rt) {
     ok(M().active == 1, "clicking a term_tabs tab selects it");
     rt.click(dsl::part_id("tabs", 0));
 
-    rt.press_key(Key::d, Mods{.shift = true, .ctrl = true});
-    ok(M().tab().panes().size() == 4, "ctrl-shift-d splits");
+    rt.press_key(Key::backslash, Mods{.shift = true, .ctrl = true});
+    ok(M().tab().panes().size() == 4, "ctrl-shift-\\ splits");
     rt.press_key(Key::w, Mods{.shift = true, .ctrl = true});
     ok(M().tab().panes().size() == 3, "ctrl-shift-w closes");
 
@@ -153,6 +153,44 @@ int script(auto& rt) {
     rt.click(dsl::node_id("win.max"));
     ok(rt.window().maximized(), "the maximise button maximises");
 
+    // ── the terminal's folder, and the editor ────────────────────────────
+    rt.click(dsl::node_id("win.max"));   // back to normal size
+    rt.click(dsl::node_id("pane.1.grid"));
+    rt.press_key(Key::e, Mods{.shift = true, .ctrl = true});
+    ok(M().files_open && M().files_focused, "ctrl-shift-e opens the folder panel, focused");
+    ok(!M().files.flat().empty(), "it lists the terminal's folder");
+    ok(cursor_over(center(dsl::part_id("files", 0))) == CursorShape::pointer, "pointer over a file row");
+    // walk to CMakeLists.txt with the keyboard, open it
+    {
+        const auto flat = M().files.flat();
+        int target = -1;
+        for (std::size_t i = 0; i < flat.size(); ++i) if (flat[i].rel == "CMakeLists.txt") target = static_cast<int>(i);
+        ok(target >= 0, "CMakeLists.txt is in the panel");
+        for (int i = M().files.selected; i < target; ++i) rt.press_key(Key::down);
+        rt.press_key(Key::enter);
+    }
+    ok(M().editing(), "enter opens it in an editor pane beside the terminal");
+    ok(M().tab().panes().size() == 4, "as a new split, the terminals untouched");
+    rt.type("# hello\n");
+    ok(M().pane(M().tab().focus)->doc->ed.dirty(), "typing edits the buffer");
+    ok(M().pane(M().tab().focus)->doc->ed.text().starts_with("# hello\n"), "at the caret");
+    rt.press_key(Key::z, Mods{.ctrl = true});
+    rt.press_key(Key::z, Mods{.ctrl = true});
+    ok(!M().pane(M().tab().focus)->doc->ed.dirty(), "ctrl-z undoes back to the saved text");
+    rt.press_key(Key::d, Mods{.ctrl = true});
+    rt.press_key(Key::d, Mods{.ctrl = true});
+    ok(M().pane(M().tab().focus)->doc->ed.sels.size() >= 2, "ctrl-d adds cursors at the next occurrence");
+    rt.press_key(Key::escape);
+    ok(M().pane(M().tab().focus)->doc->ed.sels.size() == 1, "esc drops back to one cursor");
+    ok(cursor_over(center(dsl::node_id("edit." + std::to_string(M().tab().focus.v)))) == CursorShape::text,
+       "I-beam over the editor");
+    rt.press_key(Key::f, Mods{.shift = true, .ctrl = true});
+    ok(M().palette_open && M().pick == hand::App::Pick::files, "ctrl-shift-f finds files");
+    rt.type("readme");
+    rt.press_key(Key::enter);
+    ok(M().editing() && M().pane(M().tab().focus)->title == "README.md", "the finder opens the best match");
+    ok(M().tab().panes().size() == 4, "into the same editor pane (preview replaces)");
+
     std::printf("%s\n", fails == 0 ? "PASS" : "FAIL");
     return fails;
 }
@@ -200,6 +238,18 @@ int main(int argc, char** argv) {
                 if (shot == "glass") rt.send(App::Msg{E{[](App::Model& m) { m.look.chrome = hand::Chrome::glass; m.look.scheme = hand::SchemeId::dusk; m.look.roundness = 1.0f; }}});
                 if (shot == "paper") rt.send(App::Msg{E{[](App::Model& m) { m.look.scheme = hand::SchemeId::paper; m.look.chrome = hand::Chrome::standard; m.grids.clear(); }}});
                 if (shot == "phosphor") rt.send(App::Msg{E{[](App::Model& m) { m.look.scheme = hand::SchemeId::phosphor; m.grids.clear(); }}});
+                if (shot == "nerd" || shot == "nerd-glacier") {
+                    if (shot == "nerd-glacier") rt.send(App::Msg{E{[](App::Model& m) { m.look.scheme = hand::SchemeId::glacier; }}});
+                    rt.send(App::Msg{hand::on_window::ToggleFiles{}});
+                    rt.send(App::Msg{E{[](App::Model& m) {
+                        m.files.toggle("include");
+                        m.files.toggle("include/hand");
+                        m.files.toggle("include/hand/core");
+                        m.open_file("include/hand/core/theme.hpp", true);
+                        if (hand::Doc* d = m.focused_doc()) { d->ed.set_cursor({51, 12}); d->ed.reveal(); }
+                        m.files.selected = 6;
+                    }}});
+                }
                 rt.window().drive_frames(true);
                 for (int i = 0; i < 90; ++i) rt.tick();
                 rt.window().drive_frames(false);

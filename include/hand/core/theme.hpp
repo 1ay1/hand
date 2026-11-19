@@ -74,6 +74,7 @@ namespace hand {
     t.text_disabled  = mayag::mix(hex(s.ink), paper, 0.58f);
     t.border         = mayag::mix(paper, hex(s.ink), dark ? 0.12f : 0.14f);
     t.border_strong  = mayag::mix(paper, hex(s.ink), dark ? 0.24f : 0.28f);
+    t.icons = a.nerd_icons ? mayag::IconSet::nerd : mayag::IconSet::letters;
     t.success = hex(s.ansi[2]); t.warning = hex(s.ansi[3]); t.danger = hex(s.ansi[1]); t.info = hex(s.ansi[4]);
     return t;
 }

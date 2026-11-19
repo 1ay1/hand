@@ -64,6 +64,7 @@ inline constexpr auto table = std::make_tuple(
     std::pair{Field<&Appearance::font_size>{},     Row{"font.size", "terminal text", "pt", Section::type}},
     std::pair{Field<&Appearance::line_height>{},   Row{"font.line_height", "row pitch, a multiple of the size", "\u00D7", Section::type}},
     std::pair{Field<&Appearance::ui_scale>{},      Row{"ui.scale", "chrome text size", "\u00D7", Section::type}},
+    std::pair{Field<&Appearance::nerd_icons>{},    Row{"ui.nerd_icons", "devicons from a Nerd Font for files and chrome", "", Section::type}},
     std::pair{Field<&Appearance::roundness>{},     Row{"ui.roundness", "0 = square corners everywhere", "\u00D7", Section::layout}},
     std::pair{Field<&Appearance::density>{},       Row{"ui.density", "spacing throughout the chrome", "\u00D7", Section::layout}},
     std::pair{Field<&Appearance::padding>{},       Row{"pane.padding", "inside each pane", "px", Section::layout}},
