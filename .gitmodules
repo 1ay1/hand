@@ -1,0 +1,6 @@
+[submodule "external/toe"]
+	path = external/toe
+	url = https://github.com/1ay1/toe
+[submodule "external/mayag"]
+	path = external/mayag
+	url = https://github.com/1ay1/mayag
