@@ -41,7 +41,7 @@ template <class Model>
 concept HasWorkspace = requires(const Model& m, PaneId p) {
     { m.tab() } -> std::convertible_to<const Tab&>;
     { m.pane_view(p) } -> std::convertible_to<PaneView>;
-    { m.look } -> std::convertible_to<const Appearance&>;
+    { m.shown() } -> std::convertible_to<Appearance>;
 };
 
 namespace detail {
@@ -52,12 +52,13 @@ namespace detail {
 template <class Model>
 [[nodiscard]] Node leaf(const mayag::Ctx& c, const Model& m, PaneId id, bool many, bool window_focused,
                         double time) {
-    const Appearance& a = m.look;
+    const Appearance a = m.shown();
     const Tab& t = m.tab();
     const PaneView pv = m.pane_view(id);
     const bool focused = t.focus == id && window_focused;
     const std::string key = pane_key(id);
-    const bool cursor_on = !a.cursor_blink || std::fmod(time, 1.1) < 0.65;
+    const double phase = static_cast<double>(a.blink_rate.get());
+    const bool cursor_on = !a.cursor_blink || std::fmod(time, 2.0 * phase) < phase;
     if (pv.doc != nullptr) {
         // An editor pane: its own header strip replaces the pane title.
         Node ed = editor_view<Model>(c, *pv.doc, a, {.pane = id, .focused = focused, .cursor_on = cursor_on});

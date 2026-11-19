@@ -43,6 +43,7 @@ struct WindowViewProps {
     int                     active = 0;
     std::vector<StatusItem> status_left, status_right;
     bool                    window_controls = true;   ///< client-side decorations
+    bool                    show_status = true;
     bool                    focused = true;
     double                  time = 0.0;
 };
@@ -53,13 +54,14 @@ namespace detail {
 /// `danger` washes red on hover (the close button).
 template <class Msg>
 [[nodiscard]] Node chrome_button(const mayag::Ctx& c, std::string_view id, std::string_view glyph, std::string_view what,
-                                 Msg msg, bool danger = false, float w = 34.0f) {
+                                 Msg msg, bool danger = false, float w = 0.0f) {
     const mayag::Theme& t = c.theme;
     const auto nid = node_id(id);
     const bool hov = c.hovered(nid), prs = c.pressed(nid);
-    return (h(text_owned(std::string{glyph}) | font(t.font_size * 1.05f)
+    const float H = t.bar_height;
+    return (h(text_owned(std::string{glyph}) | font(t.font_size * t.chrome_type * 1.1f)
               | fg(hov ? (danger ? t.on_danger : t.text_primary) : t.text_secondary))
-            | size(w, 34.0f) | center
+            | size(w > 0.0f ? w : H, H) | center
             | bg(hov ? (danger ? t.danger : (prs ? t.surface_raised : t.tint(t.accent, 0.10f))) : t.surface.fade(0.0f))
             | transition() | pointer_cursor | role(mayag::a11y::Role::button) | label(what) | id_of(id)
             | on_click([m = std::move(msg)] { return m; })).build();
@@ -88,13 +90,14 @@ template <class Model>
                      node(detail::chrome_button(c, "win.palette", nerd ? "\uF120" : "\u2315", "command palette", on_window::OpenPalette{})),
                      node(detail::chrome_button(c, "win.settings", nerd ? "\uF013" : "\u2699", "appearance", on_window::OpenSettings{})),
                      when(p.window_controls, node((box() | size(1, 16) | bg(var::border) | margin(0, t.spaced(6))).build())),
-                     when(p.window_controls, node(detail::chrome_button(c, "win.min", "\u2013", "minimise", on_window::Minimize{}, false, 40.0f))),
-                     when(p.window_controls, node(detail::chrome_button(c, "win.max", "\u25A1", "maximise", on_window::ToggleMaximize{}, false, 40.0f))),
-                     when(p.window_controls, node(detail::chrome_button(c, "win.close", "\u2715", "close window", on_window::Close{}, true, 44.0f))))
-                 | align(mayag::Align::center) | height(34.0f) | with_look(sheet_of(t).strip, t);
+                     when(p.window_controls, node(detail::chrome_button(c, "win.min", nerd ? "\uF2D1" : "\u2013", "minimise", on_window::Minimize{}, false, t.bar_height * 1.25f))),
+                     when(p.window_controls, node(detail::chrome_button(c, "win.max", nerd ? "\uF2D0" : "\u25A1", "maximise", on_window::ToggleMaximize{}, false, t.bar_height * 1.25f))),
+                     when(p.window_controls, node(detail::chrome_button(c, "win.close", nerd ? "\uF00D" : "\u2715", "close window", on_window::Close{}, true, t.bar_height * 1.35f))))
+                 | align(mayag::Align::center) | height(t.bar_height) | with_look(sheet_of(t).strip, t)
+                 | inner_shadow(0.0f, t.border, {0.0f, -1.0f});
 
     auto top = h(node(std::move(tabs)) | grow() | min_size(0, 0), std::move(actions))
-             | width(pct(100)) | height(34.0f) | align(mayag::Align::stretch);
+             | width(pct(100)) | height(t.bar_height) | align(mayag::Align::stretch);
 
     // Body: the files panel (when open) | splitter | the panes.
     using E = mayag::Edit<Model>;
@@ -115,7 +118,7 @@ template <class Model>
 
     return (v(std::move(top),
               node(std::move(body)) | grow() | width(pct(100)) | min_size(0, 0),
-              node(status_bar(c, "status", p.status_left, p.status_right)))
+              when(p.show_status, node(status_bar(c, "status", p.status_left, p.status_right))))
             | fill_both() | bg(var::background) | opacity(p.focused ? 1.0f : 0.94f) | transition()).build();
 }
 

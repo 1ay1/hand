@@ -29,7 +29,7 @@ in the terminal (or, in an editor pane, to the editor).
 | `ctrl+shift+e` | folder panel |
 | `ctrl+shift+f` | find a file in this folder |
 | `ctrl+shift+p` | command palette |
-| `ctrl+,` | appearance |
+| `ctrl+,` | appearance: every knob of the look, and 920 presets |
 | `ctrl+s` (editor) | save |
 
 ## Build
@@ -43,3 +43,18 @@ cmake --build build
 ```
 
 Built on [mayag](external/mayag) (UI) and, next, [toe](external/toe) (the VT engine).
+
+## Appearance
+
+`ctrl+,` opens the appearance panel. Everything about the look and feel is a
+setting there, generated from one typed table (`include/hand/core/settings.hpp`):
+colour (polarity, accent source / hue / chroma / ANSI slot, chrome shade and
+tint, borders, opacity), type (face, size, line height, chrome scale, nerd
+icons), chrome (mayag look, roundness, density, depth, line weight, bar
+heights), tabs (five shapes, width, numbers, close button), panes, terminal,
+editor and motion. The window morphs live behind the panel.
+
+**Presets**: hand's own seven plus all 913 of
+[iTerm2-Color-Schemes](https://github.com/mbadolato/iTerm2-Color-Schemes)
+(the source maya uses), searchable and filterable; hover a card to preview it on
+the whole window, click to keep it. Regenerate with `tools/gen_schemes.py`.

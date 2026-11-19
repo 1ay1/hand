@@ -58,7 +58,7 @@ template <class Model>
                     node(small_btn("files.refresh", nerd ? "\uF021" : "\u27F3", "refresh", E{[](Model& mm) { mm.files.refresh(); }})),
                     node(small_btn("files.close", "\u2715", "close", E{[](Model& mm) { mm.files_open = false; }})))
                 | gap(t.spaced(6)) | align(mayag::Align::center) | pad(0, t.spaced(8), 0, t.spaced(12)) | height(34)
-                | width(pct(100)) | with_look(sheet_of(t).strip, t);
+                | width(pct(100)) | with_look(sheet_of(t).strip, t) | inner_shadow(0.0f, t.border, {0.0f, -1.0f});
 
     // the tree: mayag file_tree; a click on row i toggles a folder or opens
     // a file (single = preview into the editor pane, double = keep)

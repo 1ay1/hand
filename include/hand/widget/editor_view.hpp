@@ -40,7 +40,7 @@ struct Doc {
 /// in `dusk` is coloured like `dusk`'s terminal is.
 [[nodiscard]] inline CodeTheme code_theme_of(const Appearance& a, const mayag::Theme& t) {
     using mayag::editor::Tok;
-    const Scheme& s = scheme(a.scheme);
+    const Scheme s = effective_scheme(a);
     CodeTheme c = CodeTheme::dark(t);
     const auto set = [&](Tok k, std::uint32_t v) { c.tok[static_cast<std::size_t>(k)] = hex(v); };
     set(Tok::text, s.ink);       set(Tok::keyword, s.ansi[5]);  set(Tok::type, s.ansi[11]);
@@ -107,11 +107,12 @@ template <class Model>
                 | bg(p.focused ? t.surface : t.surface.fade(0.5f)) | border(t.stroke(1), t.border.fade(0.6f));
 
     CodeViewOptions o{.font_size = a.font_size.get(), .line_height = std::max(1.3f, a.line_height.get()),
-                      .focused = p.focused, .cursor_on = p.cursor_on,
-                      .cursor_style = a.cursor == CursorStyle::block ? 1 : a.cursor == CursorStyle::underline ? 2 : 0,
-                      .rulers = {100}};
+                      .focused = p.focused, .line_numbers = a.line_numbers, .relative_numbers = a.relative_numbers,
+                      .indent_guides = a.indent_guides, .current_line = a.current_line, .cursor_on = p.cursor_on,
+                      .cursor_style = a.cursor == CursorStyle::block ? 1 : a.cursor == CursorStyle::underline ? 2 : 0};
+    if (a.ruler.get() > 0) o.rulers = {a.ruler.get()};
     o.family = mayag::custom_family(a.mono.v);
-    o.ligatures = true;
+    o.ligatures = a.ligatures;
     Node body = code_view(c, id, d.ed, code_theme_of(a, t), o);
 
     // Pointer: press places / adds (alt) / extends (shift) carets, drag

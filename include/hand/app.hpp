@@ -6,7 +6,7 @@
 //
 //   window_view     term_tabs (+ grab handle), chrome buttons, status_bar
 //     workspace_view  pane_split / pane_frame / terminal_view
-//   overlays        picker (palette), settings_view, toasts, resize_hud
+//   overlays        picker (palette), appearance_view, toasts, resize_hud
 //
 // The look is mayag's theme system: theme(model) = looks::<chrome>(seed of
 // the Appearance), so a settings change morphs the whole window, and every
@@ -19,7 +19,7 @@
 #include "core/files.hpp"
 #include "core/workspace.hpp"
 #include "demo.hpp"
-#include "widget/settings_view.hpp"
+#include "widget/appearance_view.hpp"
 #include "widget/window_view.hpp"
 #include "widget/workspace_view.hpp"
 
@@ -70,7 +70,20 @@ struct App {
         std::string              clipboard;
 
         bool                     settings_open = false;
-        settings::Section        section = settings::Section::colour;
+        settings::Section        section = settings::Section::presets;
+        mayag::TextEditState     preset_query;
+        int                      preset_filter = 0;
+        mayag::ScrollState       preset_scroll{};
+        std::optional<SchemeId>  preview_scheme;      ///< a hovered preset, shown on the window
+        bool                     preset_search_focused = false;
+
+        /// The Appearance the window SHOWS: the user's, with a hovered
+        /// preset swapped in while the pointer rests on it.
+        [[nodiscard]] Appearance shown() const {
+            Appearance a = look;
+            if (preview_scheme) a.scheme = *preview_scheme;
+            return a;
+        }
 
         bool                     palette_open = false;
         Pick                     pick = Pick::commands;
@@ -110,14 +123,16 @@ struct App {
         /// recolours the panes like a palette change would. A std::map: its
         /// nodes never move, so the pointers PaneView hands out stay valid
         /// for the whole frame.
-        mutable std::map<std::pair<std::uint32_t, SchemeId>, mayag::dsl::TermGrid> grids;
+        mutable std::map<std::pair<std::uint32_t, std::uint16_t>, mayag::dsl::TermGrid> grids;
         [[nodiscard]] PaneView pane_view(PaneId id) const {
             const Pane* p = pane(id);
             if (p == nullptr) return {};
             if (p->doc) return {p->title, nullptr, &*p->doc, false, 0};
-            auto key = std::pair{id.v, look.scheme};
+            const Appearance a = shown();
+            auto key = std::pair{id.v, a.scheme.v};
             auto it = grids.find(key);
-            if (it == grids.end()) it = grids.emplace(key, demo::screen(p->screen, scheme(look.scheme))).first;
+            if (it == grids.end()) it = grids.emplace(key, demo::screen(p->screen, effective_scheme(a))).first;
+            if (grids.size() > 64) { grids.clear(); it = grids.emplace(key, demo::screen(p->screen, effective_scheme(a))).first; }
             return {p->title, &it->second, nullptr, p->state == PaneState::failed, p->exit_code};
         }
         void focus(PaneId id) {
@@ -208,6 +223,7 @@ struct App {
             {{"previous pane", "pane", "ctrl shift ["}, Cycle{-1}},
             {{"new tab", "tab", "ctrl shift t"}, NewTab{}},
             {{"appearance", "settings", "ctrl ,"}, ToggleSettings{}},
+            {{"appearance: presets", "settings", ""}, E{[](Model& m) { m.settings_open = true; m.section = settings::Section::presets; }}},
             {{"toggle cursor blink", "settings", ""}, E{[](Model& m) { m.look.cursor_blink = !m.look.cursor_blink; }}},
             {{"toggle pane titles", "settings", ""}, E{[](Model& m) { m.look.pane_titles = !m.look.pane_titles; }}},
             {{"bigger text", "settings", "ctrl ="}, E{[](Model& m) { m.look.font_size = m.look.font_size.get() + 1.0f; }}},
@@ -216,9 +232,15 @@ struct App {
             {{"maximise window", "window", ""}, on_window::ToggleMaximize{}},
             {{"quit", "window", "ctrl q"}, Quit{}},
         };
-        for (std::size_t s = 0; s < scheme_count; ++s)
-            c.push_back({{"scheme: " + std::string{schemes[s].name}, "colour", ""},
-                         E{[s](Model& m) { m.look.scheme = static_cast<SchemeId>(s); }}});
+        for (std::size_t s = 0; s < scheme_count; ++s) {
+            const SchemeId id{static_cast<std::uint16_t>(s)};
+            const Scheme sc = scheme(id);
+            c.push_back({{"scheme: " + std::string{sc.name}, sc.mode == mayag::Mode::light ? "light" : "dark", ""},
+                         E{[id](Model& m) { m.look.scheme = id; }}});
+        }
+        for (std::size_t k = 0; k < static_cast<std::size_t>(Tabs::count_); ++k)
+            c.push_back({{"tabs: " + std::string{labels<Tabs>[k]}, "look", ""},
+                         E{[k](Model& m) { m.look.tabs = static_cast<Tabs>(k); }}});
         for (std::size_t k = 0; k < static_cast<std::size_t>(Chrome::count_); ++k)
             c.push_back({{"chrome: " + std::string{labels<Chrome>[k]}, "colour", ""},
                          E{[k](Model& m) { m.look.chrome = static_cast<Chrome>(k); }}});
@@ -277,7 +299,7 @@ struct App {
             }
         return {};
     }
-    static Cmd update(Model& m, Blink) { m.time += 0.55; return {}; }
+    static Cmd update(Model& m, Blink) { m.time += static_cast<double>(m.look.blink_rate.get()); return {}; }
     static Cmd update(Model& m, SplitPane s) {
         const PaneId f = m.tab().focus;
         const Pane* src = m.pane(f);
@@ -404,6 +426,8 @@ struct App {
     }
     static Cmd update(Model& m, ToggleSettings) {
         m.settings_open = !m.settings_open;
+        m.preview_scheme.reset();
+        m.preset_search_focused = false;
         m.palette_open = false;
         return {};
     }
@@ -536,6 +560,8 @@ struct App {
     }
     static std::optional<Msg> on(const Model& m, const mayag::TextEvent& t) {
         if (m.palette_open) return PaletteText{t.text};
+        if (m.settings_open && m.preset_search_focused)
+            return mayag::Edit<Model>{[s = t.text](Model& mm) { mm.preset_query.insert(s); mm.preset_scroll = {}; }};
         if (m.settings_open || m.files_focused) return std::nullopt;
         if (m.editing()) return EditText{t.text};
         return std::nullopt;
@@ -553,8 +579,32 @@ struct App {
         if (k.mods.primary() && !k.mods.shift && k.key == Key::comma) return ToggleSettings{};
         if (chord && k.key == Key::q) return Quit{};
         if (m.palette_open) return PaletteKey{k.key, k.mods};
-        if (m.settings_open && k.key == Key::escape) return ToggleSettings{};
-        if (m.settings_open) return std::nullopt;
+        if (m.settings_open && m.preset_search_focused && k.key != Key::escape) {
+            return mayag::Edit<Model>{[k](Model& mm) {
+                if (mm.preset_query.handle_key(k.key, k.mods)) mm.preset_scroll = {};
+            }};
+        }
+        if (m.settings_open && k.key == Key::escape) {
+            if (m.preset_search_focused) return mayag::Edit<Model>{[](Model& mm) { mm.preset_search_focused = false; }};
+            return ToggleSettings{};
+        }
+        if (m.settings_open) {
+            // keyboard through the presets: arrows step, enter keeps
+            if (m.section == settings::Section::presets && (k.key == Key::left || k.key == Key::right || k.key == Key::up || k.key == Key::down)) {
+                const int d = k.key == Key::left || k.key == Key::up ? -1 : 1;
+                return mayag::Edit<Model>{[d](Model& mm) {
+                    const auto ms = preset_matches(mm.preset_query.text, mm.preset_filter);
+                    if (ms.empty()) return;
+                    auto it = std::ranges::find(ms, mm.look.scheme);
+                    long i = it == ms.end() ? 0 : static_cast<long>(it - ms.begin()) + d;
+                    i = std::clamp(i, 0L, static_cast<long>(ms.size()) - 1);
+                    mm.look.scheme = ms[static_cast<std::size_t>(i)];
+                }};
+            }
+            if (k.key == Key::slash && m.section == settings::Section::presets)
+                return mayag::Edit<Model>{[](Model& mm) { mm.preset_search_focused = true; }};
+            return std::nullopt;
+        }
         if (m.files_open && m.files_focused && !chord) return FilesKey{k.key};
         if (m.editing() && !chord) {
             // An editor speaks the editor's language: ctrl-s saves, ctrl-p
@@ -592,14 +642,15 @@ struct App {
 
     static Sub subscribe(const Model& m) {
         std::vector<Sub> s;
-        if (m.look.cursor_blink && m.window_focused) s.push_back(Sub::every(std::chrono::milliseconds(550), Msg{Blink{}}));
+        if (m.look.cursor_blink && m.window_focused)
+            s.push_back(Sub::every(std::chrono::milliseconds(static_cast<int>(m.look.blink_rate.get() * 1000.0f)), Msg{Blink{}}));
         bool live = m.time - m.resized_at < 0.9 || !m.toasts.empty();
         for (const auto& p : m.panes) live = live || p.state == PaneState::running;
         if (live) s.push_back(Sub::on_frame([](double dt) -> Msg { return Tick{dt}; }));
         return Sub::batch(std::move(s));
     }
 
-    static mayag::Theme theme(const Model& m) { return theme_of(m.look); }
+    static mayag::Theme theme(const Model& m) { return theme_of(m.shown()); }
 
     static mayag::Node view(const Model& m);
 };
@@ -610,7 +661,8 @@ inline mayag::Node App::view(const Model& m) {
     const Ctx& c = ctx();
 
     // ── what the chrome shows ────────────────────────────────────────────
-    WindowViewProps w{.active = static_cast<int>(m.active), .focused = m.window_focused, .time = m.time};
+    WindowViewProps w{.active = static_cast<int>(m.active), .window_controls = m.look.window_buttons,
+                      .show_status = m.look.status_bar, .focused = m.window_focused, .time = m.time};
     for (const auto& tab : m.tabs) {
         TermTab tt;
         const Pane* f = m.pane(tab.focus);
@@ -640,7 +692,7 @@ inline mayag::Node App::view(const Model& m) {
         if (f->doc && f->doc->ed.dirty()) w.status_left.push_back({.text = "modified", .tone = T::warning, .interactive = false});
         const std::string mode = f->doc ? "EDIT" : "TERM";
         w.status_right = {
-            {.text = std::string{scheme(m.look.scheme).name} + " \u00B7 " +
+            {.text = std::string{scheme(m.shown().scheme).name} + " \u00B7 " +
                      std::string{labels<Chrome>[static_cast<std::size_t>(m.look.chrome)]}, .icon = nerd ? "\uF53F" : "\u25D0"},
             {.text = f->doc ? std::string{f->doc->ed.language ? f->doc->ed.language->name : "text"} : f->process,
              .tone = T::dim, .interactive = false},
@@ -665,7 +717,9 @@ inline mayag::Node App::view(const Model& m) {
                            .footer = {{"\u2191\u2193", "move"}, {"\u21B5", files ? "open" : "run"}, {"esc", "close"}}});
     }
     if (m.settings_open)
-        c.overlay(Overlay{.content = settings_view(c, m, {.section = m.section, .faces = m.faces}),
+        c.overlay(Overlay{.content = appearance_view(c, m, {.faces = m.faces,
+                                                             .width = std::min(1080.0f, c.size.x - 48.0f),
+                                                             .height = std::min(720.0f, c.size.y - 48.0f)}),
                           .id = part_id("settings", part_menu), .placement = Placement::centered,
                           .dismiss = mayag::Dismiss::modal, .layer = 15, .scrim = 0.4f});
     toasts(c, "toasts", m.toasts, c.size);

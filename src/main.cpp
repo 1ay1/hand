@@ -91,9 +91,9 @@ int script(auto& rt) {
 
     rt.press_key(Key::p, Mods{.shift = true, .ctrl = true});
     ok(M().palette_open, "ctrl-shift-p opens the picker");
-    rt.type("glac");
+    rt.type("scheme: glacier");
     rt.press_key(Key::enter);
-    ok(M().look.scheme == hand::SchemeId::glacier && !M().palette_open, "enter runs the best match");
+    ok(M().look.scheme == hand::schemes_by_name::glacier && !M().palette_open, "enter runs the best match");
 
     rt.press_key(Key::comma, Mods{.ctrl = true});
     ok(M().settings_open, "ctrl-, opens appearance");
@@ -103,11 +103,48 @@ int script(auto& rt) {
     rt.click(dsl::part_id("cursor.style", 1));
     ok(M().look.cursor == hand::CursorStyle::beam, "the mayag segmented edits cursor.style inline");
     ok(hand::settings::modified_count(M().look) == 3, "three settings modified");
-    const bool found = rt.click_text("reset");
+    const bool found = rt.click_text("reset all");
     ok(found, "the reset button is on screen");
     ok(hand::settings::modified_count(M().look) == 0, "reset restores defaults");
     rt.press_key(Key::escape);
     ok(!M().settings_open, "esc closes");
+
+    // ── the appearance panel: presets ───────────────────────────────────────────────
+    ok(hand::scheme_count >= 900, "over 900 presets compiled in");
+    rt.press_key(Key::comma, Mods{.ctrl = true});
+    rt.send(App::Msg{mayag::Edit<App::Model>{[](App::Model& m) { m.section = hand::settings::Section::presets; }}});
+    rt.click(dsl::node_id("preset.search"));
+    ok(M().preset_search_focused, "clicking the search field focuses it");
+    rt.type("dracula");
+    {
+        const auto ms = hand::preset_matches(M().preset_query.text, M().preset_filter);
+        ok(!ms.empty() && hand::scheme(ms.front()).name.find("Dracula") != std::string_view::npos,
+           "typing filters the gallery (dracula)");
+        const auto card = dsl::part_id("preset", ms.front().v);
+        rt.window().move_to(rt.center_of(card));
+        rt.tick();
+        ok(M().preview_scheme == ms.front() && M().look.scheme != ms.front(), "hovering a preset previews it, without keeping it");
+        rt.click(card);
+        ok(M().look.scheme == ms.front(), "clicking a preset keeps it");
+    }
+    rt.press_key(Key::escape);   // leave the search field
+    rt.click(dsl::part_id("preset.filter", 2));
+    ok(M().preset_filter == 2, "the light filter");
+    {
+        const auto ms = hand::preset_matches("", 2);
+        bool all_light = !ms.empty();
+        for (auto id : ms) all_light = all_light && hand::scheme(id).mode == mayag::Mode::light;
+        ok(all_light, "shows only light presets");
+    }
+    rt.click(dsl::part_id("appearance.nav", static_cast<std::size_t>(hand::settings::Section::tabs)));
+    ok(M().section == hand::settings::Section::tabs, "the sidebar switches section");
+    rt.click(dsl::part_id("tabs.style", 3));
+    ok(M().look.tabs == hand::Tabs::pill, "tabs.style edits the tab shape");
+    rt.click_text("reset section");
+    ok(M().look.tabs == hand::Appearance{}.tabs, "reset section restores the tab defaults");
+    rt.click_text("reset all");
+    rt.press_key(Key::escape);
+    ok(!M().settings_open && !M().preview_scheme, "closing leaves no preview behind");
 
     // ── the pointer's shape follows what is under it ─────────────────────
     const auto cursor_over = [&](Vec2 p) {
@@ -235,11 +272,29 @@ int main(int argc, char** argv) {
                     rt.send(App::Msg{App::ToggleSettings{}});
                     rt.send(App::Msg{E{[](App::Model& m) { m.section = hand::settings::Section::type; }}});
                 }
-                if (shot == "glass") rt.send(App::Msg{E{[](App::Model& m) { m.look.chrome = hand::Chrome::glass; m.look.scheme = hand::SchemeId::dusk; m.look.roundness = 1.0f; }}});
-                if (shot == "paper") rt.send(App::Msg{E{[](App::Model& m) { m.look.scheme = hand::SchemeId::paper; m.look.chrome = hand::Chrome::standard; m.grids.clear(); }}});
-                if (shot == "phosphor") rt.send(App::Msg{E{[](App::Model& m) { m.look.scheme = hand::SchemeId::phosphor; m.grids.clear(); }}});
+                if (shot == "glass") rt.send(App::Msg{E{[](App::Model& m) { m.look.chrome = hand::Chrome::glass; m.look.scheme = hand::schemes_by_name::dusk; m.look.roundness = 1.0f; }}});
+                if (shot == "paper") rt.send(App::Msg{E{[](App::Model& m) { m.look.scheme = hand::schemes_by_name::paper; m.look.chrome = hand::Chrome::standard; m.grids.clear(); }}});
+                if (shot == "phosphor") rt.send(App::Msg{E{[](App::Model& m) { m.look.scheme = hand::schemes_by_name::phosphor; m.grids.clear(); }}});
+                for (std::size_t k = 0; k < static_cast<std::size_t>(hand::Tabs::count_); ++k)
+                    if (shot == "tabs-" + std::string{hand::labels<hand::Tabs>[k]})
+                        rt.send(App::Msg{E{[k](App::Model& m) { m.look.tabs = static_cast<hand::Tabs>(k); m.look.nerd_icons = true; }}});
+                if (shot == "presets" || shot == "presets-search") {
+                    rt.send(App::Msg{App::ToggleSettings{}});
+                    rt.send(App::Msg{E{[](App::Model& m) { m.section = hand::settings::Section::presets; }}});
+                    if (shot == "presets-search") rt.send(App::Msg{E{[](App::Model& m) { m.preset_query.set("gruvbox"); }}});
+                }
+                if (shot == "chrome") {
+                    rt.send(App::Msg{App::ToggleSettings{}});
+                    rt.send(App::Msg{E{[](App::Model& m) { m.section = hand::settings::Section::chrome; }}});
+                }
+                if (shot == "catppuccin") {
+                    rt.send(App::Msg{E{[](App::Model& m) {
+                        if (auto id = hand::find_scheme("Catppuccin Mocha")) m.look.scheme = *id;
+                        m.look.tabs = hand::Tabs::pill; m.look.roundness = 1.0f; m.look.chrome = hand::Chrome::standard;
+                    }}});
+                }
                 if (shot == "nerd" || shot == "nerd-glacier") {
-                    if (shot == "nerd-glacier") rt.send(App::Msg{E{[](App::Model& m) { m.look.scheme = hand::SchemeId::glacier; }}});
+                    if (shot == "nerd-glacier") rt.send(App::Msg{E{[](App::Model& m) { m.look.scheme = hand::schemes_by_name::glacier; }}});
                     rt.send(App::Msg{hand::on_window::ToggleFiles{}});
                     rt.send(App::Msg{E{[](App::Model& m) {
                         m.files.toggle("include");
