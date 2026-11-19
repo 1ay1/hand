@@ -121,13 +121,13 @@ template <class Model>
     using E = mayag::Edit<Model>;
     auto surface = node(std::move(body))
         | on_press([pane](const mayag::Pressed& e) {
-              return E{[pane, local = e.local](Model& m) {
+              // count 1 caret / alt adds a caret / shift extends; 2 word; 3 line --
+              // decided AT the press, so the drag that follows goes by the
+              // same unit (mayag EditorState::press_at / drag_to).
+              return E{[pane, local = e.local, n = e.count, mods = e.mods](Model& m) {
                   m.focus(pane);
-                  if (Doc* doc = m.doc(pane)) {
-                      const auto at = code_view_hit(doc->ed, local);
-                      if (m.press_mods.alt) doc->ed.add_cursor_at(at);
-                      else doc->ed.set_cursor(at, m.press_mods.shift);
-                  }
+                  if (Doc* doc = m.doc(pane))
+                      doc->ed.press_at(code_view_hit(doc->ed, local), n, mods.shift, mods.alt);
               }};
           })
         | on_drag([pane](const mayag::Dragged& e) {
@@ -135,14 +135,14 @@ template <class Model>
                   if (Doc* doc = m.doc(pane)) doc->ed.drag_to(code_view_hit(doc->ed, local));
               }};
           })
-        | on_click([pane](const mayag::Clicked& e) -> std::optional<E> {
-              if (e.count < 2) return std::nullopt;
-              return E{[pane, local = e.local, n = e.count](Model& m) {
-                  if (Doc* doc = m.doc(pane)) {
-                      const auto at = code_view_hit(doc->ed, local);
-                      if (n == 2) doc->ed.select_word_at(at); else doc->ed.select_line_at(at.line);
-                  }
-              }};
+        | on_click([pane, lines = d.ed.line_count()](const mayag::Clicked& e) -> std::optional<E> {
+              // A fold chevron in the gutter (code_view names them
+              // part_fold_base + line): the click bubbled here from it.
+              const std::string base = "edit." + std::to_string(pane.v);
+              for (int l = 0; l < lines; ++l)
+                  if (e.node == part_id(base, part_fold_base + static_cast<std::size_t>(l)))
+                      return E{[pane, l](Model& m) { if (Doc* doc = m.doc(pane)) doc->ed.toggle_fold(l); }};
+              return std::nullopt;
           })
         | on_scroll([pane](const mayag::Scrolled& e) {
               return E{[pane, d = e.delta](Model& m) { if (Doc* doc = m.doc(pane)) doc->ed.scroll.scroll_by(d); }};

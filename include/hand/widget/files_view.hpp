@@ -60,20 +60,28 @@ template <class Model>
                 | gap(t.spaced(6)) | align(mayag::Align::center) | pad(0, t.spaced(8), 0, t.spaced(12)) | height(34)
                 | width(pct(100)) | with_look(sheet_of(t).strip, t) | inner_shadow(0.0f, t.border, {0.0f, -1.0f});
 
-    // the tree: mayag file_tree; a click on row i toggles a folder or opens
-    // a file (single = preview into the editor pane, double = keep)
-    Node tree = file_tree(c, "files", rows, ft.selected, ft.scroll, m.files_focused, [](int row, int count) {
-        return E{[row, count](Model& mm) {
-            mm.files_focused = true;
-            const auto flat = mm.files.flat();
-            if (row < 0 || row >= static_cast<int>(flat.size())) return;
-            mm.files.selected = row;
-            const auto& f = flat[static_cast<std::size_t>(row)];
-            if (f.row.dir) mm.files.toggle(f.rel);
-            else mm.open_file(f.rel, count >= 2);
-        }};
-    });
+    // the tree: mayag file_tree. A click on a row bubbles to the tree's
+    // root, which owns the behaviour (mayag handlers bubble, like the DOM):
+    //   folder: toggle on the FIRST click of a sequence only -- a double
+    //           click must not open and then close it again;
+    //   file:   single = preview beside the terminal, double = open & focus.
+    Node tree = file_tree(c, "files", rows, ft.selected, ft.scroll, m.files_focused);
     auto wired = node(std::move(tree))
+        | on_click([n = rows.size()](const mayag::Clicked& k) -> std::optional<E> {
+              for (std::size_t i = 0; i < n; ++i) {
+                  if (k.node != part_id("files", i)) continue;
+                  return E{[row = static_cast<int>(i), count = k.count](Model& mm) {
+                      mm.files_focused = true;
+                      const auto flat = mm.files.flat();
+                      if (row >= static_cast<int>(flat.size())) return;
+                      mm.files.selected = row;
+                      const auto& f = flat[static_cast<std::size_t>(row)];
+                      if (f.row.dir) { if (count % 2 == 1) mm.files.toggle(f.rel); }
+                      else mm.open_file(f.rel, count >= 2);
+                  }};
+              }
+              return std::nullopt;
+          })
         | on_scroll([](const mayag::Scrolled& s) {
               return E{[d = s.delta](Model& mm) { mm.files.scroll.scroll_by(d); }};
           });

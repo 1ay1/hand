@@ -80,10 +80,11 @@ namespace hand {
             case Chrome::standard: return mayag::looks::standard(seed);
             case Chrome::glass:    return mayag::looks::glass(seed);
             case Chrome::brutal:   return mayag::looks::brutal(seed);
-            case Chrome::terminal:
+            case Chrome::terminal: return mayag::looks::terminal(seed);
+            case Chrome::refined:
             case Chrome::count_:   break;
         }
-        return mayag::looks::terminal(seed);
+        return mayag::looks::refined(seed);
     }();
     // Agreement with the terminal: the window background IS the paper; the
     // chrome is the paper shaded (chrome_shade) and tinted toward the accent
@@ -106,6 +107,7 @@ namespace hand {
     t.border         = mayag::mix(paper, ink, std::min(0.9f, (dark ? 0.12f : 0.14f) * bs));
     t.border_strong  = mayag::mix(paper, ink, std::min(0.95f, (dark ? 0.24f : 0.28f) * bs));
     t.success = hex(s.ansi[2]); t.warning = hex(s.ansi[3]); t.danger = hex(s.ansi[1]); t.info = hex(s.ansi[4]);
+    t.focus_ring     = mayag::mix(paper, t.accent, 0.75f);
     t.icons = a.nerd_icons ? mayag::IconSet::nerd : mayag::IconSet::letters;
     // chrome geometry
     t.tab_shape = static_cast<mayag::TabShape>(a.tabs);

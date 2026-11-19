@@ -66,7 +66,6 @@ struct App {
         bool                     files_open = false;
         bool                     files_focused = false;
         float                    files_width = 260.0f;
-        mayag::Mods              press_mods{};   ///< mods of the last press (alt-click = add caret)
         std::string              clipboard;
 
         bool                     settings_open = false;
@@ -195,11 +194,10 @@ struct App {
     struct Save {};
     struct FilesKey { mayag::Key key; };
     struct OpenFinder {};
-    struct PressMods { mayag::Mods mods; };
     struct Quit {};
     using Msg = std::variant<Tick, Blink, SplitPane, ClosePane, Zoom, Cycle, SelectTab, CloseTab, NewTab,
                              TogglePalette, PaletteKey, PaletteText, Run, ToggleSettings, DismissToast, Resized,
-                             Focused, EditKey, EditText, Paste, Save, FilesKey, OpenFinder, PressMods, Quit,
+                             Focused, EditKey, EditText, Paste, Save, FilesKey, OpenFinder, Quit,
                              on_window::Move, on_window::ToggleMaximize, on_window::Minimize, on_window::Close,
                              on_window::OpenPalette, on_window::OpenSettings, on_window::ToggleFiles, mayag::Edit<Model>>;
     using Cmd = mayag::Cmd<Msg, mayag::set_title, mayag::window_action, mayag::write_clipboard,
@@ -486,7 +484,6 @@ struct App {
         m.toast({.title = "saved", .body = d->path.filename().string(), .kind = mayag::dsl::Toast::Kind::success});
         return {};
     }
-    static Cmd update(Model& m, PressMods p) { m.press_mods = p.mods; return {}; }
 
     // ── the files panel ──────────────────────────────────────────────────
     static Cmd update(Model& m, on_window::ToggleFiles) {
@@ -633,9 +630,6 @@ struct App {
             default: return std::nullopt;
         }
     }
-    /// Alt/shift on a press reach the editor through the model (alt-click
-    /// adds a caret, shift-click extends): the gesture itself carries none.
-    static std::optional<Msg> on(const Model&, const mayag::MouseDown& d) { return PressMods{d.mods}; }
     static std::optional<Msg> on(const Model&, const mayag::ResizeEvent& r) { return Resized{r.size}; }
     static std::optional<Msg> on(const Model&, const mayag::FocusEvent& f) { return Focused{f.focused}; }
     static std::optional<Msg> on(const Model&, const mayag::CloseRequest&) { return Quit{}; }
@@ -732,43 +726,55 @@ inline mayag::Node App::view(const Model& m) {
 
 inline void App::Model::open_file(const std::string& rel, bool keep) {
     namespace fs = std::filesystem;
-    const fs::path path = files.root / rel;
-    files.active = rel;
-    Doc d{.path = path};
     std::error_code ec;
+    const fs::path path = fs::weakly_canonical(files.root / rel, ec);
+    files.active = rel;
+    // keep (double click, enter, the finder): the editor takes focus.
+    // preview (single click, space): the file shows, focus stays in the tree.
+    const auto settle = [&](PaneId id) {
+        if (keep) { tab().focus = id; files_focused = false; }
+    };
+
+    // Already open in this tab: just go there -- never reload over edits.
+    for (PaneId pid : tab().panes())
+        if (Pane* p = pane(pid); p && p->doc && fs::equivalent(p->doc->path, path, ec)) {
+            settle(pid);
+            return;
+        }
+
+    Doc d{.path = path};
     if (fs::file_size(path, ec) > (8u << 20)) d.error = "too large to edit (> 8 MiB)";
-    std::ifstream in{path, std::ios::binary};
-    std::stringstream ss;
-    if (in && d.error.empty()) ss << in.rdbuf();
-    else if (d.error.empty()) d.error = "could not read";
-    std::string text = ss.str();
+    std::string text;
+    if (d.error.empty()) {
+        std::ifstream in{path, std::ios::binary};
+        if (!in) d.error = "could not read";
+        else { std::stringstream ss; ss << in.rdbuf(); text = ss.str(); }
+    }
     if (text.find('\0') != std::string::npos) { d.error = "binary file"; text.clear(); }
     d.ed = mayag::editor::EditorState::from_text(text, &mayag::editor::language_for(path.string()));
     d.ed.mark_saved();
     const std::string title = path.filename().string();
 
-    // The tab's existing editor pane takes the file (Zed's preview tab):
-    // unless it is dirty and this is only a preview, then a new pane opens.
+    // The tab's editor pane takes the file (Zed's preview pane), unless it
+    // holds unsaved changes: those are never replaced, a new pane opens.
     for (PaneId pid : tab().panes()) {
         Pane* p = pane(pid);
-        if (p == nullptr || !p->doc) continue;
-        if (p->doc->ed.dirty() && !keep) break;
-        if (p->doc->ed.dirty()) break;
+        if (p == nullptr || !p->doc || p->doc->ed.dirty()) continue;
         p->doc = std::move(d);
         p->title = title;
-        if (!files_focused) tab().focus = pid;
+        settle(pid);
         return;
     }
-    // Else split it off the focused pane, to the right: the terminal you
-    // came from stays where it is.
+    // Else split it off the focused TERMINAL, to the right: the terminal you
+    // came from stays where it is (and keeps focus on a preview).
     const PaneId from = tab().focus;
     const PaneId id{next_pane++};
     panes.push_back({id, title, pane(from) ? pane(from)->cwd : "~", "edit", demo::Screen::shell, PaneState::idle, 0,
                      std::move(d)});
-    tab().split(from, id, mayag::Axis::horizontal);
+    tab().split(from, id, mayag::Axis::horizontal);   // (split focuses the new pane)
     tab().zoom.reset();
-    if (files_focused) tab().focus = from == id ? id : tab().focus;
-    if (!files_focused || keep) { tab().focus = id; files_focused = false; }
+    if (!keep) tab().focus = from;
+    settle(id);
 }
 
 }  // namespace hand

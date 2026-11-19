@@ -171,9 +171,9 @@ template <class Model>
               std::move(prompt),
               h_list(std::move(chips), 2.0f) | wrap)
             | gap(6) | pad(9, 10) | size(w, 84.0f) | bg(hex(s.paper)) | radius(t.rounded(6))
-            | border(chosen ? 2.0f : 1.0f, chosen ? t.accent : (hov ? t.border_strong : t.border),
-                     chosen ? mayag::StrokeAlign::outside : mayag::StrokeAlign::inside)
-            | when(hov && !chosen, translate(0.0f, -1.0f)) | transition()
+            | border(chosen ? 2.0f : 1.0f, chosen ? t.accent : (hov ? t.text_disabled : t.border),
+                     mayag::StrokeAlign::inside)
+            | transition()
             | pointer_cursor | role(mayag::a11y::Role::radio) | checked(chosen) | label(s.name) | id_of_raw(pid)
             | on_enter([id] { return E{[id](Model& m) { m.preview_scheme = id; }}; })
             | on_leave([id] { return E{[id](Model& m) { if (m.preview_scheme == id) m.preview_scheme.reset(); }}; })
@@ -231,7 +231,7 @@ template <class Model>
                      text_owned("~/.config/hand/appearance") | font(t.font_size * 0.75f) | monospace
                          | fg(var::text_disabled) | ellipsis)
                  | gap(t.spaced(4)) | pad(t.spaced(10), t.spaced(8)) | width(190.0f) | height(pct(100))
-                 | bg(var::surface) | inner_shadow(0.0f, t.border, {-1.0f, 0.0f});
+                 | bg(var::background) | inner_shadow(0.0f, t.border, {-1.0f, 0.0f});
 
     // ── header
     const auto changed = settings::modified_count(a);
@@ -326,7 +326,7 @@ template <class Model>
     return (v(std::move(header), h(std::move(sidebar), node(std::move(body))) | grow() | width(pct(100)) | min_size(0, 0),
               std::move(footer))
             | size(p.width, p.height) | clip | look_of(c, &mayag::Sheet::panel) | mayag::dsl::pad(0)
-            | elevation(t.lift(24)) | role(mayag::a11y::Role::dialog) | label("appearance")).build();
+            | role(mayag::a11y::Role::dialog) | label("appearance")).build();
 }
 
 }  // namespace hand

@@ -20,7 +20,7 @@
 namespace hand {
 
 /// Which of mayag's looks (widget/sheet.hpp) shapes every widget.
-enum class Chrome : std::uint8_t { terminal, standard, glass, brutal, count_ };
+enum class Chrome : std::uint8_t { refined, terminal, standard, glass, brutal, count_ };
 enum class CursorStyle : std::uint8_t { block, beam, underline, count_ };
 /// mayag::TabShape, mirrored so the settings table can label it.
 enum class Tabs : std::uint8_t { underline, overline, block, pill, slant, count_ };
@@ -32,7 +32,7 @@ enum class Bell : std::uint8_t { off, flash, count_ };
 
 /// Display names for an enum, in declaration order.
 template <class E> inline constexpr std::array<std::string_view, 0> labels{};
-template <> inline constexpr std::array<std::string_view, 4> labels<Chrome>{"terminal", "standard", "glass", "brutal"};
+template <> inline constexpr std::array<std::string_view, 5> labels<Chrome>{"refined", "terminal", "standard", "glass", "brutal"};
 template <> inline constexpr std::array<std::string_view, 3> labels<CursorStyle>{"block", "beam", "underline"};
 template <> inline constexpr std::array<std::string_view, 5> labels<Tabs>{"underline", "overline", "block", "pill", "slant"};
 template <> inline constexpr std::array<std::string_view, 3> labels<AccentFrom>{"scheme", "hue", "ansi slot"};
@@ -76,8 +76,8 @@ struct Appearance {
     bool                         nerd_icons = true;
 
     // ── chrome ─────────────────────────────────────────────────────────
-    Chrome                       chrome = Chrome::terminal;
-    Bounded<float, 0.0f, 1.8f>   roundness{0.0f};      ///< mayag Seed::roundness
+    Chrome                       chrome = Chrome::refined;
+    Bounded<float, 0.0f, 1.8f>   roundness{0.6f};      ///< mayag Seed::roundness
     Bounded<float, 0.6f, 1.5f>   density{0.9f};        ///< mayag Seed::density
     Bounded<float, 0.0f, 2.0f>   depth{0.0f};          ///< mayag Seed::depth (shadows)
     Bounded<float, 0.5f, 2.5f>   lines{1.0f};          ///< mayag Seed::lines (stroke widths)

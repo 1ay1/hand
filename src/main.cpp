@@ -228,6 +228,71 @@ int script(auto& rt) {
     ok(M().editing() && M().pane(M().tab().focus)->title == "README.md", "the finder opens the best match");
     ok(M().tab().panes().size() == 4, "into the same editor pane (preview replaces)");
 
+    // ── double clicks, the Wayland way (no platform count, real timing) ─────
+    {
+        const auto doc = [&]() -> const hand::Doc* { return M().pane(M().tab().focus)->doc ? &*M().pane(M().tab().focus)->doc : nullptr; };
+        const std::string eid = "edit." + std::to_string(M().tab().focus.v);
+        const Vec2 at = rt.center_of(dsl::node_id(eid));
+        rt.window().timed_clicks(at, 2);
+        rt.tick();
+        ok(doc() && !doc()->ed.sels.front().empty() && doc()->ed.sels.front().head.line == doc()->ed.sels.front().anchor.line,
+           "double click in the editor selects a word");
+        rt.window().advance(1.0);
+        rt.window().timed_clicks(at, 3);
+        rt.tick();
+        ok(doc() && doc()->ed.sels.front().end().line == doc()->ed.sels.front().start().line + 1,
+           "triple click selects the line");
+        rt.window().advance(1.0);
+        rt.window().timed_clicks(at, 1);
+        rt.tick();
+        ok(doc() && doc()->ed.sels.front().empty(), "a later single click is a caret again (the sequence ended)");
+        rt.window().advance(1.0);
+        rt.window().timed_clicks(at, 2, 0.8);
+        rt.tick();
+        ok(doc() && doc()->ed.sels.front().empty(), "two clicks 0.8 s apart are two singles");
+        rt.window().advance(1.0);
+        rt.window().timed_clicks(at, 1, 0.1, Mods{.alt = true});
+        rt.window().timed_clicks(Vec2{at.x, at.y + 40.0f}, 1, 0.1, Mods{.alt = true});
+        rt.tick();
+        ok(doc() && doc()->ed.sels.size() >= 2, "alt-click adds carets");
+        rt.press_key(Key::escape);
+
+        // a folder in the panel: one double click toggles it ONCE
+        const auto flat = M().files.flat();
+        std::size_t dir = 0;
+        while (dir < flat.size() && !flat[dir].row.dir) ++dir;
+        if (dir < flat.size()) {
+            const bool was = M().files.open.contains(flat[dir].rel);
+            rt.window().advance(1.0);
+            rt.window().timed_clicks(rt.center_of(dsl::part_id("files", dir)), 2);
+            rt.tick();
+            ok(M().files.open.contains(flat[dir].rel) != was, "double clicking a folder toggles it once, not twice");
+        }
+        // a file: single previews (focus stays in the tree), double opens
+        std::size_t file = 0;
+        const auto flat2 = M().files.flat();
+        while (file < flat2.size() && flat2[file].row.dir) ++file;
+        if (file < flat2.size()) {
+            rt.window().advance(1.0);
+            rt.window().timed_clicks(rt.center_of(dsl::part_id("files", file)), 1);
+            rt.tick();
+            ok(M().files_focused, "single click on a file previews it, the tree keeps focus");
+            rt.window().advance(1.0);
+            rt.window().timed_clicks(rt.center_of(dsl::part_id("files", file)), 2);
+            rt.tick();
+            ok(!M().files_focused && M().editing(), "double click opens it and focuses the editor");
+        }
+        // the split divider: double click evens it
+        const auto divider = dsl::part_id("split.0", dsl::part_bar);
+        if (rt.node_rect(divider)) {
+            rt.window().advance(1.0);
+            rt.window().timed_clicks(rt.center_of(divider), 2);
+            rt.tick();
+            const auto* s = std::get_if<hand::Split>(&M().tab().nodes[0]);
+            ok(s && s->ratio == 0.5f, "double click on a divider evens the split");
+        }
+    }
+
     std::printf("%s\n", fails == 0 ? "PASS" : "FAIL");
     return fails;
 }
