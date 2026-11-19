@@ -48,6 +48,13 @@ bool pty_read(int fd, std::string& out, int timeout_ms);
 /// Reap the child; its exit code, or -1 if still running.
 int pty_reap(pid_t pid);
 
+/// The foreground process group on the pty (the program you are talking to), -1 if none.
+[[nodiscard]] pid_t pty_foreground(int fd);
+/// A process's short name ("ssh", "nvim"); "" when it is gone.
+[[nodiscard]] std::string proc_name(pid_t pid);
+/// A process's argv; empty when it is gone or not ours to read.
+[[nodiscard]] std::vector<std::string> proc_argv(pid_t pid);
+
 /// Run `argv` fully detached (double fork, setsid, stdio on /dev/null):
 /// never blocks, never leaves a zombie. For opening links, notifications.
 void spawn_detached(const std::vector<std::string>& argv);

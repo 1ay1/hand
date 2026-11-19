@@ -1,6 +1,6 @@
 // hand::shell_integration — the scripts, written to a private runtime dir.
 
-#include <hand/shell.hpp>
+#include <hand/core/shell.hpp>
 
 #include <cstdlib>
 #include <filesystem>

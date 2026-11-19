@@ -1,8 +1,8 @@
 // hand settings — the table, hand.vibe, the scheme catalogue.
 // The only TU that compiles the 913-scheme catalogue.
 
-#include <hand/config.hpp>
-#include <hand/schemes_gen.hpp>
+#include <hand/config/config.hpp>
+#include <hand/config/schemes_gen.hpp>
 #include <vibe.h>
 
 #include <algorithm>
@@ -78,6 +78,13 @@ const std::vector<Row>& rows() {
         {"colors", "dim_unfocused", "darken the terminal when the window loses focus", Kind::number, 0, 0.6f, 0.05f, 0, "%", 100, none,
          GET(c.dim_unfocused), SET(c.dim_unfocused = v)},
 
+        {"window", "padding", "space around the grid", Kind::number, 0, 40, 1, 0, "px", 1, none,
+         GET(c.padding), SET(c.padding = v)},
+        {"window", "roundness", "every corner: panels, menus, tabs, controls (0 = square)", Kind::number, 0, 2.5f, 0.05f, 2, "\u00D7", 1, none,
+         GET(c.roundness), SET(c.roundness = v)},
+        {"window", "opacity", "background opacity (compositor permitting)", Kind::number, 0.5f, 1.0f, 0.02f, 0, "%", 100, none,
+         GET(c.opacity), SET(c.opacity = v)},
+
         {"cursor", "style", "the default shape (apps may change it)", Kind::choice, 0, 2, 1, 0, "", 1,
          [] { return std::vector<std::string>{"block", "beam", "underline"}; },
          GET(static_cast<int>(c.cursor)), SET(c.cursor = static_cast<CursorShape>(std::clamp(static_cast<int>(v), 0, 2)))},
@@ -104,13 +111,6 @@ const std::vector<Row>& rows() {
         {"motion", "interface", "panels fade in and out, new lines glide up", Kind::toggle, 0, 1, 1, 0, "", 1, none,
          GET(c.motion), SET(c.motion = v > 0.5f)},
 
-        {"window", "padding", "space around the grid", Kind::number, 0, 40, 1, 0, "px", 1, none,
-         GET(c.padding), SET(c.padding = v)},
-        {"window", "roundness", "every corner: panels, menus, tabs, controls (0 = square)", Kind::number, 0, 2.5f, 0.05f, 2, "\u00D7", 1, none,
-         GET(c.roundness), SET(c.roundness = v)},
-        {"window", "opacity", "background opacity (compositor permitting)", Kind::number, 0.5f, 1.0f, 0.02f, 0, "%", 100, none,
-         GET(c.opacity), SET(c.opacity = v)},
-
         {"scrollback", "lines", "history kept above the screen (changing it clears history)", Kind::number, 0, 100000, 1000, 0, "", 1, none,
          GET(c.scrollback), SET(c.scrollback = v)},
         {"scrollback", "wheel_lines", "lines per wheel notch", Kind::number, 1, 15, 1, 0, "", 1, none,
@@ -131,11 +131,15 @@ const std::vector<Row>& rows() {
         {"shell", "notify_after", "notify when a command this long ends while away (0 = off)", Kind::number, 0, 120, 1, 0, "s", 1, none,
          GET(c.notify_after), SET(c.notify_after = v)},
 
+        {"window", "decorations", "the system title bar and border (off: the tab strip is the title area, with \u2212 \u25A1 \u00D7 on its right; restart to apply)", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+         GET(c.decorations), SET(c.decorations = v > 0.5f)},
+        {"keyboard", "option_as_alt", "macOS: \u2325 is Alt/Meta for the shell (\u2325b, \u2325f in readline) instead of typing \u00E9 \u2122 \u2026 (restart to apply)", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+         GET(c.option_as_alt), SET(c.option_as_alt = v > 0.5f)},
         {"tabs", "always", "show the tab strip even with a single tab (ctrl+shift+t opens a tab)", Kind::toggle, 0, 1, 1, 0, "", 1, none,
          GET(c.tabs_always), SET(c.tabs_always = v > 0.5f)},
-        {"tabs", "style", "how the active tab is marked: a lifted pill, a sliding underline, a flat block", Kind::choice, 0, 2, 1, 0, "", 1,
-         [] { return std::vector<std::string>{"pill", "underline", "flat"}; },
-         GET(static_cast<int>(c.tab_style)), SET(c.tab_style = static_cast<TabStyle>(std::clamp(static_cast<int>(v), 0, 2)))},
+        {"tabs", "style", "line: compact mono cells, tmux-like; pill: a lifted card; underline: a sliding bar; flat: a filled block", Kind::choice, 0, 3, 1, 0, "", 1,
+         [] { return std::vector<std::string>{"pill", "underline", "flat", "line"}; },
+         GET(static_cast<int>(c.tab_style)), SET(c.tab_style = static_cast<TabStyle>(std::clamp(static_cast<int>(v), 0, 3)))},
         {"tabs", "animation", "how the active marker moves: stretch (elastic), slide, instant", Kind::choice, 0, 2, 1, 0, "", 1,
          [] { return std::vector<std::string>{"stretch", "slide", "instant"}; },
          GET(static_cast<int>(c.tab_anim)), SET(c.tab_anim = static_cast<TabAnim>(std::clamp(static_cast<int>(v), 0, 2)))},
@@ -145,7 +149,7 @@ const std::vector<Row>& rows() {
         {"tabs", "title", "what a tab is named after (smart: the running command, else the program, else the folder)", Kind::choice, 0, 3, 1, 0, "", 1,
          [] { return std::vector<std::string>{"smart", "folder", "program", "shell"}; },
          GET(static_cast<int>(c.tab_title)), SET(c.tab_title = static_cast<TabTitle>(std::clamp(static_cast<int>(v), 0, 3)))},
-        {"tabs", "height", "the strip's height (compact ~30, roomy ~52)", Kind::number, 26, 60, 1, 0, "px", 1, none,
+        {"tabs", "height", "the strip's height (line: ~26, pill: ~40)", Kind::number, 22, 60, 1, 0, "px", 1, none,
          GET(c.tab_height), SET(c.tab_height = v)},
         {"tabs", "width", "the widest a tab grows", Kind::number, 110, 400, 2, 0, "px", 1, none,
          GET(c.tab_width), SET(c.tab_width = v)},
@@ -164,24 +168,39 @@ const std::vector<Row>& rows() {
          GET(c.tab_colors), SET(c.tab_colors = v > 0.5f)},
         {"tabs", "new_button", "the + button at the end of the strip", Kind::toggle, 0, 1, 1, 0, "", 1, none,
          GET(c.tab_new_button), SET(c.tab_new_button = v > 0.5f)},
+
         {"selection", "toolbar", "a chip by the selection: its size, and copy / find / open", Kind::toggle, 0, 1, 1, 0, "", 1, none,
          GET(c.sel_toolbar), SET(c.sel_toolbar = v > 0.5f)},
         {"selection", "flash", "the selection flashes when it is copied", Kind::toggle, 0, 1, 1, 0, "", 1, none,
          GET(c.sel_flash), SET(c.sel_flash = v > 0.5f)},
+
         {"confirm", "paste", "ask before pasting: never, risky (sudo, rm -rf, curl|sh, control chars), any multi-line, or only into programs without bracketed paste", Kind::choice, 0, 3, 1, 0, "", 1,
          [] { return std::vector<std::string>{"never", "risky", "multiline", "unbracketed"}; },
          GET(static_cast<int>(c.paste_confirm)), SET(c.paste_confirm = static_cast<PasteConfirm>(std::clamp(static_cast<int>(v), 0, 3)))},
         {"confirm", "close", "ask before closing a tab or the window: never, while something runs, always", Kind::choice, 0, 2, 1, 0, "", 1,
          [] { return std::vector<std::string>{"never", "running", "always"}; },
          GET(static_cast<int>(c.close_confirm)), SET(c.close_confirm = static_cast<CloseConfirm>(std::clamp(static_cast<int>(v), 0, 2)))},
+
         {"mouse", "copy_on_select", "selecting text copies it", Kind::toggle, 0, 1, 1, 0, "", 1, none,
          GET(c.copy_on_select), SET(c.copy_on_select = v > 0.5f)},
         {"mouse", "links_need_ctrl", "links open on ctrl+click (off: any click)", Kind::toggle, 0, 1, 1, 0, "", 1, none,
          GET(c.links_need_ctrl), SET(c.links_need_ctrl = v > 0.5f)},
+
         {"bell", "visual", "flash the screen on BEL", Kind::toggle, 0, 1, 1, 0, "", 1, none,
          GET(c.visual_bell), SET(c.visual_bell = v > 0.5f)},
         {"bell", "shake", "the window shakes on BEL", Kind::toggle, 0, 1, 1, 0, "", 1, none,
          GET(c.bell_shake), SET(c.bell_shake = v > 0.5f)},
+
+        {"ssh", "multiplex", "one connection per host: a second tab opens instantly, one password prompt (off when ~/.ssh/config sets ControlMaster)", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+         GET(c.ssh_multiplex), SET(c.ssh_multiplex = v > 0.5f)},
+        {"ssh", "keepalive", "probe the link every 15 s, so a dead connection says so within a minute", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+         GET(c.ssh_keepalive), SET(c.ssh_keepalive = v > 0.5f)},
+        {"ssh", "known_hosts", "also list machines from ~/.ssh/known_hosts in the picker (ctrl+shift+s)", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+         GET(c.ssh_known_hosts), SET(c.ssh_known_hosts = v > 0.5f)},
+        {"ssh", "prod_guard", "mark production hosts in red on the tab and around the terminal", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+         GET(c.ssh_prod_guard), SET(c.ssh_prod_guard = v > 0.5f)},
+        {"ssh", "reconnect", "when an ssh tab drops, keep it open and offer to reconnect", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+         GET(c.ssh_reconnect), SET(c.ssh_reconnect = v > 0.5f)},
     };
     return r;
 }
@@ -236,7 +255,20 @@ dsl::SettingSpec spec_of(const Row& r, const Config& c, const Config& d) {
     dsl::SettingSpec s;
     s.section = r.section;
     s.section_icon = icon_of(r.section);
+    // five pages, like a preferences window: what you change most comes first
+    const std::string_view sec = r.section;
+    using I = dsl::Icon;
+    if (sec == "font" || sec == "colors" || sec == "window") { s.page = "Appearance"; s.page_icon = I::eye; }
+    else if (sec == "cursor" || sec == "motion") { s.page = "Cursor & motion"; s.page_icon = I::sparkles; }
+    else if (sec == "scrollback" || sec == "shell") { s.page = "Terminal"; s.page_icon = I::terminal; }
+    else if (sec == "tabs") { s.page = "Tabs"; s.page_icon = I::layout; }
+    else if (sec == "ssh") { s.page = "SSH"; s.page_icon = I::server; }
+    else { s.page = "Behaviour"; s.page_icon = I::settings; }
     s.key = r.key;
+    // clearer names where a key alone is ambiguous or terse (the file keys stay)
+    if (sec == "motion" && std::string_view{r.key} == "blink") s.label = "Blink style";
+    if (sec == "motion" && std::string_view{r.key} == "cursor") s.label = "Cursor movement";
+    if (sec == "cursor" && std::string_view{r.key} == "style") s.label = "Shape";
     s.hint = r.hint;
     s.kind = r.kind;
     s.value = r.get(c);

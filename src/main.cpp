@@ -6,7 +6,13 @@
 //   hand --headless          scripted self-test (no pty), exit code = failures
 
 #include <hand/app.hpp>
-#include <hand/shell.hpp>
+#include <hand/core/shell.hpp>
+
+#include "app/detail.hpp"   // the self-test checks geometry against the same queries
+
+#include <filesystem>
+
+#include <mayag/widget/ssh.hpp>
 
 #include <mayag/backend/tiled.hpp>
 #ifdef MAYAG_WITH_VULKAN
@@ -20,6 +26,8 @@
 #include <cstdlib>
 #include <string>
 #include <string_view>
+#include <sys/resource.h>
+#include <csignal>
 #include <unistd.h>
 
 namespace {
@@ -59,6 +67,14 @@ std::shared_ptr<typo::FontStack> load_fonts(bool system) {
         s = typo::system::default_stack(typo::FontConfig{.mode = typo::RenderMode::hybrid, .atlas_size = 2048}, 400,
                                         false, lead);
         (void)typo::system::attach_family(*s, FontFamily::mono, mono);
+        // the platform's UI face (SF Pro, Segoe, Inter, Cantarell...) for window
+        // chrome that reads as an app, not a terminal: the settings window
+        {
+            std::vector<std::string_view> ui{"Inter", "Inter Variable"};
+            for (auto f : typo::system::ui_font_families()) ui.push_back(f);
+            for (auto f : {"Noto Sans", "Cantarell", "DejaVu Sans"}) ui.push_back(f);
+            (void)typo::system::attach_family(*s, FontFamily::display, ui);
+        }
         for (auto cand : mono) {
             if (names.size() >= custom_family_count) break;
             const std::array<std::string_view, 1> one{cand};
@@ -297,6 +313,8 @@ int main(int argc, char** argv) {
         else if (a == "--font-size" && i + 1 < argc) cfg.font_size = std::strtof(argv[++i], nullptr);
         else if (a == "-e" && i + 1 < argc) cfg.shell_cli = argv[++i];
         else if (a == "--shot" && i + 1 < argc) shot = argv[++i];
+        else if (a == "--bench") { mode = Mode::png; shot = "bench"; }
+        else if (a == "--flood") { mode = Mode::png; shot = "flood"; cfg.shell_cli = (i + 1 < argc && argv[i + 1][0] != '-') ? argv[++i] : "yes"; }
     }
     g_stack = load_fonts(system_fonts);
     if (mode == Mode::window) {
@@ -304,7 +322,7 @@ int main(int argc, char** argv) {
         const std::string problems = hand::config_load(cfg, hand::config_path());
         if (!problems.empty()) std::fprintf(stderr, "hand: %s:\n%s", hand::config_path().c_str(), problems.c_str());
     }
-    cfg.demo = mode != Mode::window;
+    cfg.demo = mode != Mode::window && shot != "flood";
     hand::App::config = cfg;
 
     static typo::StackMeasurer measurer{*g_stack};
@@ -316,7 +334,7 @@ int main(int argc, char** argv) {
         return w > 0.0f ? w : s * 0.6f;
     };
 
-    AppConfig ac{.title = "hand", .size = size, .transparent = true, .theme_morph = false, .fonts = g_stack, .log_renderer = false};
+    AppConfig ac{.title = "hand", .size = size, .decorated = cfg.decorations, .transparent = true, .option_as_alt = cfg.option_as_alt, .theme_morph = false, .fonts = g_stack, .log_renderer = false};
     switch (mode) {
         case Mode::window: return mayag::run<hand::App>(std::move(ac));
         case Mode::headless:
@@ -449,7 +467,7 @@ int main(int argc, char** argv) {
                             rt.click(trig);
                             ok(rt.model().panel.menu < 0, "clicking it again closes it");
                             rt.click(trig);
-                            rt.click(dsl::node_id("settings.search"));
+                            rt.click(dsl::part_id("settings.nav", 0));   // the sidebar: never under the menu
                             ok(rt.model().panel.menu < 0 && rt.model().settings_open,
                                "clicking elsewhere in the panel closes it (and the panel stays)");
                             rt.click(trig);
@@ -463,7 +481,7 @@ int main(int argc, char** argv) {
                         // ── EVERY setting: step it through the panel, check it took effect ──
                         using K = mayag::Key;
                         using SE = dsl::SettingEdit;
-                        const auto specs = hand::setting_specs(hand::Config{});
+                        const auto specs = hand::setting_specs(rt.model().cfg);
                         int changed = 0, total = 0;
                         std::string stuck;
                         for (std::size_t i = 0; i < specs.size(); ++i) {
@@ -478,7 +496,7 @@ int main(int argc, char** argv) {
                             }}}});
                             rt.tick();
                             const auto after = hand::setting_specs(rt.model().cfg)[i];
-                            if (after.modified && after.value != hand::setting_specs(before)[i].value) ++changed;
+                            if (after.value != hand::setting_specs(before)[i].value) ++changed;
                             else stuck += " " + s.section + "." + s.key;
                         }
                         if (!stuck.empty()) std::printf("    did not change:%s\n", stuck.c_str());
@@ -557,17 +575,17 @@ int main(int argc, char** argv) {
                         // hints
                         rt.press_key(K::space, Mods{.shift = true, .ctrl = true});
                         bool url = false, path = false, hash = false;
-                        for (const auto& h : rt.model().hints) {
+                        for (const auto& h : rt.model().hint->hints) {
                             url = url || h.text == "https://toe.dev/x";
                             path = path || h.text == "~/src/hand/main.cpp";
                             hash = hash || h.text == "3f9a2c1d";
                         }
-                        ok(rt.model().hinting && url && path && hash, "ctrl+shift+space labels the URL, the path and the hash");
+                        ok(rt.model().hint.has_value() && url && path && hash, "ctrl+shift+space labels the URL, the path and the hash");
                         std::size_t hi = 0;
-                        while (hi < rt.model().hints.size() && rt.model().hints[hi].text != "3f9a2c1d") ++hi;
-                        const std::string label = hi < rt.model().hint_labels.size() ? rt.model().hint_labels[hi] : "?";
+                        while (hi < rt.model().hint->hints.size() && rt.model().hint->hints[hi].text != "3f9a2c1d") ++hi;
+                        const std::string label = rt.model().hint && hi < rt.model().hint->labels.size() ? rt.model().hint->labels[hi] : "?";
                         rt.type(label);
-                        ok(!rt.model().hinting && rt.window().get_clipboard() == "3f9a2c1d", "typing its label copies it");
+                        ok(!rt.model().hint.has_value() && rt.window().get_clipboard() == "3f9a2c1d", "typing its label copies it");
                         rt.window().drive_frames(true);
                         for (int i = 0; i < 30; ++i) rt.tick();
                         feed("\r\n");
@@ -981,21 +999,21 @@ int main(int argc, char** argv) {
                         // copy mode
                         rt.send(hand::App::Msg{E5{[](hand::App::Model& m2) { m2.term->select_clear(); }}});
                         rt.press_key(K::m, Mods{.shift = true, .ctrl = true});
-                        ok(rt.model().copy_mode, "ctrl+shift+m enters copy mode");
+                        ok(rt.model().copy.has_value(), "ctrl+shift+m enters copy mode");
                         rt.type("k"); rt.type("k"); rt.type("0");   // from the prompt up to "alpha beta"
                         rt.type("w");
                         rt.type("v"); rt.type("e");
                         ok(rt.model().term->selection_text() == "beta", "w / v / e select a word with the keyboard");
                         rt.type("y");
-                        ok(!rt.model().copy_mode && rt.window().get_clipboard() == "beta", "y yanks it and leaves copy mode");
+                        ok(!rt.model().copy.has_value() && rt.window().get_clipboard() == "beta", "y yanks it and leaves copy mode");
                         rt.send(hand::App::Msg{E5{[](hand::App::Model& m2) { m2.term->select_clear(); }}});
                         rt.press_key(K::m, Mods{.shift = true, .ctrl = true});
                         rt.type("k"); rt.type("V"); rt.type("k");
                         ok(rt.model().term->selection_text() == "alpha beta\ngamma delta", "V selects whole lines");
                         rt.press_key(K::escape);
-                        ok(rt.model().copy_mode && !rt.model().term->has_selection(), "esc drops the selection first...");
+                        ok(rt.model().copy.has_value() && !rt.model().term->has_selection(), "esc drops the selection first...");
                         rt.press_key(K::escape);
-                        ok(!rt.model().copy_mode, "...then copy mode");
+                        ok(!rt.model().copy.has_value(), "...then copy mode");
                         // paste guard
                         rt.send(hand::App::Msg{hand::App::Pasted{"rm -rf a\nrm -rf b\n"}});
                         ok(!rt.model().pending_paste.empty(), "a multi-line paste waits for confirmation");
@@ -1003,18 +1021,18 @@ int main(int argc, char** argv) {
                         ok(rt.model().pending_paste.empty(), "esc cancels it");
                         rt.send(hand::App::Msg{hand::App::Pasted{"echo one\necho two\n"}});
                         rt.press_key(K::enter);
-                        ok(rt.model().pending_paste.empty() && rt.model().ask == hand::App::Model::Ask::none,
+                        ok(rt.model().pending_paste.empty() && !rt.model().ask,
                            "enter pastes it, and doesn't ask twice");
                         rt.send(hand::App::Msg{hand::App::Pasted{"sudo true"}});
-                        ok(rt.model().ask == hand::App::Model::Ask::paste, "a single risky line asks too");
+                        ok((rt.model().ask && rt.model().ask->kind == hand::Ask::Kind::paste), "a single risky line asks too");
                         rt.press_key(K::escape);
                         rt.send(hand::App::Msg{hand::App::Output{std::string{"\x1b[?2004h"}}});
                         rt.send(hand::App::Msg{hand::App::Pasted{"a\nb"}});
-                        ok(rt.model().ask == hand::App::Model::Ask::paste, "multiline mode asks even with bracketed paste");
+                        ok((rt.model().ask && rt.model().ask->kind == hand::Ask::Kind::paste), "multiline mode asks even with bracketed paste");
                         rt.press_key(K::escape);
                         rt.send(hand::App::Msg{E5{[](hand::App::Model& m2) { m2.cfg.paste_confirm = hand::PasteConfirm::unbracketed; }}});
                         rt.send(hand::App::Msg{hand::App::Pasted{"a\nb"}});
-                        ok(rt.model().pending_paste.empty() && rt.model().ask == hand::App::Model::Ask::none,
+                        ok(rt.model().pending_paste.empty() && !rt.model().ask,
                            "unbracketed mode: a program that asked for bracketed paste gets it straight away");
                         rt.send(hand::App::Msg{E5{[](hand::App::Model& m2) { m2.cfg.paste_confirm = hand::PasteConfirm::multiline; }}});
                         rt.send(hand::App::Msg{hand::App::Output{std::string{"\x1b[?2004l"}}});
@@ -1023,6 +1041,11 @@ int main(int argc, char** argv) {
                         // ── tabs ────────────────────────────────────────────────────────────
                         using K = mayag::Key;
                         rt.window().drive_frames(true);
+                        // the pill's motion is what these check; line (the default) has none
+                        rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& mm) {
+                            mm.cfg.decorations = true; mm.cfg.tabs_always = false;   // the strip only from the second tab, like foot
+                            mm.strip_t = 0.0f; hand::App::fit(mm);
+                            mm.cfg.tab_style = hand::TabStyle::pill; mm.cfg.tab_height = 40.0f; }}});
                         const auto settle = [&] { for (int i = 0; i < 60; ++i) rt.tick(); };
                         settle();
                         ok(rt.model().tab_count() == 1 && rt.model().strip_h() == 0.0f, "one tab: no strip, like foot");
@@ -1068,7 +1091,7 @@ int main(int argc, char** argv) {
                             settle();
                             const auto tab0 = rt.node_rect(dsl::part_id("tabs", 0)), mk = rt.node_rect(dsl::node_id("tabs.marker"));
                             const auto strip = rt.node_rect(dsl::node_id("tabs"));
-                            const bool aligned = tab0 && mk && strip && mk->left() > tab0->left() && mk->right() < tab0->right() &&
+                            const bool aligned = tab0 && mk && strip && mk->left() >= tab0->left() - 0.5f && mk->right() <= tab0->right() + 0.5f &&
                                                  std::fabs((mk->left() - tab0->left()) - (tab0->right() - mk->right())) < 1.0f &&
                                                  std::fabs(mk->bottom() - strip->bottom()) < 1.0f;
                             ok(aligned, "the underline is centred on its tab, on the strip's edge");
@@ -1079,8 +1102,54 @@ int main(int argc, char** argv) {
                             ok(mid && tab2 && mid->width() > tab2->width(), "on the way to the next tab it stretches");
                             settle();
                             const auto end = rt.node_rect(dsl::node_id("tabs.marker"));
-                            ok(end && tab2 && end->width() < tab2->width() && end->left() > tab2->left(), "...and lands, its own width again");
+                            ok(end && tab2 && std::fabs(end->width() - tab2->width()) < 1.0f && std::fabs(end->left() - tab2->left()) < 1.0f, "...and lands, its own width again");
                             rt.click(dsl::part_id("tabs", 0));
+                            settle();
+                        }
+                        {
+                            // ── hover a tab, then its ×: it appears and stays, frame after frame ──
+                            using E9 = mayag::Edit<hand::App::Model>;
+                            int flicker = 0;
+                            std::string which;
+                            for (int style = 0; style < 4; ++style) {
+                                rt.send(hand::App::Msg{E9{[style](hand::App::Model& mm) {
+                                    mm.cfg.tab_style = static_cast<hand::TabStyle>(style); mm.cfg.tab_height = style == 3 ? 26.0f : 36.0f;
+                                    hand::App::fit(mm); }}});
+                                settle();
+                                for (std::size_t t = 0; t < 2; ++t) {
+                                    // a real pointer: across the whole tab, a few px at a time
+                                    const auto tr = rt.node_rect(dsl::part_id("tabs", t));
+                                    if (tr) {
+                                        int lost = 0, moved = 0;
+                                        for (float x = tr->left() + 2.0f; x < tr->right() - 1.0f; x += 2.0f) {
+                                            rt.window().move_to(Vec2{x, tr->center().y});
+                                            rt.tick();
+                                            if (!rt.node_rect(dsl::part_id("tabs", dsl::tab_part_close + t))) ++lost;
+                                            const auto now = rt.node_rect(dsl::part_id("tabs", t));
+                                            if (!now || std::fabs(now->width() - tr->width()) > 0.5f || std::fabs(now->left() - tr->left()) > 0.5f) ++moved;
+                                        }
+                                        if (lost) { ++flicker; which += " s" + std::to_string(style) + "t" + std::to_string(t) + ":sweep-lost" + std::to_string(lost); }
+                                        if (moved) { ++flicker; which += " s" + std::to_string(style) + "t" + std::to_string(t) + ":reflowed" + std::to_string(moved); }
+                                    }
+                                    rt.window().move_to(rt.host().center_of(dsl::part_id("tabs", t)));
+                                    for (int f = 0; f < 4; ++f) rt.tick();
+                                    const auto x = rt.node_rect(dsl::part_id("tabs", dsl::tab_part_close + t));
+                                    if (!x) { ++flicker; which += " s" + std::to_string(style) + "t" + std::to_string(t) + ":no-x"; continue; }
+                                    rt.window().move_to(x->center());
+                                    for (int f = 0; f < 12; ++f) {
+                                        rt.tick();
+                                        const auto x2 = rt.node_rect(dsl::part_id("tabs", dsl::tab_part_close + t));
+                                        if (!x2 || std::fabs(x2->center().x - x->center().x) > 0.5f) {
+                                            ++flicker; which += " s" + std::to_string(style) + "t" + std::to_string(t) + "@" + std::to_string(f);
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            if (flicker) std::printf("    close button unsteady:%s\n", which.c_str());
+                            ok(flicker == 0, "every tab style: the \u00D7 shows on hover and holds still under the pointer");
+                            rt.window().move_to(Vec2{-50.0f, -50.0f});
+                            rt.send(hand::App::Msg{E9{[](hand::App::Model& mm) { mm.cfg.tab_style = hand::TabStyle::pill; mm.cfg.tab_height = 40.0f; hand::App::fit(mm); }}});
                             settle();
                         }
                         rt.press_key(K::w, Mods{.shift = true, .ctrl = true});
@@ -1090,7 +1159,186 @@ int main(int argc, char** argv) {
                         settle();
                         ok(rt.model().tab_count() == 1 && rt.model().strip_h() == 0.0f && rt.model().term->rows() == rows1,
                            "back to one tab: the strip slides away and the grid gets its rows back");
+                        {
+                            // ── no system title bar (the default): the strip IS the title area ──
+                            rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& mm) {
+                                mm.cfg = hand::Config{}; mm.cfg.demo = true; hand::App::fit(mm); }}});
+                            settle();
+                            ok(rt.model().tab_count() == 1 && rt.model().strip_h() > 20.0f &&
+                               rt.node_rect(dsl::part_id("tabs", dsl::tab_part_window + 2)).has_value(),
+                               "undecorated: one tab still has the strip, with \u2212 \u25A1 \u00D7 on its right");
+                            const auto close = rt.node_rect(dsl::part_id("tabs", dsl::tab_part_window + 2));
+                            const auto strip = rt.node_rect(dsl::node_id("tabs"));
+                            ok(close && strip && std::fabs(close->right() - strip->right()) < 1.0f && std::fabs(close->top() - strip->top()) < 1.0f,
+                               "...flush in the top-right corner");
+                            const int moves0 = rt.window().moves();
+                            const Vec2 empty{strip->right() - 300.0f, strip->center().y};
+                            rt.window().push(mayag::MouseMove{empty, {}, {}});
+                            rt.window().push(mayag::MouseDown{empty, mayag::MouseButton::left, {}, 1});
+                            rt.tick();
+                            rt.window().push(mayag::MouseUp{empty, mayag::MouseButton::left, {}});
+                            rt.tick();
+                            ok(rt.window().moves() == moves0 + 1, "pressing the strip's empty space moves the window");
+                            rt.click(dsl::part_id("tabs", dsl::tab_part_window + 1));
+                            ok(rt.window().maximized(), "\u25A1 maximises");
+                            rt.click(dsl::part_id("tabs", dsl::tab_part_window + 1));
+                            const int mins = rt.window().minimizes();
+                            rt.click(dsl::part_id("tabs", dsl::tab_part_window + 0));
+                            ok(!rt.window().maximized() && rt.window().minimizes() == mins + 1, "...and back; \u2212 minimises");
+                            // tabs.always off: no strip with one tab; the top edge brings the title area
+                            rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& mm) { mm.cfg.tabs_always = false; }}});
+                            settle();
+                            ok(rt.model().strip_h() == 0.0f && !rt.node_rect(dsl::node_id("tabs")).has_value(), "tabs.always off: one tab, no strip");
+                            const auto cx = rt.node_rect(dsl::part_id("corner", dsl::tab_part_window + 2));
+                            const float mm = hand::detail::minimap_w(rt.model());
+                            ok(cx && std::fabs(cx->right() - (rt.model().win.x - mm)) < 1.0f && cx->top() < 1.0f && cx->height() < 24.0f,
+                               "...the window's buttons sit small in the top-right corner, left of the scrollbar");
+                            rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& mm2) { mm2.mm_w = 96.0f; }}});
+                            rt.tick();
+                            const auto cx2 = rt.node_rect(dsl::part_id("corner", dsl::tab_part_window + 2));
+                            ok(!hand::detail::minimap_on(rt.model())
+                                   || (cx2 && cx2->right() <= rt.model().win.x - hand::detail::minimap_w(rt.model()) + 0.5f && cx2->right() < cx->right()),
+                               "...and move left as the scrollbar widens: never over it");
+                            rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& mm2) { mm2.mm_w = 14.0f; }}});
+                            rt.tick();
+                            const int mins2 = rt.window().minimizes();
+                            rt.click(dsl::part_id("corner", dsl::tab_part_window + 0));
+                            ok(rt.window().minimizes() == mins2 + 1, "...and work");
+                            rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& mm) { mm.cfg.tabs_always = true; }}});
+                            settle();
+                        }
                         rt.window().drive_frames(false);
+                    }
+                    {
+                        // ── the Mac: ⌘ shortcuts, the input method ──
+                        using K = mayag::Key;
+                        using M = mayag::Mods;
+                        const std::size_t tabs0 = rt.model().tab_count();
+                        rt.press_key(K::t, M{.super = true});
+                        for (int i = 0; i < 4; ++i) rt.tick();
+                        ok(rt.model().tab_count() == tabs0 + 1, "\u2318T opens a tab");
+                        rt.press_key(K::n1, M{.super = true});
+                        ok(rt.model().active == 0, "\u23181 selects the first tab");
+                        rt.press_key(K::w, M{.super = true});
+                        for (int i = 0; i < 4; ++i) rt.tick();
+                        if (rt.model().ask) rt.press_key(K::enter);
+                        for (int i = 0; i < 4; ++i) rt.tick();
+                        ok(rt.model().tab_count() == tabs0, "\u2318W closes it");
+                        rt.press_key(K::f, M{.super = true});
+                        ok(rt.model().search_open, "\u2318F finds");
+                        rt.press_key(K::escape);
+                        rt.press_key(K::comma, M{.super = true});
+                        ok(rt.model().settings_open, "\u2318, opens settings");
+                        rt.press_key(K::comma, M{.super = true});
+                        ok(!rt.model().settings_open, "...and closes them");
+                        const float fs = rt.model().font_size;
+                        rt.press_key(K::equal, M{.super = true});
+                        ok(rt.model().font_size > fs, "\u2318= zooms in");
+                        rt.press_key(K::n0, M{.super = true});
+                        ok(rt.model().font_size == fs, "\u23180 resets");
+                        const auto bytes0 = rt.model().term->epoch();
+                        rt.press_key(K::j, M{.super = true});   // bound to nothing: consumed, never typed
+                        ok(rt.model().term->epoch() == bytes0 && !rt.model().ask, "an unbound \u2318 key does nothing");
+                        rt.send(hand::App::Msg{hand::App::Output{"old line\r\n"}});
+                        rt.press_key(K::k, M{.super = true});
+                        rt.tick();
+                        ok(rt.model().term->history() == 0 && rt.model().term->search("old line") == 0, "\u2318K clears the screen and history");
+                        rt.model().term->search_clear();
+                        // the input method: composing shows at the cursor, only the commit is typed
+                        rt.window().compose("\u3053\u3093");
+                        rt.tick();
+                        ok(rt.model().preedit == "\u3053\u3093" && rt.model().grid && rt.model().grid->preedit == "\u3053\u3093",
+                           "a composition shows at the cursor");
+                        rt.window().commit("\u4eca\u65e5\u306f");
+                        rt.tick();
+                        ok(rt.model().preedit.empty(), "...and goes once committed");
+                    }
+                    {
+                        // ── ssh: ~/.ssh/config the way ssh reads it, hosts.vibe, the picker ──
+                        using K = mayag::Key;
+                        const std::string dir = "/tmp/hand-ssh-" + std::to_string(::getpid());
+                        std::filesystem::create_directories(dir + "/conf.d");
+                        const auto put = [](const std::string& p, const std::string& s) { std::FILE* f = std::fopen(p.c_str(), "w"); std::fputs(s.c_str(), f); std::fclose(f); };
+                        put(dir + "/config",
+                            "# test\nHost *.internal\n  User ops\nHost prod-db\n  HostName 10.0.3.4\n  User deploy\n  ProxyJump bastion\n"
+                            "Host bastion gpu-box !nope\n  HostName %h.example.com\nHost gpu-box\n  Port 2222\n  User root\n"
+                            "Include " + std::string{dir} + "/conf.d/*\nHost *\n  User fallback\n  IdentityFile ~/.ssh/id_ed25519\n");
+                        put(dir + "/conf.d/extra", "Host api.staging.internal\n");
+                        put(dir + "/known", "seen.example.org ssh-ed25519 AAAA\n[odd.example.org]:2200 ssh-rsa AAAA\n|1|hashed= ssh-rsa AAAA\n10.0.3.4 ssh-ed25519 AAAA\n");
+                        const hand::HostSources src{.ssh_config = dir + "/config", .known_hosts = dir + "/known", .store = dir + "/hosts.vibe"};
+                        auto book = hand::hosts_load(src);
+                        const auto* db = book.find("prod-db");
+                        const auto* gpu = book.find("gpu-box");
+                        const auto* api = book.find("api.staging.internal");
+                        ok(db && db->hostname == "10.0.3.4" && db->user == "deploy" && db->jump == "bastion" && db->env == hand::HostEnv::prod,
+                           "ssh_config: HostName / User / ProxyJump, and prod-db reads as prod");
+                        // first value wins: gpu-box's Port comes from its own block, its User from the first block that sets one
+                        ok(gpu && gpu->hostname == "gpu-box.example.com" && gpu->port == 2222 && gpu->user == "root" && !book.find("nope") && !book.find("*.internal"),
+                           "ssh_config: %h, first-wins across blocks, globs and !negations are not hosts");
+                        ok(api && api->user == "ops" && api->env == hand::HostEnv::staging, "ssh_config: Include, a glob block applies, staging from the name");
+                        ok(book.find("seen.example.org") && book.find("odd.example.org:2200") && book.find("odd.example.org:2200")->port == 2200 &&
+                           !book.find("10.0.3.4"), "known_hosts: new machines listed, [host]:port kept, hashed and known ones skipped");
+                        const auto d = hand::parse_destination("deploy@10.0.0.9:2201");
+                        const auto s = hand::ssh_destination({"ssh", "-t", "-p", "2022", "-l", "me", "-o", "Foo=bar", "box.lan", "uptime"});
+                        ok(d && d->user == "deploy" && d->hostname == "10.0.0.9" && d->port == 2201 && !hand::parse_destination("a b") &&
+                           s && s->hostname == "box.lan" && s->user == "me" && s->port == 2022, "destinations: typed user@host:port, and a running ssh's argv");
+                        const auto argv = hand::ssh_argv(*gpu, book, {});
+                        ok(argv.back() == "gpu-box" && std::find(argv.begin(), argv.end(), "ControlMaster=auto") != argv.end(),
+                           "a config host runs as `ssh <alias>`, multiplexed");
+                        hand::hosts_record_use(src, *gpu, 1000);
+                        hand::hosts_record_use(src, *gpu, 2000);
+                        hand::hosts_set_pinned(src, *db, true);
+                        hand::hosts_record_use(src, *d, 1500);
+                        book = hand::hosts_load(src);
+                        ok(book.find("gpu-box")->uses == 2 && book.find("gpu-box")->last == 2000 && book.find("prod-db")->pinned &&
+                           book.find("deploy@10.0.0.9:2201") && book.find("deploy@10.0.0.9:2201")->port == 2201,
+                           "hosts.vibe: uses, last, pinned, and a typed host remembered");
+                        std::vector<dsl::SshHost> sh;
+                        for (const auto& h : book.hosts) { dsl::SshHost x; x.alias = h.alias; x.hostname = h.hostname; x.user = h.user; x.pinned = h.pinned; x.uses = h.uses; x.last_used = h.last; sh.push_back(x); }
+                        const auto r0 = dsl::rank_hosts(sh, "", 2100), r1 = dsl::rank_hosts(sh, "gpu", 2100);
+                        ok(!r0.empty() && sh[static_cast<std::size_t>(r0[0])].alias == "prod-db" && sh[static_cast<std::size_t>(r0[1])].alias == "gpu-box" &&
+                           !r1.empty() && sh[static_cast<std::size_t>(r1[0])].alias == "gpu-box",
+                           "ranking: pinned, then frecent, before typing; a query finds its host");
+                        std::filesystem::remove_all(dir);
+
+                        // the picker, end to end (the demo has no pty: a connect makes a tab)
+                        rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[s = src](hand::App::Model& mm) {
+                            mm.book = hand::HostBook{};
+                            for (const char* a : {"prod-db", "gpu-box", "build-01"}) { hand::Host h; h.alias = a; h.hostname = a; mm.book.hosts.push_back(h); }
+                            mm.book.hosts[0].env = hand::HostEnv::prod;
+                        }}});
+                        rt.press_key(K::s, Mods{.shift = true, .ctrl = true});
+                        rt.tick();
+                        // OpenHosts reloads the book in a real run; in the demo it keeps the fixture
+                        ok(rt.model().hosts_open && rt.node_rect(dsl::part_id("hosts", 0)).has_value() && rt.node_rect(dsl::part_id("hosts", 2)).has_value(),
+                           "ctrl+shift+s opens the host picker, every host listed");
+                        rt.type("gpu");
+                        rt.tick();
+                        ok(rt.node_rect(dsl::part_id("hosts", 0)).has_value() && !rt.node_rect(dsl::part_id("hosts", 1)).has_value(), "typing narrows it to one host");
+                        const std::size_t tabs0 = rt.model().tab_count();
+                        rt.press_key(K::enter);
+                        for (int i = 0; i < 10; ++i) rt.tick();
+                        ok(!rt.model().hosts_open && rt.model().tab_count() == tabs0 + 1 && rt.model().remote && rt.model().remote->alias == "gpu-box",
+                           "enter connects in a new tab, beside this one");
+                        // ssh fails (255): the tab stays, with its scrollback, and offers to reconnect
+                        rt.send(hand::App::Msg{hand::App::Exited{255, rt.model().sid}});
+                        rt.tick();
+                        ok(rt.model().tab_count() == tabs0 + 1 && rt.model().link.dropped && rt.node_rect(dsl::node_id("ssh.reconnect")).has_value(),
+                           "a dropped connection keeps the tab and offers to reconnect");
+                        rt.press_key(K::enter);
+                        rt.tick();
+                        ok(!rt.model().link.dropped, "enter reconnects");
+                        rt.send(hand::App::Msg{hand::App::Exited{0, rt.model().sid}});
+                        for (int i = 0; i < 10; ++i) rt.tick();
+                        ok(rt.model().tab_count() == tabs0, "a clean logout closes the tab");
+                        // a typed destination nobody listed
+                        rt.press_key(K::s, Mods{.shift = true, .ctrl = true});
+                        rt.type("me@10.1.2.3:2200");
+                        rt.tick();
+                        ok(rt.node_rect(dsl::part_id("hosts", dsl::part_inc)).has_value(), "an unknown user@host:port offers to connect as typed");
+                        rt.press_key(K::escape);
+                        rt.tick();
+                        ok(!rt.model().hosts_open, "esc closes the picker");
                     }
                     {
                         // ── hand.vibe: every row survives save + load ──────────────────────────
@@ -1131,6 +1379,106 @@ int main(int argc, char** argv) {
                     return fails;
                 }
                 rt.window().resize(size, 2.0f);
+                if (shot == "bench") {
+                    // a realistic frame: a screen of colour output, history, the minimap, two tabs
+                    std::string s;
+                    for (int i = 0; i < 400; ++i)
+                        s += "\x1b]133;A\a\x1b[1;34m~/src/hand\x1b[0m \x1b[35m\u276F\x1b[0m \x1b]133;B\amake -j8\r\n\x1b]133;C\a"
+                             "\x1b[32m[" + std::to_string(i % 100) + "%]\x1b[0m Building CXX object \x1b[1mCMakeFiles/hand.dir/src/app/"
+                             + std::to_string(i) + ".cpp.o\x1b[0m \x1b[2m(" + std::to_string(i * 7 % 997) + " ms)\x1b[0m\r\n\x1b]133;D;"
+                             + std::to_string(i % 13 == 0 ? 2 : 0) + "\a";
+                    rt.send(hand::App::Msg{hand::App::Output{s}});
+                    rt.press_key(mayag::Key::t, mayag::Mods{.shift = true, .ctrl = true});
+                    rt.send(hand::App::Msg{hand::App::Output{s}});
+                    for (int i = 0; i < 20; ++i) rt.tick();
+                    using clk = std::chrono::steady_clock;
+                    const auto run = [&](const char* what, auto&& poke) {
+                        static const int N = std::getenv("HAND_BENCH_LOOP") ? std::atoi(std::getenv("HAND_BENCH_LOOP")) : 120;
+                        double view = 0, cascade = 0, layout = 0, paint = 0, render = 0;
+                        const auto t0 = clk::now();
+                        for (int i = 0; i < N; ++i) {
+                            poke(i);
+                            rt.tick();
+                            const auto& f = rt.host().latency().last();
+                            view += f.view_ms; cascade += f.cascade_ms; layout += f.layout_ms; paint += f.paint_ms; render += f.render_ms;
+                        }
+                        const double total = std::chrono::duration<double, std::milli>(clk::now() - t0).count() / N;
+                        std::printf("  %-26s %6.3f ms/frame   view %.3f  cascade %.3f  layout %.3f  paint %.3f  raster %.3f\n",
+                                    what, total, view / N, cascade / N, layout / N, paint / N, render / N);
+                    };
+                    std::printf("hand frame pipeline (%dx%d, %d cols x %d rows)\n", static_cast<int>(size.x), static_cast<int>(size.y),
+                                rt.model().term->cols(), rt.model().term->rows());
+                    run("typing (a char/frame)", [&](int i) { rt.send(hand::App::Msg{hand::App::Output{std::string(1, static_cast<char>('a' + i % 26))}}); });
+                    run("streaming (a line/frame)", [&](int i) { rt.send(hand::App::Msg{hand::App::Output{"line " + std::to_string(i) + " \x1b[33mwarning\x1b[0m: something\r\n"}}); });
+                    run("scrolling history", [&](int i) { rt.window().scroll(Vec2{400.0f, 300.0f}, Vec2{0.0f, (i / 30) % 2 ? -48.0f : 48.0f}); });
+                    run("pointer over tabs", [&](int i) { rt.window().move_to(Vec2{40.0f + static_cast<float>(i % 60) * 6.0f, 14.0f}); });
+                    std::printf("  damage: %.1f%% of tiles reused, %llu mismatches\n",
+                                100.0 * static_cast<double>(rt.window().tiles_reused()) / static_cast<double>(std::max<std::uint64_t>(rt.window().tiles_total(), 1)),
+                                static_cast<unsigned long long>(rt.window().damage_mismatches()));
+                    {   // `yes`: the pty reader hands over 1 MB of "y\n" per wakeup, as fast as it can
+                        std::string y;
+                        y.reserve(1u << 20);
+                        while (y.size() + 2 <= (1u << 20)) y += "y\r\n";
+                        double worst = 0, feed = 0;
+                        constexpr int N = 40;
+                        const auto t0 = clk::now();
+                        for (int i = 0; i < N; ++i) {
+                            const auto a = clk::now();
+                            rt.send(hand::App::Msg{hand::App::Output{y}});
+                            const auto b = clk::now();
+                            rt.tick();
+                            const double ms = std::chrono::duration<double, std::milli>(clk::now() - a).count();
+                            feed += std::chrono::duration<double, std::milli>(b - a).count();
+                            worst = std::max(worst, ms);
+                        }
+                        const double total = std::chrono::duration<double, std::milli>(clk::now() - t0).count();
+                        std::printf("  %-26s %6.3f ms/MB   (feed %.3f, worst frame %.2f ms, %.0f MB/s, history %d)\n", "yes (1 MB/frame)",
+                                    total / N, feed / N, worst, N * 1000.0 / total, rt.model().term->history());
+                    }
+                    return 0;
+                }
+                if (shot == "flood") {   // a real shell running a firehose: frames keep coming, memory stays flat, ctrl-C lands
+                    using clk = std::chrono::steady_clock;
+                    const auto rss_mb = [] { rusage u{}; ::getrusage(RUSAGE_SELF, &u); return static_cast<double>(u.ru_maxrss) / (1024.0 * 1024.0); };
+                    const auto t0 = clk::now();
+                    double worst = 0; int frames = 0; std::uint64_t b0 = rt.model().bytes;
+                    const double dur = std::getenv("HAND_FLOOD_S") ? std::atof(std::getenv("HAND_FLOOD_S")) : 4.0;
+                    while (clk::now() - t0 < std::chrono::duration<double>(dur)) {
+                        const auto a = clk::now();
+                        rt.settle([](const auto&) { return false; }, std::chrono::milliseconds(16));   // one vsync of real time
+                        rt.tick();
+                        worst = std::max(worst, std::chrono::duration<double, std::milli>(clk::now() - a).count());
+                        ++frames;
+                    }
+                    const double secs = std::chrono::duration<double>(clk::now() - t0).count();
+                    const double mbps = static_cast<double>(rt.model().bytes - b0) / (1024.0 * 1024.0) / secs;
+                    rt.press_key(mayag::Key::c, mayag::Mods{.ctrl = true});
+                    const auto c0 = clk::now();
+                    std::uint64_t last = rt.model().bytes; auto quiet_since = clk::now();
+                    while (clk::now() - c0 < std::chrono::seconds(5) && clk::now() - quiet_since < std::chrono::milliseconds(300)) {
+                        rt.settle([](const auto&) { return false; }, std::chrono::milliseconds(16));   // one vsync of real time
+                        rt.tick();
+                        if (rt.model().bytes != last) { last = rt.model().bytes; quiet_since = clk::now(); }
+                    }
+                    const double stop_ms = std::chrono::duration<double, std::milli>(quiet_since - c0).count();
+                    if (rt.model().pty) {
+                        const int pid = static_cast<int>(rt.model().pty->pid());
+                        std::printf("flood: child %d %s, fg pgrp %d, history %d, offset %d\n", pid, ::kill(pid, 0) == 0 ? "ALIVE" : "gone",
+                                    static_cast<int>(hand::pty_foreground(rt.model().pty->fd())), rt.model().term->history(), rt.model().term->scroll_offset());
+                    }
+                    std::printf("flood: %d frames in %.1fs (%.0f fps), worst frame %.1f ms, %.0f MB/s through toe, peak rss %.0f MB, ctrl-C quiet after %.0f ms\n",
+                                frames, secs, frames / secs, worst, mbps, rss_mb(), stop_ms);
+                    return (worst < 100.0 && rss_mb() < 400.0 && stop_ms < 1000.0) ? 0 : 1;
+                }
+                if (shot == "corner") {   // tabs.always off: the window's buttons alone in the corner
+                    rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) {
+                        m.cfg.tabs_always = false; m.strip_t = 0.0f; hand::App::fit(m); }}});
+                    for (int i = 0; i < 4; ++i) rt.tick();
+                    if (std::getenv("HAND_TABHOVER")) {
+                        rt.window().move_to(rt.host().center_of(dsl::part_id("corner", dsl::tab_part_window + 2)));
+                        for (int i = 0; i < 4; ++i) rt.tick();
+                    }
+                }
                 if (shot == "cool" || shot == "hints") {
                     std::string s = "\x1b[2J\x1b[H";
                     const char* cmds[][3] = {{"cargo build --release", "   Compiling hand v0.1.0\r\n    Finished release in 41.2s", "0"},
@@ -1255,6 +1603,56 @@ int main(int argc, char** argv) {
                         hand::App::fit(m);
                         for (int i = 0; i < 12; ++i) m.tabs[0].activity.push_back(0.2f + 0.06f * static_cast<float>(i % 5)); }}});
                     for (int i = 0; i < 5; ++i) rt.tick();
+                    if (const char* hv = std::getenv("HAND_TABHOVER")) {   // hover tab N (screenshots of hover states)
+                        rt.window().move_to(rt.host().center_of(dsl::part_id("tabs", static_cast<std::size_t>(std::atoi(hv)))));
+                        for (int i = 0; i < 30; ++i) rt.tick();
+                    }
+                }
+                if (shot == "hosts" || shot == "ssh" || shot == "ssh-drop") {
+                    using E7 = mayag::Edit<hand::App::Model>;
+                    rt.send(hand::App::Msg{E7{[](hand::App::Model& m) {
+                        const std::int64_t now = static_cast<std::int64_t>(std::time(nullptr));
+                        const auto add = [&](const char* a, const char* host, const char* user, int port, const char* jump, hand::HostEnv env,
+                                             bool pin, int uses, std::int64_t ago, std::vector<std::string> tags, hand::HostSource src) {
+                            hand::Host h; h.alias = a; h.hostname = host; h.user = user; h.port = port; h.jump = jump; h.env = env;
+                            h.pinned = pin; h.uses = uses; h.last = uses ? now - ago : 0; h.tags = std::move(tags); h.source = src;
+                            m.book.hosts.push_back(std::move(h));
+                        };
+                        using HE = hand::HostEnv; using HS = hand::HostSource;
+                        add("prod-db", "10.0.3.4", "deploy", 22, "bastion", HE::prod, true, 31, 3 * 3600, {"db", "eu"}, HS::config);
+                        add("bastion", "bastion.example.com", "ops", 22, "", HE::none, true, 54, 3 * 3600, {}, HS::config);
+                        add("gpu-box", "gpu.lan", "ayush", 2222, "", HE::dev, false, 12, 2 * 86400, {"cuda"}, HS::config);
+                        add("api.staging", "api.staging.example.com", "ops", 22, "bastion", HE::staging, false, 6, 5 * 86400, {}, HS::config);
+                        add("pi", "raspberrypi.local", "pi", 22, "", HE::none, false, 3, 18 * 86400, {"home"}, HS::config);
+                        add("build-01", "build-01.ci.internal", "ci", 22, "", HE::none, false, 0, 0, {"ci"}, HS::config);
+                        add("build-02", "build-02.ci.internal", "ci", 22, "", HE::none, false, 0, 0, {"ci"}, HS::config);
+                        add("seen.example.org", "seen.example.org", "", 22, "", HE::none, false, 0, 0, {}, HS::known);
+                        m.book.config_label = "~/.ssh/config";
+                    }}});
+                    rt.send(hand::App::Msg{hand::App::Output{std::string{
+                        "\x1b]7;file://h/home/u/src/hand\a\x1b]133;A\a\x1b[1;34m~/src/hand\x1b[0m \x1b[35m\u276F\x1b[0m \x1b]133;B\a"}}});
+                    rt.tick();
+                    if (shot == "hosts") {
+                        rt.send(hand::App::Msg{E7{[](hand::App::Model& m) { m.hosts_open = true; m.hosts_sel = 0; }}});
+                    } else {
+                        // connect to gpu-box and prod-db; prod-db is the one in view
+                        for (const char* a : {"gpu-box", "prod-db"}) {
+                            rt.send(hand::App::Msg{E7{[a](hand::App::Model& m) { (void)hand::App::update(m, hand::App::ConnectHost{*m.book.find(a)}); }}});
+                            rt.send(hand::App::Msg{hand::App::Output{std::string{
+                                "Welcome to Ubuntu 24.04 LTS (GNU/Linux 6.8.0-41-generic x86_64)\r\n\r\n"
+                                "  System load:  0.08    Memory usage: 31%    Users logged in: 1\r\n\r\n"
+                                "Last login: Tue Nov 19 09:12:44 2024 from 10.0.0.2\r\n"
+                                "\x1b[1;31mdeploy@prod-db\x1b[0m:\x1b[1;34m~\x1b[0m$ systemctl status postgresql\r\n"
+                                "\x1b[1;32m\u25CF\x1b[0m postgresql.service - PostgreSQL RDBMS\r\n"
+                                "     Active: \x1b[1;32mactive (exited)\x1b[0m since Mon 2024-11-18 22:01:03 UTC\r\n"
+                                "\x1b[1;31mdeploy@prod-db\x1b[0m:\x1b[1;34m~\x1b[0m$ "}, 0}});
+                            rt.tick();
+                        }
+                        if (shot == "ssh-drop")
+                            rt.send(hand::App::Msg{E7{[](hand::App::Model& m) { (void)hand::App::update(m, hand::App::Exited{255, m.sid}); m.link.dropped_at = m.time - 10.0; }}});
+                        rt.send(hand::App::Msg{E7{[](hand::App::Model& m) { m.strip_t = 1.0f; m.switch_t = 1.0f; hand::App::fit(m); }}});
+                    }
+                    for (int i = 0; i < 8; ++i) rt.tick();
                 }
                 if (shot == "select" || shot == "copymode" || shot == "paste" || shot == "quit") {
                     rt.send(hand::App::Msg{hand::App::Output{std::string{
@@ -1268,20 +1666,31 @@ int main(int argc, char** argv) {
                         const std::int64_t r0 = m.term->view_to_abs(0);
                         if (which == "select") m.term->select_abs(r0 + 2, 20, r0 + 2, 43, 0);
                         if (which == "copymode") {
-                            m.copy_mode = true; m.cm_vis = 3; m.cm_arow = r0 + 1; m.cm_acol = 0; m.cm_row = r0 + 3; m.cm_col = 6;
-                            m.term->select_abs(m.cm_arow, m.cm_acol, m.cm_row, m.cm_col, 2);
+                            m.copy = hand::CopyMode{.row = r0 + 3, .col = 6, .visual = hand::CopyMode::Visual::block, .anchor_row = r0 + 1, .anchor_col = 0};
+                            m.term->select_abs(r0 + 1, 0, r0 + 3, 6, 2);
                         }
                         if (which == "paste") {
                             m.pending_paste = "sudo pacman -Syu\nrm -rf build\ncmake --build build\n";
-                            m.ask = hand::App::Model::Ask::paste; m.ask_focus = 2; m.ask_t = 1.0f;
+                            m.ask = hand::Ask{.kind = hand::Ask::Kind::paste, .focus = 2}; m.ask_t = 1.0f;
                         }
-                        if (which == "quit") { m.ask = hand::App::Model::Ask::quit; m.ask_focus = 1; m.ask_t = 1.0f; }
+                        if (which == "quit") { m.ask = hand::Ask{.kind = hand::Ask::Kind::quit, .focus = 1}; m.ask_t = 1.0f; }
                     }}});
                     rt.tick();
                 }
                 if (shot == "resize")
                     rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) { m.resized_at = m.time; }}});
-                if (shot == "settings")
+                if (shot == "settings") {
+                    rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) {
+                        m.settings_open = true; m.settings_t = 1.0f; m.panel.selected = 1;
+                        if (const char* v = std::getenv("HAND_SETTINGS")) {   // "row[,query]": another page, or a search
+                            const std::string s = v;
+                            m.panel.selected = std::atoi(s.c_str());
+                            if (const auto c = s.find(','); c != std::string::npos) m.panel.query = s.substr(c + 1);
+                            m.cfg.font_size = 14.0f; m.font_size = 14.0f; m.cfg.cursor = hand::CursorShape::beam;   // two changed values
+                        }
+                    }}});
+                }
+                if (shot == "settings-panel")
                     rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) { m.settings_open = true; m.settings_t = 1.0f; m.panel.selected = 1; }}});
                 if (shot == "settings-menu") {
                     rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) { m.settings_open = true; m.settings_t = 1.0f; }}});

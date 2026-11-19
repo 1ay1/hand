@@ -48,15 +48,16 @@ add_library(vibe STATIC external/vibe/vibe.c)
 target_include_directories(vibe PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/external/vibe)
 set_target_properties(vibe PROPERTIES C_STANDARD 11)
 
-# ── the app: small translation units, so an edit rebuilds one of them ─────
-#   term.cpp  the only TU that includes toe
-#   pty.cpp   the only TU that touches POSIX ptys
-#   motion.cpp cursor physics + particle effects
-#   shell.cpp shell integration (OSC 133/7 injected into fish/zsh/bash)
-#   app.cpp   update / input / view (mayag)
-#   settings.cpp  the settings table, hand.vibe, and the 913-scheme catalogue
-#   main.cpp  fonts, config, modes
-add_executable(hand src/main.cpp src/app.cpp src/term.cpp src/pty.cpp src/settings.cpp src/shell.cpp src/motion.cpp)
+# ── the app, by layer (each a folder; the UI is only ever mayag widgets) ────
+#   core/    the terminal itself: toe (term), the pty, shell integration
+#   config/  the settings table, hand.vibe, the 913-scheme catalogue
+#   ssh/     hosts: ~/.ssh/config, known_hosts, hosts.vibe, the ssh argv
+#   app/     the program: update and input, one file per concern
+#   view/    the widget tree: model -> mayag widget props, composed
+#   main.cpp fonts, config, modes (window / --png / --headless)
+file(GLOB HAND_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/core/*.cpp ${CMAKE_CURRENT_SOURCE_DIR}/src/config/*.cpp
+     ${CMAKE_CURRENT_SOURCE_DIR}/src/ssh/*.cpp ${CMAKE_CURRENT_SOURCE_DIR}/src/app/*.cpp ${CMAKE_CURRENT_SOURCE_DIR}/src/view/*.cpp)
+add_executable(hand src/main.cpp ${HAND_SOURCES})
 target_include_directories(hand PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(hand PRIVATE mayag::mayag toe::toe vibe util)
 target_compile_options(hand PRIVATE ${HAND_WARNINGS})

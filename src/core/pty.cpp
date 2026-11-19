@@ -1,6 +1,6 @@
 // hand::Pty — forkpty + nonblocking I/O.
 
-#include <hand/pty.hpp>
+#include <hand/core/pty.hpp>
 
 #include <cerrno>
 #include <csignal>
@@ -17,7 +17,12 @@
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
+#if defined(__APPLE__)
+#include <libproc.h>
+#include <sys/sysctl.h>
+#endif
 
+#include <fstream>
 #include <vector>
 
 namespace hand {
@@ -121,6 +126,55 @@ int pty_reap(pid_t pid) {
     const pid_t r = ::waitpid(pid, &status, WNOHANG);
     if (r != pid) return -1;
     return WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
+}
+
+pid_t pty_foreground(int fd) {
+    if (fd < 0) return -1;
+    const pid_t pg = ::tcgetpgrp(fd);
+    return pg > 0 ? pg : -1;
+}
+
+std::string proc_name(pid_t pid) {
+    if (pid <= 0) return {};
+#if defined(__APPLE__)
+    char name[2 * MAXCOMLEN + 1] = {};
+    if (::proc_name(pid, name, sizeof name) > 0) return name;
+    return {};
+#else
+    std::ifstream f{"/proc/" + std::to_string(pid) + "/comm"};
+    std::string n;
+    std::getline(f, n);
+    return n;
+#endif
+}
+
+std::vector<std::string> proc_argv(pid_t pid) {
+    std::vector<std::string> out;
+    if (pid <= 0) return out;
+#if defined(__APPLE__)
+    // KERN_PROCARGS2: argc, the exec path, padding, then argv[0..argc)
+    int mib[3] = {CTL_KERN, KERN_PROCARGS2, static_cast<int>(pid)};
+    std::size_t size = 0;
+    if (::sysctl(mib, 3, nullptr, &size, nullptr, 0) != 0 || size < sizeof(int)) return out;
+    std::vector<char> buf(size);
+    if (::sysctl(mib, 3, buf.data(), &size, nullptr, 0) != 0 || size < sizeof(int)) return out;
+    int argc = 0;
+    std::memcpy(&argc, buf.data(), sizeof argc);
+    std::size_t p = sizeof argc;
+    while (p < size && buf[p] != '\0') ++p;   // the exec path
+    while (p < size && buf[p] == '\0') ++p;   // padding
+    for (int i = 0; i < argc && p < size; ++i) {
+        const std::size_t s = p;
+        while (p < size && buf[p] != '\0') ++p;
+        out.emplace_back(buf.data() + s, p - s);
+        ++p;
+    }
+#else
+    std::ifstream f{"/proc/" + std::to_string(pid) + "/cmdline", std::ios::binary};
+    std::string a;
+    while (std::getline(f, a, '\0')) out.push_back(a);
+#endif
+    return out;
 }
 
 void spawn_detached(const std::vector<std::string>& argv) {

@@ -1,60 +1,59 @@
 # hand
 
-A terminal. As plain as foot: open it, you get a shell, nothing in the way.
+A terminal. As plain as foot: open it and you get a shell, nothing in the
+way. Tabs, search, hints, copy mode and SSH are there when you reach for them.
 
-It also carries two things you'd otherwise leave the terminal for:
-
-- **the folder you're in**, beside the panes (`ctrl+shift+e`). It follows the
-  focused terminal's working directory; it is not a project, there is nothing
-  to open or configure.
-- **a real editor**, as a pane (`enter` on a file, or `ctrl+shift+f` to find
-  one). Multi-cursor, undo, folding, bracket matching, find, syntax colours —
-  next to the terminal you opened it from, in the same split tree, closed the
-  same way.
-
-An editor with a terminal is an IDE. This is a terminal with an editor.
+Built on [toe](external/toe) (the VT engine), [mayag](external/mayag) (the
+GPU UI) and [vibe](external/vibe) (the config format).
 
 ## Keys
 
-Every hand chord is `ctrl+shift+…`; plain `ctrl+…` always goes to the program
-in the terminal (or, in an editor pane, to the editor).
+Every hand chord is `ctrl+shift+…`; plain `ctrl+…` goes to the program in the
+terminal.
 
 | keys | |
 |---|---|
-| `ctrl+shift+\` / `-` | split right / down |
-| `ctrl+shift+w` | close pane |
-| `ctrl+shift+z` | zoom pane |
-| `ctrl+shift+[` / `]` | previous / next pane |
-| `ctrl+shift+t` | new tab |
-| `ctrl+shift+e` | folder panel |
-| `ctrl+shift+f` | find a file in this folder |
-| `ctrl+shift+p` | command palette |
-| `ctrl+,` | appearance: every knob of the look, and 920 presets |
-| `ctrl+s` (editor) | save |
+| `ctrl+shift+t` / `w` | new tab / close tab |
+| `ctrl+tab`, `ctrl+pgup/pgdn`, `ctrl+shift+←/→` | previous / next tab |
+| `alt+1` … `alt+9` | go to tab N |
+| `ctrl+shift+pgup/pgdn` | move the tab |
+| `ctrl+shift+s` | SSH hosts |
+| `ctrl+shift+f` | search the scrollback |
+| `ctrl+shift+space` | hints: pick a URL / path / hash on screen |
+| `ctrl+shift+m` | copy mode (vim keys through the scrollback) |
+| `ctrl+shift+z` / `x` | previous / next prompt |
+| `ctrl+shift+g` | copy the last command's output |
+| `ctrl+shift+c` / `v` | copy / paste |
+| `ctrl+=` / `-` / `0` | font size |
+| `shift+pgup/pgdn`, `shift+home/end` | scroll |
+| `ctrl+,` | settings |
+
+## SSH
+
+`ctrl+shift+s` lists every host in `~/.ssh/config` (read the way ssh reads
+it: first value wins, globs, `Include`), the machines in `known_hosts`, and
+any `user@host[:port]` you typed once. Pinned and recent hosts come first.
+Enter connects in a new tab; one connection per host is shared, so a second
+tab opens instantly. A production host (by name, or `env prod` in
+`hosts.vibe`) is marked red; a dropped connection keeps its tab and offers to
+reconnect. `~/.ssh/config` is never written; hand's notes on your hosts live
+in `hosts.vibe` beside `hand.vibe`.
+
+## Settings
+
+`ctrl+,` opens settings over the terminal. Every edit applies live and is saved to
+`~/.config/hand/hand.vibe` (the file is generated from the settings table in
+`src/settings.cpp`; every key is a setting). Colours come from all 913
+[iTerm2-Color-Schemes](https://github.com/mbadolato/iTerm2-Color-Schemes);
+regenerate the catalogue with `tools/gen_schemes.py`.
 
 ## Build
 
 ```sh
 git submodule update --init --recursive
-cmake -S . -B build -G Ninja -DCMAKE_CXX_COMPILER=clang++
-cmake --build build
-./build/hand               # window
-./build/hand --headless    # scripted self-test
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target hand
+./build/hand                              # the terminal
+./build/hand --headless --last-resort     # the self-test (also: ctest)
+./build/hand --png out.png --shot tabs    # a screenshot (tabs, settings, hosts, ssh, ...)
 ```
-
-Built on [mayag](external/mayag) (UI) and, next, [toe](external/toe) (the VT engine).
-
-## Appearance
-
-`ctrl+,` opens the appearance panel. Everything about the look and feel is a
-setting there, generated from one typed table (`include/hand/core/settings.hpp`):
-colour (polarity, accent source / hue / chroma / ANSI slot, chrome shade and
-tint, borders, opacity), type (face, size, line height, chrome scale, nerd
-icons), chrome (mayag look, roundness, density, depth, line weight, bar
-heights), tabs (five shapes, width, numbers, close button), panes, terminal,
-editor and motion. The window morphs live behind the panel.
-
-**Presets**: hand's own seven plus all 913 of
-[iTerm2-Color-Schemes](https://github.com/mbadolato/iTerm2-Color-Schemes)
-(the source maya uses), searchable and filterable; hover a card to preview it on
-the whole window, click to keep it. Regenerate with `tools/gen_schemes.py`.

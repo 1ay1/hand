@@ -7,6 +7,8 @@
 // hand.vibe, and validates input. Adding a setting is adding a row.
 
 #include <mayag/widget/settings_panel.hpp>
+#include <mayag/widget/tab_strip.hpp>
+#include <mayag/widget/terminal/cursor_fx.hpp>
 
 #include <cstdint>
 #include <string>
@@ -22,14 +24,17 @@ struct Palette {
     bool light = false;
 };
 
+// What the widgets already name, hand uses as is: one type per idea.
+using CursorAnim = mayag::dsl::CursorMotion;
+using CursorFx   = mayag::dsl::CursorFx;
+using TabStyle   = mayag::dsl::TabStripStyle;
+using TabAnim    = mayag::dsl::TabMotion;
+using TabClose   = mayag::dsl::TabClose;
+namespace motion = mayag::dsl::cursor_fx;   ///< cursor physics and particle effects
+
 enum class CursorShape : std::uint8_t { block, beam, underline };
-enum class CursorAnim : std::uint8_t { none, glide, spring, smear };
-enum class CursorFx : std::uint8_t { none, ripple, sonicboom, wireframe, pixiedust, railgun, torpedo, fireworks };
 enum class BlinkStyle : std::uint8_t { hard, fade, breathe };
-enum class TabStyle : std::uint8_t { pill, underline, flat };
 enum class TabTitle : std::uint8_t { smart, folder, program, shell };   ///< what a tab is named after
-enum class TabClose : std::uint8_t { hover, always, never };
-enum class TabAnim : std::uint8_t { stretch, slide, instant };
 /// When a paste asks first.
 enum class PasteConfirm : std::uint8_t { never, risky, multiline, unbracketed };
 /// When closing a tab / the window asks first.
@@ -72,19 +77,24 @@ struct Config {
     bool  shell_marks = true;       ///< prompt marks in the gutter
     float notify_after = 10.0f;     ///< seconds; notify when a longer command ends unfocused (0 = off)
     // behaviour
-    bool  tabs_always = false;      ///< show the tab strip with one tab too (else: from the second)
-    TabStyle tab_style = TabStyle::pill;
+    bool  tabs_always = true;       ///< show the tab strip with one tab too (else: from the second)
+    bool  decorations = false;      ///< the system title bar; off: the tab strip is the title area (restart to apply)
+    bool  option_as_alt = false;    ///< macOS: ⌥ is Alt/Meta for the shell, not a character key (restart to apply)
+    /// The strip shows with one tab too. Off on an undecorated window, the
+    /// window's buttons float small in the top-right corner instead.
+    [[nodiscard]] bool strip_always() const noexcept { return tabs_always; }
+    TabStyle tab_style = TabStyle::line;
     TabTitle tab_title = TabTitle::smart;
     TabClose tab_close = TabClose::hover;
-    TabAnim  tab_anim = TabAnim::stretch;   ///< how the active marker moves between tabs
-    float tab_height = 40.0f;
-    float tab_width = 236.0f;       ///< the widest a tab grows
+    TabAnim  tab_anim = TabAnim::slide;    ///< how the active marker moves between tabs
+    float tab_height = 26.0f;
+    float tab_width = 220.0f;       ///< the widest a tab grows
     float tab_radius = -1.0f;       ///< tab corners, px; -1 = follow window.roundness
     bool  tab_bottom = false;       ///< the strip under the terminal instead of above
-    bool  tab_icon = true;          ///< the process icon with its status ring
-    bool  tab_subtitle = true;      ///< the second line: directory / elapsed
-    bool  tab_activity = true;      ///< the output sparkline
-    bool  tab_colors = true;        ///< each tab tinted by its directory
+    bool  tab_icon = false;         ///< the process icon with its status ring
+    bool  tab_subtitle = false;     ///< the second line: directory / elapsed
+    bool  tab_activity = false;     ///< the output sparkline
+    bool  tab_colors = false;       ///< each tab tinted by its directory
     bool  tab_new_button = true;
     bool  copy_on_select = false;
     bool  sel_toolbar = true;       ///< a chip by the selection: size, copy, find, open
@@ -94,6 +104,12 @@ struct Config {
     bool  visual_bell = true;
     bool  bell_shake = false;       ///< the window shakes on BEL
     bool  links_need_ctrl = true;   ///< ctrl+click opens links (plain click selects)
+    // ssh (ctrl+shift+s): the host picker and connections
+    bool  ssh_multiplex = true;     ///< share one connection per host (ControlMaster) unless ~/.ssh/config chooses
+    bool  ssh_keepalive = true;     ///< ServerAliveInterval 15: notice a dead link in a minute, not hours
+    bool  ssh_known_hosts = true;   ///< list machines from ~/.ssh/known_hosts too
+    bool  ssh_prod_guard = true;    ///< a prod host (by name or hosts.vibe) is marked in red on its tab and frame
+    bool  ssh_reconnect = true;     ///< a dropped ssh tab offers to reconnect instead of closing
 
     // not settings: launch options
     std::string shell;          ///< [main] shell (from the file)

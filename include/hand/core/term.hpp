@@ -8,7 +8,7 @@
 // This file only translates between toe's types and mayag's widget types.
 // Kept out of the app header so editing the view never recompiles toe glue.
 
-#include "config.hpp"
+#include <hand/config/config.hpp>
 
 #include <mayag/core/event.hpp>
 #include <mayag/widget/scrollback_bar.hpp>
@@ -137,6 +137,8 @@ class Term {
     /// The scrollback binned into `buckets` minimap rows: one sampled line per
     /// bucket, as coloured runs (cached until the content changes).
     [[nodiscard]] const std::vector<mayag::dsl::ScrollbackRun>& minimap(int buckets) const;
+    /// Identifies what the last minimap() returned (changes with it).
+    [[nodiscard]] std::uint64_t minimap_version() const noexcept { return mm_key_ | 1u; }
     void scroll_to_line(int first);
 
     // ── cursor (viewport cell; visible = false when off screen / hidden) ──

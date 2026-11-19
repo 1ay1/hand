@@ -1,6 +1,6 @@
 // hand::Term — toe ⇄ mayag. The only translation unit that includes toe.
 
-#include <hand/term.hpp>
+#include <hand/core/term.hpp>
 
 #include <toe/input/keymap.hpp>
 #include <toe/term/update.hpp>
