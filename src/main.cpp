@@ -220,14 +220,30 @@ int main(int argc, char** argv) {
             return 0;
         }
         if (a == "--repro-resize") {
-            // Real fish (your config + hand's integration) through a drag of resizes.
-            // Prints the screen after each step. Bounded: every read is ≤ 50 ms.
+            // A real shell (fish by default: your config + hand's integration)
+            // through a drag of resizes. Prints the screen after each step.
+            // Bounded: every read is ≤ 50 ms. `--repro-resize /bin/zsh` for another.
+            const std::string shell = [&]() -> std::string {
+                if (i + 1 < argc && argv[i + 1][0] != '-') return argv[i + 1];
+                if (const char* path = std::getenv("PATH")) {   // fish wherever it lives (/opt/homebrew/bin on macOS)
+                    std::string_view p = path;
+                    while (!p.empty()) {
+                        const auto c = p.find(':');
+                        const std::string cand = std::string{p.substr(0, c)} + "/fish";
+                        if (::access(cand.c_str(), X_OK) == 0) return cand;
+                        if (c == std::string_view::npos) break;
+                        p.remove_prefix(c + 1);
+                    }
+                }
+                return hand::Pty::resolve_shell({});
+            }();
+            std::printf("shell: %s\n", shell.c_str());
             hand::Pty pty;
-            const auto si = hand::shell_integration("/usr/bin/fish");
+            const auto si = hand::shell_integration(shell);
             int cols = 80, rows = 24;
             hand::Term t{cols, rows, hand::palette_of(hand::Config{})};
             t.set_prompt_protect(!si.reflow_aware);
-            if (!pty.spawn(cols, rows, "/usr/bin/fish", si.env, si.args)) return 1;
+            if (!pty.spawn(cols, rows, shell, si.env, si.args)) return 1;
             const bool show_bytes = false;
             const auto pump = [&](int ms) {
                 std::string buf;
@@ -283,7 +299,10 @@ int main(int argc, char** argv) {
             resize(80, 24);
             pump(600);
             dump("after a 40-step drag burst (down to 30 cols: the prompt wraps)");
-            // the verdict: every number once, in order; exactly one live prompt line
+            // The verdict, for any shell: every number of `seq` exactly once and
+            // in order; the live prompt (the cursor's row) exactly once -- no
+            // stale copies left by a reflow; no hole between the output and
+            // the prompt. Rows BELOW the prompt are empty by design.
             const auto g = t.snapshot();
             std::vector<std::string> lines;
             for (const auto& l : g.lines) {
@@ -292,16 +311,28 @@ int main(int argc, char** argv) {
                 while (!line.empty() && line.back() == ' ') line.pop_back();
                 lines.push_back(line);
             }
-            int prompts = 0, blank_run = 0, worst_gap = 0;
-            for (const auto& l : lines) {
-                prompts += l.rfind("\u276F", 0) == 0 && l.size() <= 4 ? 1 : 0;
-                blank_run = l.empty() ? blank_run + 1 : 0;
-                worst_gap = std::max(worst_gap, blank_run);
+            const int cur = std::clamp(t.cursor().row, 0, static_cast<int>(lines.size()) - 1);
+            const std::string prompt = lines[static_cast<std::size_t>(cur)];
+            int prompts = 0, blank_run = 0, worst_gap = 0, next = 1;
+            bool order_ok = true;
+            for (int r = 0; r < static_cast<int>(lines.size()); ++r) {
+                const std::string& l = lines[static_cast<std::size_t>(r)];
+                if (!prompt.empty() && l == prompt) ++prompts;
+                if (r < cur) {
+                    blank_run = l.empty() ? blank_run + 1 : 0;
+                    worst_gap = std::max(worst_gap, blank_run);
+                }
+                if (!l.empty() && l.find_first_not_of("0123456789") == std::string::npos) {
+                    if (std::stoi(l) == next) ++next;
+                    else order_ok = false;
+                }
             }
-            std::printf("\nverdict: %d empty prompt line(s) on screen, longest blank run %d\n", prompts, worst_gap);
+            const bool all_numbers = order_ok && next == 13;
+            std::printf("\nverdict: prompt \"%s\" on screen %d time(s), seq 1..12 %s, longest blank run above the prompt %d\n",
+                        prompt.c_str(), prompts, all_numbers ? "intact" : "BROKEN", worst_gap);
             pty.write("exit\r");
             pump(300);
-            return prompts == 1 && worst_gap <= 2 ? 0 : 1;
+            return prompts == 1 && all_numbers && worst_gap <= 2 ? 0 : 1;
         }
     }
     for (int i = 1; i < argc; ++i) {
