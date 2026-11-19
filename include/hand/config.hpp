@@ -23,6 +23,17 @@ struct Palette {
 };
 
 enum class CursorShape : std::uint8_t { block, beam, underline };
+enum class CursorAnim : std::uint8_t { none, glide, spring, smear };
+enum class CursorFx : std::uint8_t { none, ripple, sonicboom, wireframe, pixiedust, railgun, torpedo, fireworks };
+enum class BlinkStyle : std::uint8_t { hard, fade, breathe };
+enum class TabStyle : std::uint8_t { pill, underline, flat };
+enum class TabTitle : std::uint8_t { smart, folder, program, shell };   ///< what a tab is named after
+enum class TabClose : std::uint8_t { hover, always, never };
+enum class TabAnim : std::uint8_t { stretch, slide, instant };
+/// When a paste asks first.
+enum class PasteConfirm : std::uint8_t { never, risky, multiline, unbracketed };
+/// When closing a tab / the window asks first.
+enum class CloseConfirm : std::uint8_t { never, running, always };
 
 struct Config {
     // font
@@ -37,11 +48,18 @@ struct Config {
     CursorShape cursor = CursorShape::block;
     bool  cursor_blink = true;
     float blink_ms = 500.0f;
-    bool  cursor_smooth = true;     ///< glide between cells with a short trail
-    bool  cursor_glow = false;       ///< a soft light under the cursor
+    // motion
+    CursorAnim cursor_anim = CursorAnim::glide;   ///< how the cursor travels between cells
+    CursorFx   cursor_fx = CursorFx::none;        ///< a little show at the cursor as you type
+    BlinkStyle blink_style = BlinkStyle::fade;
+    float      motion_speed = 1.0f;               ///< scales every animation's clock
+    float      cursor_trail = 1.0f;               ///< tail length (× default); 0 = no tail
+    bool  cursor_glow = false;
+    bool  motion = true;            ///< fades and slides: cursor blink, panels, new lines       ///< a soft light under the cursor
     // window
     float padding = 8.0f;
     float opacity = 1.0f;
+    float roundness = 1.0f;         ///< every corner radius (panels, menus, tabs, controls); 0 = square
     // scrollback
     float scrollback = 10000.0f;
     float scroll_lines = 3.0f;
@@ -54,8 +72,27 @@ struct Config {
     bool  shell_marks = true;       ///< prompt marks in the gutter
     float notify_after = 10.0f;     ///< seconds; notify when a longer command ends unfocused (0 = off)
     // behaviour
+    bool  tabs_always = false;      ///< show the tab strip with one tab too (else: from the second)
+    TabStyle tab_style = TabStyle::pill;
+    TabTitle tab_title = TabTitle::smart;
+    TabClose tab_close = TabClose::hover;
+    TabAnim  tab_anim = TabAnim::stretch;   ///< how the active marker moves between tabs
+    float tab_height = 40.0f;
+    float tab_width = 236.0f;       ///< the widest a tab grows
+    float tab_radius = -1.0f;       ///< tab corners, px; -1 = follow window.roundness
+    bool  tab_bottom = false;       ///< the strip under the terminal instead of above
+    bool  tab_icon = true;          ///< the process icon with its status ring
+    bool  tab_subtitle = true;      ///< the second line: directory / elapsed
+    bool  tab_activity = true;      ///< the output sparkline
+    bool  tab_colors = true;        ///< each tab tinted by its directory
+    bool  tab_new_button = true;
     bool  copy_on_select = false;
+    bool  sel_toolbar = true;       ///< a chip by the selection: size, copy, find, open
+    bool  sel_flash = true;         ///< the selection flashes when it is copied
+    PasteConfirm paste_confirm = PasteConfirm::multiline;
+    CloseConfirm close_confirm = CloseConfirm::running;
     bool  visual_bell = true;
+    bool  bell_shake = false;       ///< the window shakes on BEL
     bool  links_need_ctrl = true;   ///< ctrl+click opens links (plain click selects)
 
     // not settings: launch options

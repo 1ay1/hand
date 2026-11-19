@@ -82,6 +82,16 @@ void convert_cell(const Screen& s, const toe::term::Palette& pal, const toe::ter
 
 }  // namespace
 
+/// A command block whose rows still make sense (prompt <= output <= end). A
+/// `clear` wipes the screen under a block's feet and leaves it pointing at
+/// rows that now hold something else: those are not drawn, not jumped to.
+bool block_valid(const toe::term::CommandBlock& b) {
+    if (b.prompt_row < 0) return false;
+    if (b.output_row >= 0 && b.output_row < b.prompt_row) return false;
+    if (b.finished() && b.end_row >= 0 && b.end_row < std::max(b.prompt_row, b.output_row)) return false;
+    return true;
+}
+
 struct Term::Impl {
     toe::term::Model m;
     Impl(int cols, int rows, const Palette& pal, int scrollback)
@@ -144,6 +154,8 @@ void Term::set_palette(const Palette& pal) {
     p_->m.cfg.default_bg = rgb_of(pal.bg);
     ++epoch_; ++content_epoch_;
 }
+
+void Term::set_prompt_protect(bool on) { p_->m.cfg.protect_prompt_on_resize = on; }
 
 void Term::set_scrollback(int lines) {
     lines = std::max(lines, 0);
@@ -267,10 +279,11 @@ bool Term::alt_screen() const { return p_->m.screen.on_alt_screen(); }
 int Term::scroll_offset() const { return p_->m.screen.scroll_offset(); }
 int Term::history() const { return p_->m.screen.history_rows(); }
 
-void Term::select_begin(int col, int row, int clicks) {
+void Term::select_begin(int col, int row, int clicks, bool block) {
     auto& s = p_->m.screen;
     const Screen::AbsPos at{p_->abs_row(row), std::clamp(col, 0, cols() - 1)};
-    if (clicks >= 3) s.selection_line(at);
+    if (block) s.selection_begin(at, Screen::SelectMode::block);
+    else if (clicks >= 3) s.selection_line(at);
     else if (clicks == 2) s.selection_word(at);
     else s.selection_begin(at, Screen::SelectMode::character);
     ++epoch_;
@@ -279,6 +292,40 @@ void Term::select_extend(int col, int row) {
     p_->m.screen.selection_extend({p_->abs_row(row), std::clamp(col, 0, cols() - 1)});
     ++epoch_;
 }
+void Term::select_abs(std::int64_t r0, int c0, std::int64_t r1, int c1, int mode) {
+    auto& s = p_->m.screen;
+    const Screen::AbsPos a{r0, std::clamp(c0, 0, cols() - 1)}, b{r1, std::clamp(c1, 0, cols() - 1)};
+    if (mode == 1) s.selection_line(a);
+    else s.selection_begin(a, mode == 2 ? Screen::SelectMode::block : Screen::SelectMode::character);
+    s.selection_extend(b);
+    ++epoch_;
+}
+
+Term::SelInfo Term::selection_info() const {
+    const auto& s = p_->m.screen;
+    SelInfo i;
+    const auto r = s.selection_range();
+    if (!r) return i;
+    i.any = true;
+    i.block = s.selection_mode() == Screen::SelectMode::block;
+    i.lines_mode = s.selection_mode() == Screen::SelectMode::line;
+    i.r0 = r->first.row; i.c0 = r->first.col;
+    i.r1 = r->second.row; i.c1 = r->second.col;
+    i.lines = static_cast<int>(i.r1 - i.r0 + 1);
+    for (unsigned char ch : s.selected_text()) i.chars += (ch & 0xC0) != 0x80 ? 1 : 0;
+    return i;
+}
+
+std::int64_t Term::view_to_abs(int row) const { return p_->m.screen.viewport_to_abs(row); }
+
+std::u32string Term::line(std::int64_t abs) const {
+    std::u32string out;
+    for (const auto& c : p_->m.screen.abs_row_cells(abs)) out.push_back(c.spacer() ? U'\0' : (c.cp == 0 ? U' ' : c.cp));
+    return out;
+}
+
+bool Term::bracketed() const { return p_->m.screen.bracketed_paste(); }
+
 void Term::select_clear() { if (p_->m.screen.has_selection()) { p_->m.screen.selection_clear(); ++epoch_; } }
 bool Term::has_selection() const { return p_->m.screen.has_selection(); }
 std::string Term::selection_text() const { return p_->m.screen.selected_text(); }
@@ -342,6 +389,7 @@ std::string uri_to_path(std::string w) {
 std::vector<Term::Command> Term::commands() const {
     std::vector<Command> v;
     for (const auto& b : p_->m.commands.blocks()) {
+        if (!block_valid(b)) continue;
         Command c;
         c.id = b.id;
         c.prompt_row = b.prompt_row;
@@ -368,6 +416,7 @@ std::string trim(std::string s) {
 
 std::string Term::command_text(const Command& c) const {
     for (const auto& b : p_->m.commands.blocks()) {
+        if (!block_valid(b)) continue;
         if (b.id != c.id) continue;
         if (b.input_row < 0 || b.output_row < 0) return {};
         return trim(p_->m.screen.text_between_abs(b.input_row, std::max(b.output_row, b.input_row + 1), b.input_col));
@@ -386,6 +435,7 @@ bool Term::jump_prompt(int dir) {
     const std::int64_t top = s.viewport_to_abs(0);
     std::int64_t best = -1;
     for (const auto& b : p_->m.commands.blocks()) {
+        if (!block_valid(b)) continue;
         const std::int64_t r = b.prompt_row;
         if (r < 0) continue;
         if (dir < 0 && r < top && (best < 0 || r > best)) best = r;
@@ -550,6 +600,7 @@ dsl::TermGrid Term::grid_at(std::int64_t first_abs, int rows, int max_cols) cons
     // prompt marks in the peek too -- their rows are the NORMAL screen's; the
     // alternate screen (vim, htop, cmatrix) has its own rows and no prompts
     if (!s.on_alt_screen()) for (const auto& b : p_->m.commands.blocks()) {
+        if (!block_valid(b)) continue;
         const std::int64_t vr = b.prompt_row - first_abs;
         if (b.prompt_row < 0 || vr < 0 || vr >= g.rows) continue;
         g.lines[static_cast<std::size_t>(vr)].mark = b.output_row < 0 ? dsl::TermMark::prompt
@@ -626,6 +677,7 @@ dsl::TermGrid Term::snapshot(bool above) const {
     // shell-integration marks on prompt rows (never on the alternate screen:
     // command rows are the normal screen's history, not the full-screen app's grid)
     if (!s.on_alt_screen()) for (const auto& b : p_->m.commands.blocks()) {
+        if (!block_valid(b)) continue;
         if (b.prompt_row < 0) continue;
         const std::int64_t vr = b.prompt_row - s.viewport_to_abs(0) + shift;
         if (vr < 0 || vr >= g.rows) continue;

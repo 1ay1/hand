@@ -85,13 +85,29 @@ const std::vector<Row>& rows() {
          GET(c.cursor_blink), SET(c.cursor_blink = v > 0.5f)},
         {"cursor", "blink_rate", "half a blink period", Kind::number, 200, 1500, 50, 0, "ms", 1, none,
          GET(c.blink_ms), SET(c.blink_ms = v)},
-        {"cursor", "smooth", "glide between cells, leaving a short trail", Kind::toggle, 0, 1, 1, 0, "", 1, none,
-         GET(c.cursor_smooth), SET(c.cursor_smooth = v > 0.5f)},
         {"cursor", "glow", "a soft light around the cursor", Kind::toggle, 0, 1, 1, 0, "", 1, none,
          GET(c.cursor_glow), SET(c.cursor_glow = v > 0.5f)},
 
+        {"motion", "cursor", "how the cursor travels: glide, spring (overshoots), smear (stretches)", Kind::choice, 0, 3, 1, 0, "", 1,
+         [] { return std::vector<std::string>{"none", "glide", "spring", "smear"}; },
+         GET(static_cast<int>(c.cursor_anim)), SET(c.cursor_anim = static_cast<CursorAnim>(std::clamp(static_cast<int>(v), 0, 3)))},
+        {"motion", "effect", "a little show at the cursor as you type (fireworks: on Enter)", Kind::cycle, 0, 0, 0, 0, "", 1,
+         [] { return std::vector<std::string>{"none", "ripple", "sonicboom", "wireframe", "pixiedust", "railgun", "torpedo", "fireworks"}; },
+         GET(static_cast<int>(c.cursor_fx)), SET(c.cursor_fx = static_cast<CursorFx>(std::clamp(static_cast<int>(v), 0, 7)))},
+        {"motion", "trail", "how long the cursor's tail is -- 0 none, 4 a long comet", Kind::number, 0.0f, 4.0f, 0.1f, 1, "\u00D7", 1, none,
+         GET(c.cursor_trail), SET(c.cursor_trail = v)},
+        {"motion", "blink", "how the cursor blinks", Kind::choice, 0, 2, 1, 0, "", 1,
+         [] { return std::vector<std::string>{"hard", "fade", "breathe"}; },
+         GET(static_cast<int>(c.blink_style)), SET(c.blink_style = static_cast<BlinkStyle>(std::clamp(static_cast<int>(v), 0, 2)))},
+        {"motion", "speed", "how fast every animation runs", Kind::number, 0.25f, 3.0f, 0.05f, 2, "\u00D7", 1, none,
+         GET(c.motion_speed), SET(c.motion_speed = v)},
+        {"motion", "interface", "panels fade in and out, new lines glide up", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+         GET(c.motion), SET(c.motion = v > 0.5f)},
+
         {"window", "padding", "space around the grid", Kind::number, 0, 40, 1, 0, "px", 1, none,
          GET(c.padding), SET(c.padding = v)},
+        {"window", "roundness", "every corner: panels, menus, tabs, controls (0 = square)", Kind::number, 0, 2.5f, 0.05f, 2, "\u00D7", 1, none,
+         GET(c.roundness), SET(c.roundness = v)},
         {"window", "opacity", "background opacity (compositor permitting)", Kind::number, 0.5f, 1.0f, 0.02f, 0, "%", 100, none,
          GET(c.opacity), SET(c.opacity = v)},
 
@@ -115,12 +131,57 @@ const std::vector<Row>& rows() {
         {"shell", "notify_after", "notify when a command this long ends while away (0 = off)", Kind::number, 0, 120, 1, 0, "s", 1, none,
          GET(c.notify_after), SET(c.notify_after = v)},
 
+        {"tabs", "always", "show the tab strip even with a single tab (ctrl+shift+t opens a tab)", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+         GET(c.tabs_always), SET(c.tabs_always = v > 0.5f)},
+        {"tabs", "style", "how the active tab is marked: a lifted pill, a sliding underline, a flat block", Kind::choice, 0, 2, 1, 0, "", 1,
+         [] { return std::vector<std::string>{"pill", "underline", "flat"}; },
+         GET(static_cast<int>(c.tab_style)), SET(c.tab_style = static_cast<TabStyle>(std::clamp(static_cast<int>(v), 0, 2)))},
+        {"tabs", "animation", "how the active marker moves: stretch (elastic), slide, instant", Kind::choice, 0, 2, 1, 0, "", 1,
+         [] { return std::vector<std::string>{"stretch", "slide", "instant"}; },
+         GET(static_cast<int>(c.tab_anim)), SET(c.tab_anim = static_cast<TabAnim>(std::clamp(static_cast<int>(v), 0, 2)))},
+        {"tabs", "position", "the strip above or below the terminal", Kind::choice, 0, 1, 1, 0, "", 1,
+         [] { return std::vector<std::string>{"top", "bottom"}; },
+         GET(c.tab_bottom ? 1 : 0), SET(c.tab_bottom = v > 0.5f)},
+        {"tabs", "title", "what a tab is named after (smart: the running command, else the program, else the folder)", Kind::choice, 0, 3, 1, 0, "", 1,
+         [] { return std::vector<std::string>{"smart", "folder", "program", "shell"}; },
+         GET(static_cast<int>(c.tab_title)), SET(c.tab_title = static_cast<TabTitle>(std::clamp(static_cast<int>(v), 0, 3)))},
+        {"tabs", "height", "the strip's height (compact ~30, roomy ~52)", Kind::number, 26, 60, 1, 0, "px", 1, none,
+         GET(c.tab_height), SET(c.tab_height = v)},
+        {"tabs", "width", "the widest a tab grows", Kind::number, 110, 400, 2, 0, "px", 1, none,
+         GET(c.tab_width), SET(c.tab_width = v)},
+        {"tabs", "corners", "tab corner radius (-1: follow window.roundness)", Kind::number, -1, 20, 1, 0, "px", 1, none,
+         GET(c.tab_radius), SET(c.tab_radius = v)},
+        {"tabs", "close_button", "when a tab shows its close button", Kind::choice, 0, 2, 1, 0, "", 1,
+         [] { return std::vector<std::string>{"hover", "always", "never"}; },
+         GET(static_cast<int>(c.tab_close)), SET(c.tab_close = static_cast<TabClose>(std::clamp(static_cast<int>(v), 0, 2)))},
+        {"tabs", "icon", "the program icon, with a ring that spins while a command runs", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+         GET(c.tab_icon), SET(c.tab_icon = v > 0.5f)},
+        {"tabs", "subtitle", "a second line: the directory, and the time while running", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+         GET(c.tab_subtitle), SET(c.tab_subtitle = v > 0.5f)},
+        {"tabs", "activity", "a sparkline of recent output", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+         GET(c.tab_activity), SET(c.tab_activity = v > 0.5f)},
+        {"tabs", "colors", "tint each tab by its directory (off: the accent)", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+         GET(c.tab_colors), SET(c.tab_colors = v > 0.5f)},
+        {"tabs", "new_button", "the + button at the end of the strip", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+         GET(c.tab_new_button), SET(c.tab_new_button = v > 0.5f)},
+        {"selection", "toolbar", "a chip by the selection: its size, and copy / find / open", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+         GET(c.sel_toolbar), SET(c.sel_toolbar = v > 0.5f)},
+        {"selection", "flash", "the selection flashes when it is copied", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+         GET(c.sel_flash), SET(c.sel_flash = v > 0.5f)},
+        {"confirm", "paste", "ask before pasting: never, risky (sudo, rm -rf, curl|sh, control chars), any multi-line, or only into programs without bracketed paste", Kind::choice, 0, 3, 1, 0, "", 1,
+         [] { return std::vector<std::string>{"never", "risky", "multiline", "unbracketed"}; },
+         GET(static_cast<int>(c.paste_confirm)), SET(c.paste_confirm = static_cast<PasteConfirm>(std::clamp(static_cast<int>(v), 0, 3)))},
+        {"confirm", "close", "ask before closing a tab or the window: never, while something runs, always", Kind::choice, 0, 2, 1, 0, "", 1,
+         [] { return std::vector<std::string>{"never", "running", "always"}; },
+         GET(static_cast<int>(c.close_confirm)), SET(c.close_confirm = static_cast<CloseConfirm>(std::clamp(static_cast<int>(v), 0, 2)))},
         {"mouse", "copy_on_select", "selecting text copies it", Kind::toggle, 0, 1, 1, 0, "", 1, none,
          GET(c.copy_on_select), SET(c.copy_on_select = v > 0.5f)},
         {"mouse", "links_need_ctrl", "links open on ctrl+click (off: any click)", Kind::toggle, 0, 1, 1, 0, "", 1, none,
          GET(c.links_need_ctrl), SET(c.links_need_ctrl = v > 0.5f)},
         {"bell", "visual", "flash the screen on BEL", Kind::toggle, 0, 1, 1, 0, "", 1, none,
          GET(c.visual_bell), SET(c.visual_bell = v > 0.5f)},
+        {"bell", "shake", "the window shakes on BEL", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+         GET(c.bell_shake), SET(c.bell_shake = v > 0.5f)},
     };
     return r;
 }
@@ -138,6 +199,10 @@ const char* icon_of(std::string_view section) {
         if (section == "mouse") return "\u2196";
         if (section == "bell") return "!";
         if (section == "shell") return "$";
+        if (section == "motion") return "~";
+        if (section == "tabs") return "#";
+        if (section == "selection") return "[";
+        if (section == "confirm") return "?";
         return "\u2022";
     }
     if (section == "font") return "\uF031";
@@ -148,6 +213,10 @@ const char* icon_of(std::string_view section) {
     if (section == "mouse") return "\uF245";
     if (section == "bell") return "\uF0F3";
     if (section == "shell") return "\uF489";
+    if (section == "motion") return "\uF135";
+    if (section == "tabs") return "\uF2D2";
+    if (section == "selection") return "\uF246";
+    if (section == "confirm") return "\uF071";
     return "\u2022";
 }
 

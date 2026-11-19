@@ -24,6 +24,11 @@ end
 set -q __hand_si; and exit
 set -g __hand_si 1
 
+# hand reflows the screen itself on resize (like kitty / VTE): fish must not
+# also repaint the prompt by counting rows up from the cursor, or the two
+# disagree and stale prompt rows / blank gaps pile up on every drag.
+set -g fish_handle_reflow 0
+
 function __hand_osc7 --on-variable PWD
     printf '\e]7;file://%s%s\a' $hostname (string escape --style=url -- $PWD)
 end
@@ -107,6 +112,7 @@ ShellLaunch shell_integration(const std::string& shell) {
         const std::string orig = x && *x ? x : "";
         if (!orig.empty()) out.env.emplace_back("HAND_ORIG_XDG_DATA_DIRS", orig);
         out.env.emplace_back("XDG_DATA_DIRS", dir.string() + ":" + (orig.empty() ? "/usr/local/share:/usr/share" : orig));
+        out.reflow_aware = true;
     } else if (name == "zsh") {
         if (!write_file(dir / "zsh" / ".zshenv", kZsh)) return {};
         if (const char* z = std::getenv("ZDOTDIR"); z && *z) out.env.emplace_back("HAND_ORIG_ZDOTDIR", z);

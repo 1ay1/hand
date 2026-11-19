@@ -50,6 +50,8 @@ class Term {
     void set_palette(const Palette& p);
     /// Change scrollback capacity (drops history beyond it).
     void set_scrollback(int lines);
+    /// Crop (don't rewrap) the prompt on resize -- for shells that repaint by counting rows.
+    void set_prompt_protect(bool on);
 
     // ── input → bytes for the pty ──────────────────────────────────────
     /// A named key (arrows, enter, F-keys, ctrl-letters...). Empty when the
@@ -74,7 +76,21 @@ class Term {
     [[nodiscard]] bool alt_screen() const;
     [[nodiscard]] int  scroll_offset() const;
     [[nodiscard]] int  history() const;
-    void select_begin(int col, int row, int clicks);   ///< viewport coords; 2 = word, 3 = line
+    void select_begin(int col, int row, int clicks, bool block = false);   ///< viewport coords; 2 = word, 3 = line
+    /// Select absolute (r0,c0)..(r1,c1); mode 0 characters, 1 whole lines, 2 a block.
+    void select_abs(std::int64_t r0, int c0, std::int64_t r1, int c1, int mode);
+    struct SelInfo {
+        bool any = false, block = false, lines_mode = false;
+        std::int64_t r0 = 0, r1 = 0;   ///< absolute rows, inclusive
+        int c0 = 0, c1 = 0;
+        int lines = 0;
+        std::size_t chars = 0;         ///< codepoints in the copied text
+    };
+    [[nodiscard]] SelInfo selection_info() const;
+    [[nodiscard]] std::int64_t view_to_abs(int row) const;
+    /// One absolute row as one codepoint per column (U' ' for blank, 0 for a wide glyph's spacer).
+    [[nodiscard]] std::u32string line(std::int64_t abs) const;
+    [[nodiscard]] bool bracketed() const;   ///< the app asked for bracketed paste
     void select_extend(int col, int row);
     void select_clear();
     [[nodiscard]] bool has_selection() const;

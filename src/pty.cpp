@@ -35,7 +35,7 @@ std::string Pty::resolve_shell(std::string shell) {
 }
 
 bool Pty::spawn(int cols, int rows, std::string shell, const std::vector<std::pair<std::string, std::string>>& env,
-                const std::vector<std::string>& args) {
+                const std::vector<std::string>& args, const std::string& cwd) {
     shell = resolve_shell(std::move(shell));
     winsize ws{};
     ws.ws_col = static_cast<unsigned short>(cols);
@@ -53,6 +53,7 @@ bool Pty::spawn(int cols, int rows, std::string shell, const std::vector<std::pa
         signal(SIGPIPE, SIG_DFL);
         signal(SIGCHLD, SIG_DFL);
         for (const auto& [k, v] : env) ::setenv(k.c_str(), v.c_str(), 1);
+        if (!cwd.empty() && ::chdir(cwd.c_str()) != 0) { /* keep the inherited directory */ }
         const char* argv0 = std::strrchr(shell.c_str(), '/');
         argv0 = argv0 != nullptr ? argv0 + 1 : shell.c_str();
         std::vector<char*> av;

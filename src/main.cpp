@@ -72,6 +72,10 @@ constexpr std::string_view kDemo =
 
 }  // namespace
 
+bool motion_settled(const hand::App::Model& m) {
+    return hand::motion::tail_settled(m.fx, m.cur_x, m.cur_y);
+}
+
 int main(int argc, char** argv) {
     enum class Mode { window, png, headless } mode = Mode::window;
     std::string out = "hand.png";
@@ -81,6 +85,113 @@ int main(int argc, char** argv) {
     std::string shot;
     for (int i = 1; i < argc; ++i) {
         const std::string_view a = argv[i];
+        if (a == "--repro-narrow-fish") {
+            hand::Pty pty;
+            const auto si = hand::shell_integration("/usr/bin/fish");
+            hand::Term t{100, 30, hand::palette_of(hand::Config{})};
+            t.set_prompt_protect(!si.reflow_aware);
+            if (!pty.spawn(100, 30, "/usr/bin/fish", si.env, si.args)) return 1;
+            const auto pump = [&](int ms) {
+                std::string buf;
+                for (int k = 0; k < ms / 50 && hand::pty_read(pty.fd(), buf, 50); ++k) {
+                    const auto fx = t.feed(buf); buf.clear();
+                    if (!fx.reply.empty()) pty.write(fx.reply);
+                }
+            };
+            const auto dump = [&](const char* w) {
+                std::printf("\n=== %s (%dx%d cursor row %d)\n", w, t.cols(), t.rows(), t.cursor().row);
+                const auto g = t.snapshot();
+                for (int r = 0; r < g.rows; ++r) {
+                    std::string l;
+                    for (const auto& c : g.lines[static_cast<std::size_t>(r)].cells) l += c.text;
+                    while (!l.empty() && l.back() == ' ') l.pop_back();
+                    const char mk = g.lines[static_cast<std::size_t>(r)].mark == mayag::dsl::TermMark::none ? ' ' : '#';
+                    std::printf("%c%2d|%s\n", mk, r, l.substr(0, 70).c_str());
+                }
+            };
+            pump(1500);
+            pty.write(std::getenv("HAND_CMD") ? std::getenv("HAND_CMD") : "clear; fastfetch\r");
+            pump(2500);
+            dump("start");
+            const auto tail = [&](const char* w) {
+                const auto g = t.snapshot();
+                std::printf("--- %s %dx%d cur=%d blocks:", w, t.cols(), t.rows(), t.cursor().row);
+                for (const auto& c : t.commands()) std::printf(" [p%lld o%lld e%lld]", static_cast<long long>(c.prompt_row - t.view_to_abs(0)),
+                                                              static_cast<long long>(c.output_row - t.view_to_abs(0)), static_cast<long long>(c.end_row - t.view_to_abs(0)));
+                std::printf("\n");
+                for (int r = 12; r < g.rows; ++r) {
+                    std::string l;
+                    for (const auto& c : g.lines[static_cast<std::size_t>(r)].cells) l += c.text;
+                    while (!l.empty() && l.back() == ' ') l.pop_back();
+                    std::printf("   %2d|%s\n", r, l.substr(0, 60).c_str());
+                }
+            };
+            if (std::getenv("HAND_TRACE")) {
+                for (int c = 95; c >= 30; c -= 5) {
+                    t.resize(c, 30);
+                    char w[32]; std::snprintf(w, sizeof w, "resized %d", c); tail(w);
+                    pty.resize(c, 30); pump(300);
+                    std::snprintf(w, sizeof w, "fish redrew %d", c); tail(w);
+                }
+                for (int c = 35; c <= 100; c += 5) {
+                    t.resize(c, 30);
+                    char w[32]; std::snprintf(w, sizeof w, "resized %d", c); tail(w);
+                    pty.resize(c, 30); pump(300);
+                    std::snprintf(w, sizeof w, "fish redrew %d", c); tail(w);
+                }
+                return 0;
+            }
+            for (int c = 95; c >= 30; c -= 5) { t.resize(c, 30); pty.resize(c, 30); pump(60); }
+            pump(500);
+            dump("narrowed to 30");
+            for (int c = 35; c <= 100; c += 5) { t.resize(c, 30); pty.resize(c, 30); pump(60); }
+            pump(500);
+            dump("wide again");
+            // a real drag: no pauses at all, then one settle
+            for (int k = 0; k < 3; ++k) {
+                for (int c = 100; c >= 28; c -= 3) { t.resize(c, 30); pty.resize(c, 30); }
+                pump(50);
+                for (int c = 28; c <= 100; c += 3) { t.resize(c, 30); pty.resize(c, 30); }
+                pump(50);
+            }
+            t.resize(100, 30); pty.resize(100, 30);
+            pump(800);
+            dump("after 3 fast drags");
+            // verdict: the prompt sits right under the content
+            const auto g2 = t.snapshot();
+            int last_content = -1, prompt_row = t.cursor().row;
+            for (int r = 0; r < prompt_row - 1; ++r) {
+                std::string l;
+                for (const auto& c : g2.lines[static_cast<std::size_t>(r)].cells) l += c.text;
+                if (l.find_first_not_of(' ') != std::string::npos) last_content = r;
+            }
+            const int gap = prompt_row - 1 - last_content - 1;
+            std::printf("\nverdict: %d blank row(s) between the output and the prompt\n", gap);
+            pty.write("exit\r"); pump(200);
+            return gap <= 1 ? 0 : 1;
+        }
+        if (a == "--repro-narrow") {
+            // wide output, then narrow hard, then wide again (no shell: toe alone)
+            hand::Term t{100, 30, hand::palette_of(hand::Config{})};
+            std::string text = "\x1b]133;A\a$ \x1b]133;B\afastfetch\r\n\x1b]133;C\a";
+            for (int k = 0; k < 14; ++k) text += "      line " + std::to_string(k) + " " + std::string(60, static_cast<char>('a' + k)) + "\r\n";
+            text += "\x1b]133;D;0\a\x1b]133;A\a~/hand on main\r\n\x1b]133;B\a> ";
+            (void)t.feed(text);
+            const auto dump = [&](const char* w) {
+                std::printf("\n=== %s (%dx%d cursor row %d)\n", w, t.cols(), t.rows(), t.cursor().row);
+                const auto g = t.snapshot();
+                for (int r = 0; r < g.rows; ++r) {
+                    std::string l;
+                    for (const auto& c : g.lines[static_cast<std::size_t>(r)].cells) l += c.text;
+                    while (!l.empty() && l.back() == ' ') l.pop_back();
+                    std::printf("%2d|%s\n", r, l.substr(0, 60).c_str());
+                }
+            };
+            dump("start");
+            t.resize(30, 30); dump("narrow 30");
+            t.resize(100, 30); dump("wide again");
+            return 0;
+        }
         if (a == "--repro-resize") {
             // Real fish (your config + hand's integration) through a drag of resizes.
             // Prints the screen after each step. Bounded: every read is ≤ 50 ms.
@@ -88,6 +199,7 @@ int main(int argc, char** argv) {
             const auto si = hand::shell_integration("/usr/bin/fish");
             int cols = 80, rows = 24;
             hand::Term t{cols, rows, hand::palette_of(hand::Config{})};
+            t.set_prompt_protect(!si.reflow_aware);
             if (!pty.spawn(cols, rows, "/usr/bin/fish", si.env, si.args)) return 1;
             const bool show_bytes = false;
             const auto pump = [&](int ms) {
@@ -297,6 +409,26 @@ int main(int argc, char** argv) {
                         rt.press_key(K::escape);   // closes
                         ok(!rt.model().settings_open, "esc clears the filter, then closes");
                         {
+                            // motion: the panel fades out (still drawn a moment), the blink fades
+                            rt.window().drive_frames(true);
+                            rt.press_key(K::comma, Mods{.ctrl = true});
+                            rt.tick();
+                            ok(rt.model().settings_t > 0.0f && rt.model().settings_t < 1.0f, "the settings panel fades in");
+                            for (int i = 0; i < 30; ++i) rt.tick();
+                            ok(rt.model().settings_t == 1.0f, "...and settles");
+                            rt.press_key(K::escape);
+                            rt.tick();
+                            ok(!rt.model().settings_open && rt.model().settings_t > 0.0f, "closing, it fades out instead of vanishing");
+                            for (int i = 0; i < 30; ++i) rt.tick();
+                            ok(rt.model().settings_t == 0.0f, "...and is gone");
+                            rt.send(hand::App::Msg{hand::App::Blink{}});
+                            rt.tick();
+                            const float mid = rt.model().cur_a;
+                            for (int i = 0; i < 30; ++i) rt.tick();
+                            ok(mid > 0.0f && mid < 1.0f && (rt.model().cur_a == 0.0f || rt.model().cur_a == 1.0f), "the cursor blink fades, not snaps");
+                            rt.window().drive_frames(false);
+                        }
+                        {
                             // ── the dropdown with the mouse ────────────────────────────────────
                             rt.press_key(K::comma, Mods{.ctrl = true});
                             rt.tick();
@@ -425,8 +557,70 @@ int main(int argc, char** argv) {
                         const std::string label = hi < rt.model().hint_labels.size() ? rt.model().hint_labels[hi] : "?";
                         rt.type(label);
                         ok(!rt.model().hinting && rt.window().get_clipboard() == "3f9a2c1d", "typing its label copies it");
+                        rt.window().drive_frames(true);
+                        for (int i = 0; i < 30; ++i) rt.tick();
+                        feed("\r\n");
+                        {
+                            std::string fill;   // fill to the bottom so the next line scrolls
+                            for (int i = 0; i < 80; ++i) fill += "x\r\n";
+                            feed(fill);
+                        }
+                        for (int i = 0; i < 40; ++i) rt.tick();
+                        feed("\r\n");
+                        ok(rt.model().out_shift > 0.0f, "Enter at the live prompt glides the screen up a line");
+                        for (int i = 0; i < 40; ++i) rt.tick();
+                        ok(rt.model().out_shift == 0.0f, "...and settles");
+                        rt.window().drive_frames(false);
+                        {
+                            // ── motion: every effect fires on a typed move, then clears; spring overshoots
+                            using E2 = mayag::Edit<hand::App::Model>;
+                            rt.window().drive_frames(true);
+                            const char* names[] = {"ripple", "sonicboom", "wireframe", "pixiedust", "railgun", "torpedo", "fireworks"};
+                            bool all = true;
+                            for (int fx = 1; fx <= 7; ++fx) {
+                                rt.send(hand::App::Msg{E2{[fx](hand::App::Model& m) { m.cfg.cursor_fx = static_cast<hand::CursorFx>(fx); m.fx.ps.clear(); }}});
+                                rt.type("x");                                          // the keystroke...
+                                if (fx == 7) rt.press_key(K::enter);
+                                feed(fx == 7 ? "x\r\n" : "x");                       // ...and its echo moves the cursor
+                                rt.tick();
+                                const bool fired = rt.model().fx.busy();
+                                for (int i = 0; i < 90; ++i) rt.tick();
+                                const bool cleared = !rt.model().fx.busy();
+                                if (!fired || !cleared) { std::printf("    effect %s: fired=%d cleared=%d\n", names[fx - 1], fired, cleared); all = false; }
+                            }
+                            ok(all, "all seven cursor effects fire on a typed move and clear away");
+                            rt.send(hand::App::Msg{E2{[](hand::App::Model& m) {
+                                m.cfg.cursor_fx = hand::CursorFx::none; m.cfg.cursor_anim = hand::CursorAnim::spring; }}});
+                            for (int i = 0; i < 30; ++i) rt.tick();
+                            const int c0 = rt.model().term->cursor().col;
+                            feed("\x1b[" + std::to_string(c0 + 11) + "G");      // jump the cursor 10 cells right
+                            float peak = 0.0f;
+                            for (int i = 0; i < 60; ++i) { rt.tick(); peak = std::max(peak, rt.model().cur_x); }
+                            const float goal = static_cast<float>(rt.model().term->cursor().col);
+                            ok(peak > goal + 0.3f && std::fabs(rt.model().cur_x - goal) < 0.02f, "the spring cursor overshoots, then settles");
+                            {   // motion.trail: a longer tail lags further behind the head
+                                const auto lag = [&](float len) {
+                                    rt.send(hand::App::Msg{E2{[len](hand::App::Model& m) {
+                                        m.cfg.cursor_anim = hand::CursorAnim::glide; m.cfg.cursor_trail = len; }}});
+                                    for (int i = 0; i < 60; ++i) rt.tick();
+                                    const int c1 = rt.model().term->cursor().col;
+                                    feed("\x1b[" + std::to_string(c1 > 20 ? 1 : c1 + 21) + "G");
+                                    for (int i = 0; i < 6; ++i) rt.tick();
+                                    return std::fabs(rt.model().fx.tx - rt.model().cur_x);
+                                };
+                                const float short_ = lag(0.3f), long_ = lag(4.0f);
+                                ok(long_ > short_ * 1.5f, "motion.trail sets how far the tail lags (longer = a bigger comet)");
+                                for (int i = 0; i < 90; ++i) rt.tick();
+                                ok(motion_settled(rt.model()), "...and it always catches up");
+                            }
+                            rt.send(hand::App::Msg{E2{[](hand::App::Model& m) { m.cfg.cursor_anim = hand::CursorAnim::glide; m.cfg.bell_shake = true; }}});
+                            feed("\a");
+                            ok(rt.model().bell_at >= 0.0, "BEL with shake on is seen");
+                            rt.send(hand::App::Msg{E2{[](hand::App::Model& m) { m.cfg.bell_shake = false; }}});
+                            rt.window().drive_frames(false);
+                        }
                         // smooth cursor
-                        rt.send(hand::App::Msg{E{[](hand::App::Model& m) { m.cfg.cursor_smooth = true; m.cur_known = true; m.cur_x = 0; m.cur_y = 0; }}});
+                        rt.send(hand::App::Msg{E{[](hand::App::Model& m) { m.cfg.cursor_anim = hand::CursorAnim::glide; m.cur_known = true; m.cur_x = 0; m.cur_y = 0; }}});
                         rt.window().drive_frames(true);   // the frame clock runs, as on screen
                         feed("\x1b[10;30H");
                         const float mid = rt.model().cur_x;
@@ -566,6 +760,7 @@ int main(int argc, char** argv) {
                             hand::Pty pty;
                             const auto si = hand::shell_integration("/usr/bin/fish");
                             hand::Term t{80, 10, hand::palette_of(hand::Config{})};
+            t.set_prompt_protect(!si.reflow_aware);
                             const bool up = pty.spawn(80, 10, "/usr/bin/fish", si.env, si.args);
                             std::string buf;
                             for (int i = 0; i < 40 && hand::pty_read(pty.fd(), buf, 50); ++i) {
@@ -587,6 +782,7 @@ int main(int argc, char** argv) {
                             hand::Pty pty;
                             const auto si = hand::shell_integration("/usr/bin/fish");
                             hand::Term t{80, 24, hand::palette_of(hand::Config{})};
+            t.set_prompt_protect(!si.reflow_aware);
                             const bool up = pty.spawn(80, 24, "/usr/bin/fish", si.env, si.args);
                             const auto pump = [&](int ms) {
                                 std::string buf;
@@ -596,8 +792,8 @@ int main(int argc, char** argv) {
                                 }
                             };
                             pump(1200);
-                            pty.write("clear; seq 1 12\r");   // fish redraws its prompt after; then wait for idle
-                            pump(700);
+                            pty.write("seq 1 12\r");   // fish redraws its prompt after; then wait for idle
+                            pump(1500);
                             const auto text = [&] {
                                 std::vector<std::string> v;
                                 for (const auto& l : t.snapshot().lines) {
@@ -631,7 +827,7 @@ int main(int argc, char** argv) {
                                     bool num = !l.empty();
                                     for (char ch : l) num = num && ch >= '0' && ch <= '9';
                                     nums += num ? 1 : 0;
-                                    prompts += l.rfind("\u276F", 0) == 0 ? 1 : 0;
+                                    prompts += l.find("\u276F seq 1 12") != std::string::npos ? 1 : 0;
                                     run = l.empty() ? run + 1 : 0;
                                     gap = std::max(gap, run);
                                 }
@@ -652,12 +848,56 @@ int main(int argc, char** argv) {
                             ok(nseq == 12 && nprompt == 1 && ngap <= 2, "squeezed narrower than the prompt and back: output intact");
                             int same = 0;
                             for (std::size_t i = 0; i < std::min(before.size(), after.size()); ++i) same += before[i] == after[i] ? 1 : 0;
+                            if (same < static_cast<int>(before.size()) - 3)
+                                for (std::size_t i = 0; i < std::min(before.size(), after.size()); ++i)
+                                    if (before[i] != after[i]) std::printf("    %2zu before|%s\n       after |%s\n", i, before[i].c_str(), after[i].c_str());
                             ok(same >= static_cast<int>(before.size()) - 3, "back at the same size, the screen reads the same");
                             int marks = 0;
                             for (const auto& c : t.commands()) marks += c.ran && c.prompt_row >= 0 ? 1 : 0;
                             ok(marks >= 1, "command marks follow the rewrap");
                             pty.write("exit\r");
                             pump(200);
+                        }
+                    }
+                    {
+                        // ── wide output, squeezed thin and back, in a real fish: no gap ────────
+                        if (::access("/usr/bin/fish", X_OK) == 0) {
+                            hand::Pty pty;
+                            const auto si = hand::shell_integration("/usr/bin/fish");
+                            hand::Term t{100, 30, hand::palette_of(hand::Config{})};
+                            t.set_prompt_protect(!si.reflow_aware);
+                            if (pty.spawn(100, 30, "/usr/bin/fish", si.env, si.args)) {
+                                const auto pump = [&](int ms) {
+                                    std::string buf;
+                                    for (int k = 0; k < ms / 50 && hand::pty_read(pty.fd(), buf, 50); ++k) {
+                                        const auto fx = t.feed(buf); buf.clear();
+                                        if (!fx.reply.empty()) pty.write(fx.reply);
+                                    }
+                                };
+                                pump(1200);
+                                pty.write("clear; for i in (seq 14); printf '      line %02d %s\\n' $i (string repeat -n 70 x); end\r");
+                                pump(900);
+                                for (int k = 0; k < 3; ++k) {
+                                    for (int c = 100; c >= 28; c -= 3) { t.resize(c, 30); pty.resize(c, 30); }
+                                    pump(50);
+                                    for (int c = 28; c <= 100; c += 3) { t.resize(c, 30); pty.resize(c, 30); }
+                                    pump(50);
+                                }
+                                pump(800);
+                                const auto sg = t.snapshot();
+                                int last = -1, lines = 0;
+                                for (int r = 0; r < t.cursor().row; ++r) {
+                                    std::string l;
+                                    for (const auto& c : sg.lines[static_cast<std::size_t>(r)].cells) l += c.text;
+                                    if (l.find("line ") != std::string::npos) { ++lines; last = r; }
+                                }
+                                // the prompt may be two lines (info + ❯): at most one row between
+                                const int gap = t.cursor().row - last - 1;
+                                std::printf("    thin+wide: %d output lines, %d rows to the prompt\n", lines, gap);
+                                ok(lines == 14 && gap <= 2, "squeezed thin and back: no gap opens above the prompt");
+                                pty.write("exit\r");
+                                pump(200);
+                            }
                         }
                     }
                     {
@@ -670,6 +910,176 @@ int main(int argc, char** argv) {
                         for (const auto& c : snap.lines[0].cells) row += c.text;
                         while (!row.empty() && row.back() == ' ') row.pop_back();
                         ok(row == "12345 789 abcdefg", "spaces at wrap points are text, not padding");
+                    }
+                    {
+                        // ── selection & text ────────────────────────────────────────────────
+                        using K = mayag::Key;
+                        using E5 = mayag::Edit<hand::App::Model>;
+                        rt.send(hand::App::Msg{E5{[](hand::App::Model& m) { m.term->scroll_to_bottom(); m.scroll_d = m.scroll_goal = 0; m.scroll_applied = 0; }}});
+                        rt.send(hand::App::Msg{hand::App::Output{std::string{
+                            "\x1b[2J\x1b[H\x1b]133;A\a$ \x1b]133;B\als\r\n\x1b]133;C\aalpha beta\r\ngamma delta\r\n\x1b]133;D;0\a"
+                            "\x1b]133;A\a$ \x1b]133;B\a"}}});
+                        rt.tick();
+                        const auto& mm = rt.model();
+                        const float ox = mm.metrics.origin_x, oy = mm.metrics.origin_y + mm.strip_h(), cw = mm.metrics.cell_w, chh = mm.metrics.cell_h;
+                        const auto at = [&](int col, int row) { return Vec2{ox + (static_cast<float>(col) + 0.3f) * cw, oy + (static_cast<float>(row) + 0.5f) * chh}; };
+                        // alt+drag: a block
+                        const auto ev = [&](mayag::Event e) { rt.window().push(std::move(e)); rt.tick(); };
+                        ev(mayag::MouseMove{at(1, 1), {}, {}});
+                        ev(mayag::MouseDown{at(1, 1), mayag::MouseButton::left, Mods{.alt = true}, 1});
+                        ev(mayag::MouseMove{at(3, 2), {}, Mods{.alt = true}});
+                        ev(mayag::MouseUp{at(3, 2), mayag::MouseButton::left, Mods{.alt = true}});
+                        ok(rt.model().term->selection_info().block && rt.model().term->selection_text() == "lph\namm",
+                           "alt+drag selects a block (a rectangle of columns)");
+                        // a plain click (no drag) selects nothing, so no toolbar pops up
+                        ev(mayag::MouseDown{at(2, 1), mayag::MouseButton::left, {}, 1});
+                        ev(mayag::MouseUp{at(2, 1), mayag::MouseButton::left, {}});
+                        for (int i = 0; i < 2; ++i) rt.tick();
+                        ok(!rt.model().term->has_selection() && rt.model().sel_chip.size.x == 0.0f,
+                           "a single click selects nothing and shows no toolbar");
+                        ev(mayag::MouseDown{at(1, 1), mayag::MouseButton::left, {}, 1});
+                        ev(mayag::MouseMove{at(4, 1), {}, {}});
+                        ev(mayag::MouseUp{at(4, 1), mayag::MouseButton::left, {}});
+                        for (int i = 0; i < 2; ++i) rt.tick();
+                        ok(rt.model().term->selection_text() == "lpha" && rt.model().sel_chip.size.x > 0.0f,
+                           "a drag still selects, with its toolbar");
+                        rt.send(hand::App::Msg{E5{[](hand::App::Model& m2) { m2.term->select_begin(0, 0, 1, true); m2.term->select_extend(3, 2); m2.selecting = false; }}});
+                        {
+                            const auto bg2 = rt.model().term->snapshot();
+                            std::string spans;
+                            for (const auto& sp : bg2.selection) spans += std::to_string(sp.row) + ":" + std::to_string(sp.col) + "+" + std::to_string(sp.len) + " ";
+                            (void)spans;
+                            ok(bg2.selection.size() == 3, "a three-row block is drawn on all three rows");
+                        }
+                        // a fourth click: the whole command's output
+                        rt.send(hand::App::Msg{E5{[](hand::App::Model& m2) { m2.term->select_clear(); }}});
+                        rt.window().multi_click(at(2, 1), 4);
+                        for (int i = 0; i < 3; ++i) rt.tick();
+                        ok(rt.model().term->selection_text() == "alpha beta\ngamma delta", "a fourth click selects the command's whole output");
+                        ok(rt.node_rect(dsl::node_id("sel.copy")).has_value(), "a selection toolbar appears by it");
+                        rt.click(dsl::node_id("sel.copy"));
+                        ok(rt.window().get_clipboard() == "alpha beta\ngamma delta" && rt.model().time - rt.model().copy_flash_at < 0.5,
+                           "its copy button copies, and the selection flashes");
+                        ok(rt.model().term->has_selection(), "...and the selection stays");
+                        // shift+click extends
+                        // (the toolbar sits under the selection: shift+click past it, as a user would)
+                        rt.send(hand::App::Msg{E5{[](hand::App::Model& m2) { m2.term->select_begin(0, 0, 1); m2.selecting = false; }}});
+                        ev(mayag::MouseDown{at(4, 2), mayag::MouseButton::left, Mods{.shift = true}, 1});
+                        ev(mayag::MouseUp{at(4, 2), mayag::MouseButton::left, Mods{.shift = true}});
+                        ok(rt.model().term->selection_text() == "$ ls\nalpha beta\ngamma", "shift+click extends the selection");
+                        // copy mode
+                        rt.send(hand::App::Msg{E5{[](hand::App::Model& m2) { m2.term->select_clear(); }}});
+                        rt.press_key(K::m, Mods{.shift = true, .ctrl = true});
+                        ok(rt.model().copy_mode, "ctrl+shift+m enters copy mode");
+                        rt.type("k"); rt.type("k"); rt.type("0");   // from the prompt up to "alpha beta"
+                        rt.type("w");
+                        rt.type("v"); rt.type("e");
+                        ok(rt.model().term->selection_text() == "beta", "w / v / e select a word with the keyboard");
+                        rt.type("y");
+                        ok(!rt.model().copy_mode && rt.window().get_clipboard() == "beta", "y yanks it and leaves copy mode");
+                        rt.send(hand::App::Msg{E5{[](hand::App::Model& m2) { m2.term->select_clear(); }}});
+                        rt.press_key(K::m, Mods{.shift = true, .ctrl = true});
+                        rt.type("k"); rt.type("V"); rt.type("k");
+                        ok(rt.model().term->selection_text() == "alpha beta\ngamma delta", "V selects whole lines");
+                        rt.press_key(K::escape);
+                        ok(rt.model().copy_mode && !rt.model().term->has_selection(), "esc drops the selection first...");
+                        rt.press_key(K::escape);
+                        ok(!rt.model().copy_mode, "...then copy mode");
+                        // paste guard
+                        rt.send(hand::App::Msg{hand::App::Pasted{"rm -rf a\nrm -rf b\n"}});
+                        ok(!rt.model().pending_paste.empty(), "a multi-line paste waits for confirmation");
+                        rt.press_key(K::escape);
+                        ok(rt.model().pending_paste.empty(), "esc cancels it");
+                        rt.send(hand::App::Msg{hand::App::Pasted{"echo one\necho two\n"}});
+                        rt.press_key(K::enter);
+                        ok(rt.model().pending_paste.empty() && rt.model().ask == hand::App::Model::Ask::none,
+                           "enter pastes it, and doesn't ask twice");
+                        rt.send(hand::App::Msg{hand::App::Pasted{"sudo true"}});
+                        ok(rt.model().ask == hand::App::Model::Ask::paste, "a single risky line asks too");
+                        rt.press_key(K::escape);
+                        rt.send(hand::App::Msg{hand::App::Output{std::string{"\x1b[?2004h"}}});
+                        rt.send(hand::App::Msg{hand::App::Pasted{"a\nb"}});
+                        ok(rt.model().ask == hand::App::Model::Ask::paste, "multiline mode asks even with bracketed paste");
+                        rt.press_key(K::escape);
+                        rt.send(hand::App::Msg{E5{[](hand::App::Model& m2) { m2.cfg.paste_confirm = hand::PasteConfirm::unbracketed; }}});
+                        rt.send(hand::App::Msg{hand::App::Pasted{"a\nb"}});
+                        ok(rt.model().pending_paste.empty() && rt.model().ask == hand::App::Model::Ask::none,
+                           "unbracketed mode: a program that asked for bracketed paste gets it straight away");
+                        rt.send(hand::App::Msg{E5{[](hand::App::Model& m2) { m2.cfg.paste_confirm = hand::PasteConfirm::multiline; }}});
+                        rt.send(hand::App::Msg{hand::App::Output{std::string{"\x1b[?2004l"}}});
+                    }
+                    {
+                        // ── tabs ────────────────────────────────────────────────────────────
+                        using K = mayag::Key;
+                        rt.window().drive_frames(true);
+                        const auto settle = [&] { for (int i = 0; i < 60; ++i) rt.tick(); };
+                        settle();
+                        ok(rt.model().tab_count() == 1 && rt.model().strip_h() == 0.0f, "one tab: no strip, like foot");
+                        const int rows1 = rt.model().term->rows();
+                        rt.send(hand::App::Msg{hand::App::Output{std::string{"\x1b[2J\x1b[HTAB-ONE"}}});
+                        rt.press_key(K::t, Mods{.shift = true, .ctrl = true});
+                        settle();
+                        ok(rt.model().tab_count() == 2 && rt.model().active == 1, "ctrl+shift+t opens a tab and switches to it");
+                        ok(rt.model().strip_h() > 30.0f && rt.node_rect(dsl::node_id("tabs")).has_value(), "the tab strip slides in");
+                        ok(rt.model().term->rows() < rows1, "and every grid refits below it");
+                        rt.send(hand::App::Msg{hand::App::Output{std::string{"\x1b[2J\x1b[HTAB-TWO"}}});
+                        const auto top = [&] {   // the whole visible screen, as one string
+                            std::string s0;
+                            const auto g = rt.model().term->snapshot();
+                            for (const auto& l : g.lines) for (const auto& c : l.cells) s0 += c.text;
+                            return s0;
+                        };
+                        const auto has = [&](const char* w) { return top().find(w) != std::string::npos; };
+                        ok(has("TAB-TWO") && !has("TAB-ONE"), "the new tab has its own screen");
+                        rt.press_key(K::tab, Mods{.ctrl = true});
+                        settle();
+                        ok(rt.model().active == 0 && has("TAB-ONE") && !has("TAB-TWO"), "ctrl+tab switches back, screen intact");
+                        // output for a background tab lands there, and marks it
+                        const std::uint64_t bg = rt.model().tabs[1].sid;
+                        rt.send(hand::App::Msg{hand::App::Output{std::string{"\r\nbackground!"}, bg}});
+                        rt.tick();
+                        ok(rt.model().tabs[1].unread && !has("background!"), "background output goes to its tab and marks it unread");
+                        rt.press_key(K::n2, Mods{.alt = true});
+                        settle();
+                        ok(rt.model().active == 1 && !rt.model().unread, "alt+2 jumps to it, and it is read");
+                        rt.press_key(K::t, Mods{.shift = true, .ctrl = true});
+                        settle();
+                        rt.press_key(K::page_up, Mods{.shift = true, .ctrl = true});
+                        settle();
+                        ok(rt.model().tab_count() == 3 && rt.model().active == 1, "ctrl+shift+pgup moves the tab left");
+                        rt.click(dsl::part_id("tabs", 0));
+                        settle();
+                        ok(rt.model().active == 0, "clicking a tab selects it");
+                        ok(rt.model().tab_motion.pill.ready(), "the active pill tracks it");
+                        {   // the marker: aligned with its tab, and elastic on the way
+                            using E6 = mayag::Edit<hand::App::Model>;
+                            rt.send(hand::App::Msg{E6{[](hand::App::Model& m) { m.cfg.tab_style = hand::TabStyle::underline; m.cfg.tab_anim = hand::TabAnim::stretch; }}});
+                            settle();
+                            const auto tab0 = rt.node_rect(dsl::part_id("tabs", 0)), mk = rt.node_rect(dsl::node_id("tabs.marker"));
+                            const auto strip = rt.node_rect(dsl::node_id("tabs"));
+                            const bool aligned = tab0 && mk && strip && mk->left() > tab0->left() && mk->right() < tab0->right() &&
+                                                 std::fabs((mk->left() - tab0->left()) - (tab0->right() - mk->right())) < 1.0f &&
+                                                 std::fabs(mk->bottom() - strip->bottom()) < 1.0f;
+                            ok(aligned, "the underline is centred on its tab, on the strip's edge");
+                            rt.click(dsl::part_id("tabs", 2));
+                            rt.tick(); rt.tick();
+                            const auto mid = rt.node_rect(dsl::node_id("tabs.marker"));
+                            const auto tab2 = rt.node_rect(dsl::part_id("tabs", 2));
+                            ok(mid && tab2 && mid->width() > tab2->width(), "on the way to the next tab it stretches");
+                            settle();
+                            const auto end = rt.node_rect(dsl::node_id("tabs.marker"));
+                            ok(end && tab2 && end->width() < tab2->width() && end->left() > tab2->left(), "...and lands, its own width again");
+                            rt.click(dsl::part_id("tabs", 0));
+                            settle();
+                        }
+                        rt.press_key(K::w, Mods{.shift = true, .ctrl = true});
+                        settle();
+                        ok(rt.model().tab_count() == 2, "ctrl+shift+w closes the tab");
+                        rt.send(hand::App::Msg{hand::App::CloseTab{1}});
+                        settle();
+                        ok(rt.model().tab_count() == 1 && rt.model().strip_h() == 0.0f && rt.model().term->rows() == rows1,
+                           "back to one tab: the strip slides away and the grid gets its rows back");
+                        rt.window().drive_frames(false);
                     }
                     {
                         // ── hand.vibe: every row survives save + load ──────────────────────────
@@ -788,12 +1198,82 @@ int main(int argc, char** argv) {
                 }
                 if (shot == "minimap-short")
                     rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) { m.mm_open = true; m.mm_w = 96.0f; }}});
+                if (shot.rfind("fx-", 0) == 0) {
+                    static const char* fxn[] = {"none", "ripple", "sonicboom", "wireframe", "pixiedust", "railgun", "torpedo", "fireworks"};
+                    int k = 0;
+                    for (int i = 0; i < 8; ++i) if (shot == std::string{"fx-"} + fxn[i]) k = i;
+                    const bool smear = shot == "fx-smear" || shot == "fx-comet";
+                    const bool comet = shot == "fx-comet";
+                    rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[k, smear, comet](hand::App::Model& m) {
+                        m.cfg.cursor_fx = static_cast<hand::CursorFx>(k);
+                        if (comet) { m.cfg.cursor_anim = hand::CursorAnim::glide; m.cfg.cursor_trail = 4.0f; m.cur_known = true;
+                                     const auto cc = m.term->cursor(); m.cur_x = static_cast<float>(cc.col) + 1.5f; m.cur_y = static_cast<float>(cc.row);
+                                     m.fx.tx = 38.0f; m.fx.ty = 1.0f; m.focused = true; return; }
+                        if (smear) { m.cfg.cursor_anim = hand::CursorAnim::smear; m.cur_known = true; m.fx.tx = 34.0f; m.fx.ty = 2.0f; m.focused = true; return; }
+                        const float cw = m.metrics.cell_w, ch = m.metrics.cell_h;
+                        const auto cur = m.term->cursor();
+                        const float cx = m.metrics.origin_x + (static_cast<float>(cur.col) + 0.5f) * cw;
+                        const float cy = m.metrics.origin_y + (static_cast<float>(cur.row) + 0.5f) * ch;
+                        hand::motion::emit(m.fx, m.cfg.cursor_fx, cx, cy, cw, 0.0f, cw, ch, true, m.palette);
+                        hand::motion::emit(m.fx, m.cfg.cursor_fx, cx, cy, cw, 0.0f, cw, ch, true, m.palette);
+                        if (k == 6)   // torpedo: the puffs it leaves along a flight from the right
+                            for (int i = 0; i < 14; ++i) {
+                                hand::motion::travel(m.fx, m.cfg.cursor_fx, cx + static_cast<float>(i) * cw * 1.6f, cy, ch, m.palette);
+                                hand::motion::step(m.fx, 0.018f);
+                            }
+                        hand::motion::step(m.fx, k == 7 ? 0.28f : 0.12f); }}});
+                }
+                if (shot == "tabs") {
+                    using E3 = mayag::Edit<hand::App::Model>;
+                    const char* outs[] = {"\x1b]7;file://h/home/u/src/hand\a\x1b]133;A\a\u276F \x1b]133;B\acargo build\r\n\x1b]133;C\a   Compiling hand\r\n",
+                                          "\x1b]7;file://h/home/u/notes\a\x1b]133;A\a\u276F \x1b]133;B\amake test\r\n\x1b]133;C\aerror\r\n\x1b]133;D;2\a",
+                                          "\x1b]7;file://h/var/log\a\x1b]133;A\a\u276F \x1b]133;B\atail -f syslog\r\n\x1b]133;C\a"};
+                    for (int t = 0; t < 3; ++t) {
+                        if (t > 0) rt.press_key(mayag::Key::t, mayag::Mods{.shift = true, .ctrl = true});
+                        rt.send(hand::App::Msg{hand::App::Output{std::string{outs[t]}}});
+                        rt.tick();
+                    }
+                    rt.send(hand::App::Msg{E3{[](hand::App::Model& m) {
+                        m.tabs[0].unread = true; m.tabs[1].bell = true; m.strip_t = 1.0f; m.switch_t = 1.0f;
+                        if (const char* v = std::getenv("HAND_TABSTYLE")) {   // "style,radius,height,bottom,round"
+                            int st = 0, bot = 0; float r = -1, hgt = 40, rd = 1;
+                            std::sscanf(v, "%d,%f,%f,%d,%f", &st, &r, &hgt, &bot, &rd);
+                            m.cfg.tab_style = static_cast<hand::TabStyle>(st); m.cfg.tab_radius = r; m.cfg.tab_height = hgt;
+                            m.cfg.tab_bottom = bot != 0; m.cfg.roundness = rd;
+                        }
+                        hand::App::fit(m);
+                        for (int i = 0; i < 12; ++i) m.tabs[0].activity.push_back(0.2f + 0.06f * static_cast<float>(i % 5)); }}});
+                    for (int i = 0; i < 5; ++i) rt.tick();
+                }
+                if (shot == "select" || shot == "copymode" || shot == "paste" || shot == "quit") {
+                    rt.send(hand::App::Msg{hand::App::Output{std::string{
+                        "\x1b[2J\x1b[H\x1b]133;A\a\x1b[1;34m~/src/hand\x1b[0m \x1b[35m\u276F\x1b[0m \x1b]133;B\agit log --oneline -3\r\n\x1b]133;C\a"
+                        "\x1b[33m3f9a2c1\x1b[0m terminal: shell integration\r\n\x1b[33m9b1e07a\x1b[0m docs: https://github.com/1ay1/toe\r\n"
+                        "\x1b[33m77c4d10\x1b[0m scrollback: smooth glide\r\n\x1b]133;D;0\a"
+                        "\x1b]133;A\a\x1b[1;34m~/src/hand\x1b[0m \x1b[35m\u276F\x1b[0m \x1b]133;B\a"}}});
+                    rt.tick();
+                    const std::string which = shot;
+                    rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[which](hand::App::Model& m) {
+                        const std::int64_t r0 = m.term->view_to_abs(0);
+                        if (which == "select") m.term->select_abs(r0 + 2, 20, r0 + 2, 43, 0);
+                        if (which == "copymode") {
+                            m.copy_mode = true; m.cm_vis = 3; m.cm_arow = r0 + 1; m.cm_acol = 0; m.cm_row = r0 + 3; m.cm_col = 6;
+                            m.term->select_abs(m.cm_arow, m.cm_acol, m.cm_row, m.cm_col, 2);
+                        }
+                        if (which == "paste") {
+                            m.pending_paste = "sudo pacman -Syu\nrm -rf build\ncmake --build build\n";
+                            m.ask = hand::App::Model::Ask::paste; m.ask_focus = 2; m.ask_t = 1.0f;
+                        }
+                        if (which == "quit") { m.ask = hand::App::Model::Ask::quit; m.ask_focus = 1; m.ask_t = 1.0f; }
+                    }}});
+                    rt.tick();
+                }
                 if (shot == "resize")
                     rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) { m.resized_at = m.time; }}});
                 if (shot == "settings")
-                    rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) { m.settings_open = true; m.panel.selected = 1; }}});
+                    rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) { m.settings_open = true; m.settings_t = 1.0f; m.panel.selected = 1; }}});
                 if (shot == "settings-menu") {
-                    rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) { m.settings_open = true; }}});
+                    rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) { m.settings_open = true; m.settings_t = 1.0f; }}});
                     rt.tick();
                     for (int i = 0; i < 3; ++i) rt.press_key(mayag::Key::down);
                     rt.press_key(mayag::Key::enter);

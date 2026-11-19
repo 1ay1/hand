@@ -24,7 +24,7 @@ class Pty {
     /// a new pty of cols x rows, with `env` set and `args` after argv[0].
     bool spawn(int cols, int rows, std::string shell = {},
                const std::vector<std::pair<std::string, std::string>>& env = {},
-               const std::vector<std::string>& args = {});
+               const std::vector<std::string>& args = {}, const std::string& cwd = {});
     /// The shell spawn() would run for `shell` (resolves $SHELL).
     [[nodiscard]] static std::string resolve_shell(std::string shell);
 

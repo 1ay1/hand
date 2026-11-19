@@ -21,6 +21,7 @@ namespace hand {
 struct ShellLaunch {
     std::vector<std::pair<std::string, std::string>> env;   ///< set in the child
     std::vector<std::string>                         args;  ///< after argv[0]
+    bool reflow_aware = false;   ///< the shell leaves reflow to the terminal (fish_handle_reflow 0)
 };
 
 /// What to add to the launch of `shell` (a path or name). Empty when the

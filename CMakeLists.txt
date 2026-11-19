@@ -51,11 +51,12 @@ set_target_properties(vibe PROPERTIES C_STANDARD 11)
 # ── the app: small translation units, so an edit rebuilds one of them ─────
 #   term.cpp  the only TU that includes toe
 #   pty.cpp   the only TU that touches POSIX ptys
+#   motion.cpp cursor physics + particle effects
 #   shell.cpp shell integration (OSC 133/7 injected into fish/zsh/bash)
 #   app.cpp   update / input / view (mayag)
 #   settings.cpp  the settings table, hand.vibe, and the 913-scheme catalogue
 #   main.cpp  fonts, config, modes
-add_executable(hand src/main.cpp src/app.cpp src/term.cpp src/pty.cpp src/settings.cpp src/shell.cpp)
+add_executable(hand src/main.cpp src/app.cpp src/term.cpp src/pty.cpp src/settings.cpp src/shell.cpp src/motion.cpp)
 target_include_directories(hand PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(hand PRIVATE mayag::mayag toe::toe vibe util)
 target_compile_options(hand PRIVATE ${HAND_WARNINGS})
