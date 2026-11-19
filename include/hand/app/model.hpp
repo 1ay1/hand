@@ -74,6 +74,7 @@ struct Session {
     double                  bell_at = -1.0;
     bool                    selecting = false;
     int                     mouse_button = -1;    ///< reported to the app while held
+    int                     mouse_cell_col = -1, mouse_cell_row = -1;   ///< last motion reported (once per cell)
     bool                    search_open = false;
     mayag::TextEditState    search_query;
     std::string             hover_url;

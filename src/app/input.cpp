@@ -349,6 +349,23 @@ std::optional<App::Msg> App::on(const Model& m, const MouseMove& e_win) {
         if (near != m.mm_open || y != m.mm_hover_y) return E{[near, y](Model& mm) { mm.mm_open = near; mm.mm_hover_y = y; }};
         if (near) return std::nullopt;
     }
+    // The app wants the mouse: motion is the app's, reported once per CELL
+    // (a TUI redraws per report; per pixel floods the pty). Any-motion mode
+    // (1003: htop, lazygit, a TUI with hover) gets buttonless motion -- with
+    // button 3, "no button" -- the others only drags.
+    if (m.term->mouse_reporting() && !m.selecting && !e.mods.shift) {
+        const int col = cell_of(e.position.x, m.metrics.origin_x, m.metrics.cell_w, m.term->cols());
+        const int row = cell_of(e.position.y, m.metrics.origin_y, m.metrics.cell_h, m.term->rows());
+        const bool inside = e.position.x >= 0.0f && e.position.y >= 0.0f && e.position.x < m.size.x && e.position.y < m.size.y;
+        if (m.mouse_button >= 0 || (m.term->mouse_any_motion() && inside)) {
+            if (col == m.mouse_cell_col && row == m.mouse_cell_row) return std::nullopt;
+            auto bytes = m.term->encode_mouse(m.mouse_button >= 0 ? m.mouse_button : 3, col, row, true, true, e.mods);
+            return E{[b = std::move(bytes), col, row](Model& mm) {
+                mm.mouse_cell_col = col; mm.mouse_cell_row = row;
+                if (mm.pty && !b.empty()) mm.pty->write(b);
+            }};
+        }
+    }
     if (!m.selecting && m.mouse_button < 0) {
         // links read as clickable while ctrl is held (or always, when they need no ctrl)
         const bool armed = e.mods.ctrl || !m.cfg.links_need_ctrl;
@@ -363,12 +380,7 @@ std::optional<App::Msg> App::on(const Model& m, const MouseMove& e_win) {
         }};
     }
     const int col = cell_of(e.position.x + m.metrics.cell_w * 0.5f, m.metrics.origin_x, m.metrics.cell_w, m.term->cols() + 1);
-    const int row = cell_of(e.position.y, m.metrics.origin_y, m.metrics.cell_h, m.term->rows());
-    if (m.mouse_button >= 0) {
-        auto bytes = m.term->encode_mouse(m.mouse_button, std::min(col, m.term->cols() - 1), row, true, true, e.mods);
-        if (bytes.empty()) return std::nullopt;
-        return E{[b = std::move(bytes)](Model& mm) { if (mm.pty) mm.pty->write(b); }};
-    }
+    if (m.mouse_button >= 0) return std::nullopt;   // a held button with reporting off (shift): nothing to send
     return E{[col, row = view_row(m, e.position.y), p = e.position, speed = m.term->alt_screen() ? 0.0f : edge_speed(m, e.position.y)](Model& mm) {
         mm.term->select_extend(col, row);
         mm.sel_pos = p;

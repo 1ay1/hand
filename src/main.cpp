@@ -7,6 +7,7 @@
 
 #include <hand/app.hpp>
 #include <hand/core/shell.hpp>
+#include <hand/core/pty.hpp>
 
 #include "app/detail.hpp"   // the self-test checks geometry against the same queries
 
@@ -1239,6 +1240,59 @@ int main(int argc, char** argv) {
                             settle();
                         }
                         rt.window().drive_frames(false);
+                    }
+                    {
+                        // ── the mouse in a TUI: hover (1003) and drags (1002) reach it ──
+                        // A real program on a real pty: `cat -v` in raw mode shows every
+                        // byte it is sent, so the test reads what the app received.
+                        auto pty = std::make_shared<hand::Pty>();
+                        const bool up = pty->spawn(rt.model().term->cols(), rt.model().term->rows(), "/bin/sh", {},
+                                                   {"-c", "stty raw -echo; printf 'ready\\033[?1003h\\033[?1006h\\r\\n'; exec cat -v"});
+                        std::string got;
+                        // the app's own pty reader feeds cat's echo into the terminal:
+                        // read it back from the screen
+                        const auto drain = [&](int ms) {
+                            rt.settle([](const auto&) { return false; }, std::chrono::milliseconds(ms));
+                            rt.tick();
+                            got.clear();
+                            const auto g = rt.model().term->snapshot();
+                            for (const auto& l : g.lines) for (const auto& c : l.cells) got += c.text;
+                        };
+                        rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[pty](hand::App::Model& mm) {
+                            mm.ask.reset(); mm.ask_t = 0.0f; mm.settings_open = false; mm.hosts_open = false;
+                            mm.selecting = false; mm.mouse_button = -1; mm.pty = pty; }}});
+                        for (int i = 0; i < 30; ++i) rt.tick();   // any closing overlay is gone
+                        drain(400);
+                        ok(up && rt.model().term->mouse_reporting(), "a TUI turns on any-motion mouse tracking");
+                        const float top = rt.model().strip_h(), cw = rt.model().metrics.cell_w, chh = rt.model().metrics.cell_h;
+                        const float ox = rt.model().metrics.origin_x, oy = rt.model().metrics.origin_y + top;
+                        const auto at = [&](int c, int r) { return mayag::Vec2{ox + (c + 0.5f) * cw, oy + (r + 0.5f) * chh}; };
+                        (void)rt.model().term->feed("\x1b[2J\x1b[H");   // a clean screen: only what the moves send
+                        rt.window().move_to(at(10, 5));
+                        rt.tick();
+                        rt.window().move_to(at(10, 5) + mayag::Vec2{1.0f, 1.0f});   // the same cell: not reported again
+                        rt.tick();
+                        rt.window().move_to(at(12, 6));
+                        rt.tick();
+                        drain(300);
+                        const auto count = [&](std::string_view s) { std::size_t n = 0; for (auto p = got.find(s); p != std::string::npos; p = got.find(s, p + 1)) ++n; return n; };
+                        ok(count("^[[<35;11;6M") == 1 && count("^[[<35;13;7M") == 1,
+                           "hovering reports buttonless motion, once per cell (SGR 35)");
+                        (void)rt.model().term->feed("\x1b[2J\x1b[H");
+                        rt.window().press(at(3, 3));
+                        rt.tick();
+                        rt.window().move_to(at(5, 3));
+                        rt.tick();
+                        rt.window().release(at(5, 3));
+                        rt.tick();
+                        drain(300);
+                        ok(got.find("^[[<0;4;4M") != std::string::npos && got.find("^[[<32;6;4M") != std::string::npos &&
+                           got.find("^[[<0;6;4m") != std::string::npos, "press, drag and release reach the program at the cells under the pointer");
+                        rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& mm) {
+                            if (mm.pty) mm.pty->write("\x04");   // cat exits
+                            mm.pty.reset(); mm.mouse_cell_col = mm.mouse_cell_row = -1; }}});
+                        (void)rt.model().term->feed("\x1b[?1003l\x1b[?1006l\x1b[2J\x1b[H");
+                        rt.tick();
                     }
                     {
                         // ── the Mac: ⌘ shortcuts, the input method ──

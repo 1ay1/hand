@@ -67,6 +67,8 @@ class Term {
     // ── mouse ──────────────────────────────────────────────────────────
     /// Does the running app want the mouse (vim, htop, tmux)? Shift bypasses.
     [[nodiscard]] bool mouse_reporting() const;
+    /// ...and every pointer move, button or not (DECSET 1003): hover in TUIs.
+    [[nodiscard]] bool mouse_any_motion() const;
     /// SGR/X10 mouse report for a button press(0..2)/release/motion/wheel(64/65).
     [[nodiscard]] std::string encode_mouse(int button, int col, int row, bool press, bool motion, mayag::Mods mods) const;
 

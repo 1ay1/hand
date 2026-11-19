@@ -249,6 +249,7 @@ std::string Term::encode_focus(bool focused) const { return std::string{p_->m.sc
 // ── mouse ──────────────────────────────────────────────────────────────────
 
 bool Term::mouse_reporting() const { return p_->m.screen.mouse_mode() != Screen::MouseMode::off; }
+bool Term::mouse_any_motion() const { return p_->m.screen.mouse_mode() == Screen::MouseMode::any; }
 
 std::string Term::encode_mouse(int button, int col, int row, bool press, bool motion, mayag::Mods mods) const {
     const auto& s = p_->m.screen;
