@@ -4,7 +4,7 @@
     git clone --depth 1 --filter=blob:none --sparse \\
         https://github.com/mbadolato/iTerm2-Color-Schemes /tmp/itc
     (cd /tmp/itc && git sparse-checkout set ghostty)
-    tools/gen_schemes.py /tmp/itc/ghostty > include/hand/core/schemes_gen.hpp
+    tools/gen_schemes.py /tmp/itc/ghostty > include/hand/schemes_gen.hpp
 
 The same source maya compiles its schemes from, but hand keeps the WHOLE
 palette -- a terminal needs all sixteen slots, not a semantic projection of
@@ -20,7 +20,6 @@ import colorsys
 import re
 import sys
 from pathlib import Path
-
 
 def hexval(s: str) -> int:
     s = s.strip().lstrip("#")

@@ -4,3 +4,6 @@
 [submodule "external/mayag"]
 	path = external/mayag
 	url = https://github.com/1ay1/mayag
+[submodule "external/vibe"]
+	path = external/vibe
+	url = https://github.com/1ay1/vibe
