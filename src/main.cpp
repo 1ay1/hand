@@ -26,9 +26,19 @@ namespace {
 
 using namespace mayag;
 
-constexpr std::array<std::string_view, 8> kMono{
+constexpr std::array<std::string_view, 9> kPreferredMono{
     "JetBrainsMono Nerd Font", "JetBrains Mono", "Iosevka", "Berkeley Mono", "Geist Mono",
-    "CaskaydiaCove Nerd Font Mono", "Fira Code", "DejaVu Sans Mono"};
+    "CaskaydiaCove Nerd Font Mono", "Lilex Nerd Font Mono", "Fira Code", "DejaVu Sans Mono"};
+
+/// hand's preferred monospace faces, then the platform's own (SF Mono, Menlo
+/// on macOS; Cascadia, Consolas on Windows), so a machine with none of the
+/// preferred ones installed still gets a monospace grid, never the UI font.
+std::vector<std::string_view> mono_candidates() {
+    std::vector<std::string_view> v{kPreferredMono.begin(), kPreferredMono.end()};
+    for (auto f : typo::system::mono_font_families())
+        if (std::find(v.begin(), v.end(), f) == v.end()) v.push_back(f);
+    return v;
+}
 
 std::shared_ptr<typo::FontStack> g_stack;
 
@@ -42,13 +52,14 @@ std::shared_ptr<typo::FontStack> load_fonts(bool system) {
         s = std::make_shared<typo::FontStack>();
         s->add(typo::lastresort::face());
     } else {
-        std::array<std::string_view, 1> lead{kMono.back()};
-        for (auto cand : kMono)
+        const auto mono = mono_candidates();
+        std::array<std::string_view, 1> lead{mono.back()};
+        for (auto cand : mono)
             if (typo::system::Database::instance().first_available(std::array{cand})) { lead[0] = cand; break; }
         s = typo::system::default_stack(typo::FontConfig{.mode = typo::RenderMode::hybrid, .atlas_size = 2048}, 400,
                                         false, lead);
-        (void)typo::system::attach_family(*s, FontFamily::mono, kMono);
-        for (auto cand : kMono) {
+        (void)typo::system::attach_family(*s, FontFamily::mono, mono);
+        for (auto cand : mono) {
             if (names.size() >= custom_family_count) break;
             const std::array<std::string_view, 1> one{cand};
             if (auto got = typo::system::attach_family(*s, custom_family(names.size()), one))
