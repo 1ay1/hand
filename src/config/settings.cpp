@@ -192,7 +192,7 @@ const std::vector<Row>& rows() {
         {"bell", "shake", "the window shakes on BEL", Kind::toggle, 0, 1, 1, 0, "", 1, none,
          GET(c.bell_shake), SET(c.bell_shake = v > 0.5f)},
 
-        {"ssh", "multiplex", "one connection per host: a second tab opens instantly, one password prompt (off when ~/.ssh/config sets ControlMaster)", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+        {"ssh", "multiplex", "one connection per host: a second tab opens instantly, one password prompt (off when ~/.ssh/config sets ControlMaster; not available with Windows' OpenSSH)", Kind::toggle, 0, 1, 1, 0, "", 1, none,
          GET(c.ssh_multiplex), SET(c.ssh_multiplex = v > 0.5f)},
         {"ssh", "keepalive", "probe the link every 15 s, so a dead connection says so within a minute", Kind::toggle, 0, 1, 1, 0, "", 1, none,
          GET(c.ssh_keepalive), SET(c.ssh_keepalive = v > 0.5f)},

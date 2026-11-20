@@ -765,6 +765,10 @@ std::optional<Host> ssh_destination(const std::vector<std::string>& argv) {
 std::vector<std::string> ssh_argv(const Host& host, const HostBook& book, SshFlags f) {
     const Host h = effective_host(host, book);   // folder defaults: user, jump, key, port
     std::vector<std::string> a{"ssh"};
+    // Connection sharing (ControlMaster) rides on Unix sockets. Microsoft's
+    // OpenSSH for Windows does not support it: with these options every
+    // connection died at once with "getsockname failed: Not a socket".
+#if !defined(_WIN32)
     if (f.multiplex && !book.sets_control) {
         // one TCP+auth per host: a second tab opens instantly, and only one
         // password / 2FA prompt. Sockets live in a private per-user dir.
@@ -774,6 +778,7 @@ std::vector<std::string> ssh_argv(const Host& host, const HostBook& book, SshFla
         fs::permissions(dir, fs::perms::owner_all, fs::perm_options::replace, ec);
         a.insert(a.end(), {"-o", "ControlMaster=auto", "-o", "ControlPath=" + dir + "/%C", "-o", "ControlPersist=10m"});
     }
+#endif
     if (f.keepalive && !book.sets_alive)
         a.insert(a.end(), {"-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4"});
     // the host manager's forwards: -L / -R / -D, each checked on save and again here

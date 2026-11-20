@@ -1499,8 +1499,13 @@ int main(int argc, char** argv) {
                         ok(d && d->user == "deploy" && d->hostname == "10.0.0.9" && d->port == 2201 && !hand::parse_destination("a b") &&
                            s && s->hostname == "box.lan" && s->user == "me" && s->port == 2022, "destinations: typed user@host:port, and a running ssh's argv");
                         const auto argv = hand::ssh_argv(*gpu, book, {});
-                        ok(argv.back() == "gpu-box" && std::find(argv.begin(), argv.end(), "ControlMaster=auto") != argv.end(),
-                           "a config host runs as `ssh <alias>`, multiplexed");
+                        const bool muxed = std::find(argv.begin(), argv.end(), "ControlMaster=auto") != argv.end();
+#if defined(_WIN32)
+                        ok(argv.back() == "gpu-box" && !muxed,
+                           "a config host runs as `ssh <alias>`; never multiplexed on Windows (its OpenSSH has no ControlMaster)");
+#else
+                        ok(argv.back() == "gpu-box" && muxed, "a config host runs as `ssh <alias>`, multiplexed");
+#endif
                         hand::hosts_record_use(src, *gpu, 1000);
                         hand::hosts_record_use(src, *gpu, 2000);
                         hand::hosts_set_pinned(src, *db, true);
