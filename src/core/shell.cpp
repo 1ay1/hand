@@ -4,6 +4,7 @@
 
 #include <hand/core/platform.hpp>
 
+#include <cctype>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -109,9 +110,23 @@ bool write_file(const fs::path& p, const char* text) {
 
 ShellLaunch shell_integration(const std::string& shell) {
     ShellLaunch out;
-    const auto slash = shell.find_last_of('/');
-    const std::string name = slash == std::string::npos ? shell : shell.substr(slash + 1);
+    const auto slash = shell.find_last_of("/\\");
+    std::string name = slash == std::string::npos ? shell : shell.substr(slash + 1);
+    for (char& ch : name) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    if (name.size() > 4 && name.ends_with(".exe")) name.resize(name.size() - 4);
     const fs::path dir = runtime_dir();
+    if (name == "pwsh" || name == "powershell") {
+        // PowerShell says nothing about its directory. Wrap the prompt (the
+        // user's own, profile and all, still runs) to print OSC 7 first.
+        // Inline, not a script file: a command line is not subject to the
+        // execution policy, which blocks scripts on a default Windows.
+        out.args = {"-NoExit", "-Command",
+                    "$global:__hand_p=$function:prompt; function global:prompt { "
+                    "$l=$executionContext.SessionState.Path.CurrentLocation; "
+                    "if($l.Provider.Name -eq 'FileSystem'){ $q=$l.ProviderPath.Replace([string][char]92,'/').Replace('%','%25'); "
+                    "[Console]::Write([string][char]27+']7;file://'+$env:COMPUTERNAME+'/'+$q+[char]7) }; & $global:__hand_p }"};
+        return out;
+    }
     if (name == "fish") {
         if (!write_file(dir / "fish" / "vendor_conf.d" / "hand-shell-integration.fish", kFish)) return {};
         const char* x = std::getenv("XDG_DATA_DIRS");

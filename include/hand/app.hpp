@@ -43,6 +43,8 @@ struct App {
     using ToggleManager = msg::ToggleManager; using Manager = msg::Manager;
     using FilesListed = msg::FilesListed; using FilesDone = msg::FilesDone; using UploadPicked = msg::UploadPicked;
     using TunnelProbe = msg::TunnelProbe; using TunnelScan = msg::TunnelScan;
+    using TogglePane = msg::TogglePane; using PaneOp = msg::PaneOp; using PaneListed = msg::PaneListed; using PaneResize = msg::PaneResize;
+    using PaneWatch = msg::PaneWatch; using PanePreview = msg::PanePreview;
 
     static inline Config config{};   ///< set by main() before run
     /// Advance of one mono cell at `size` pt in face `family` (main binds the font stack).
@@ -89,6 +91,14 @@ struct App {
     static Cmd update(Model& m, UploadPicked);
     static Cmd update(Model& m, TunnelProbe);
     static Cmd update(Model& m, TunnelScan);
+    static Cmd update(Model& m, TogglePane);
+    static Cmd update(Model& m, PaneOp);
+    static Cmd update(Model& m, PaneListed);
+    static Cmd update(Model& m, PaneResize);
+    static Cmd update(Model& m, PaneWatch);
+    static Cmd update(Model& m, PanePreview);
+    /// The pane follows the active tab's directory: list it if it moved.
+    static Cmd pane_sync(Model& m);
     static Cmd update(Model& m, mayag::Edit<Model> e) { e(m); settle_scroll(m); return {}; }
 
     // src/app/input.cpp: window input -> messages

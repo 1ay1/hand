@@ -202,6 +202,37 @@ const std::vector<Row>& rows() {
          GET(c.ssh_prod_guard), SET(c.ssh_prod_guard = v > 0.5f)},
         {"ssh", "reconnect", "when an ssh tab drops, keep it open and offer to reconnect", Kind::toggle, 0, 1, 1, 0, "", 1, none,
          GET(c.ssh_reconnect), SET(c.ssh_reconnect = v > 0.5f)},
+
+        {"files", "side", "which side of the terminal the file pane docks on (ctrl+shift+e)", Kind::choice, 0, 1, 1, 0, "", 1,
+         [] { return std::vector<std::string>{"left", "right"}; },
+         GET(c.files_left ? 0 : 1), SET(c.files_left = v < 0.5f)},
+        {"files", "width", "the pane's width (or drag its edge)", Kind::number, 220, 640, 10, 0, "px", 1, none,
+         GET(c.files_width), SET(c.files_width = v)},
+        {"files", "open_at_start", "open the file pane when hand starts", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+         GET(c.files_open), SET(c.files_open = v > 0.5f)},
+        {"files", "follow", "move with the shell's cd (f brings it back after you browse away)", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+         GET(c.files_follow), SET(c.files_follow = v > 0.5f)},
+        {"files", "sort", "the order of the list (s cycles it)", Kind::choice, 0, 3, 1, 0, "", 1,
+         [] { return std::vector<std::string>{"name", "modified", "size", "type"}; },
+         GET(c.files_sort), SET(c.files_sort = std::clamp(static_cast<int>(v + 0.5f), 0, 3))},
+        {"files", "dirs_first", "folders above files", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+         GET(c.files_dirs_first), SET(c.files_dirs_first = v > 0.5f)},
+        {"files", "hidden", "show dotfiles (. toggles)", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+         GET(c.files_hidden), SET(c.files_hidden = v > 0.5f)},
+        {"files", "git", "colour files and folders by git status: modified, added, untracked, conflicts", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+         GET(c.files_git), SET(c.files_git = v > 0.5f)},
+        {"files", "size_bars", "a hairline under each file: its size against the folder's largest", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+         GET(c.files_size_bars), SET(c.files_size_bars = v > 0.5f)},
+        {"files", "age", "how long ago each file changed (4m, 2d); the last hour in the accent", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+         GET(c.files_age), SET(c.files_age = v > 0.5f)},
+        {"files", "type_colors", "icons tinted by kind: code, config, docs, images, archives", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+         GET(c.files_type_colors), SET(c.files_type_colors = v > 0.5f)},
+        {"files", "watch", "re-read the folder while open: new and changed files glow as they land", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+         GET(c.files_watch), SET(c.files_watch = v > 0.5f)},
+        {"files", "preview", "the selected file's first lines under the list", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+         GET(c.files_preview), SET(c.files_preview = v > 0.5f)},
+        {"files", "preview_lines", "how many lines the preview shows", Kind::number, 3, 40, 1, 0, "", 1, none,
+         GET(c.files_preview_lines), SET(c.files_preview_lines = v)},
     };
     return r;
 }
@@ -223,6 +254,7 @@ const char* icon_of(std::string_view section) {
         if (section == "tabs") return "#";
         if (section == "selection") return "[";
         if (section == "confirm") return "?";
+        if (section == "files") return "\u25A4";
         return "\u2022";
     }
     if (section == "font") return "\uF031";
@@ -237,6 +269,7 @@ const char* icon_of(std::string_view section) {
     if (section == "tabs") return "\uF2D2";
     if (section == "selection") return "\uF246";
     if (section == "confirm") return "\uF071";
+    if (section == "files") return "\uF07C";
     return "\u2022";
 }
 

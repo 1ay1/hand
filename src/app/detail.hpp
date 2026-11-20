@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-namespace mayag::dsl { struct SshHost; struct CornerControlsProps; }
+namespace mayag::dsl { struct SshHost; struct CornerControlsProps; struct FilePaneProps; }
 
 namespace hand::detail {
 
@@ -29,6 +29,12 @@ std::int64_t unix_now();
 std::int64_t wall_ms();
 /// Where the terminal starts (the strip may sit above it or below it).
 float term_top(const Model& m);
+/// Where the terminal starts across (the file pane may dock on the left).
+float term_left(const Model& m);
+/// Is window x over the file pane?
+bool in_pane(const Model& m, float x);
+/// Something in the file pane is still glowing (it changed a moment ago).
+bool pane_glowing(const Model& m);
 bool in_strip(const Model& m, float y);
 /// A clock for caches that must refresh even while the frame clock is idle.
 double mono_s();
@@ -95,5 +101,7 @@ void start_ssh(Model& m, Session& se, const Host& h);
 void activate(Model& m, std::size_t i);
 /// Bytes to the active pty (snaps the view live, wakes the cursor).
 std::optional<App::Msg> send(std::string bytes);
+/// The file pane's props, from the model (input and view both read them).
+mayag::dsl::FilePaneProps pane_props(const Model& m);
 
 }  // namespace hand::detail

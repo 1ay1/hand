@@ -110,6 +110,21 @@ struct Config {
     bool  ssh_known_hosts = true;   ///< list machines from ~/.ssh/known_hosts too
     bool  ssh_prod_guard = true;    ///< a prod host (by name or hosts.vibe) is marked in red on its tab and frame
     bool  ssh_reconnect = true;     ///< a dropped ssh tab offers to reconnect instead of closing
+    // files: the pane beside the terminal (ctrl+shift+e)
+    bool  files_left = true;        ///< dock on the left (off: the right)
+    float files_width = 300.0f;     ///< px; dragging its edge sets this
+    bool  files_open = false;       ///< open when hand starts
+    bool  files_follow = true;      ///< move with the shell's cd
+    bool  files_hidden = false;     ///< show dotfiles
+    bool  files_dirs_first = true;
+    int   files_sort = 0;           ///< name / modified / size / type
+    bool  files_git = true;         ///< colour files and folders by git status (local folders in a repo)
+    bool  files_size_bars = true;   ///< a bar under each file: its size against the folder's largest
+    bool  files_age = true;         ///< how long ago each file changed ("4m", "2d")
+    bool  files_type_colors = true; ///< icons tinted by kind: code, config, docs, images, archives
+    bool  files_watch = true;       ///< re-read the folder while open; new and changed files glow
+    bool  files_preview = true;     ///< the selected file's first lines under the list
+    float files_preview_lines = 12.0f;
 
     // not settings: launch options
     std::string shell;          ///< [main] shell (from the file)

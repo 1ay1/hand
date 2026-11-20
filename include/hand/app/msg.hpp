@@ -60,10 +60,18 @@ struct FilesDone { std::string alias; std::string refresh_path; std::string titl
 struct UploadPicked { std::string alias; std::string dir; std::vector<std::string> files; };
 struct TunnelProbe {};                                        ///< 1 Hz while the manager is open
 struct TunnelScan { std::vector<int> ports; std::vector<std::string> owners; bool known = true; };
+// the file pane beside the terminal
+struct TogglePane {};                                          ///< ctrl+shift+e
+struct PaneOp { mayag::dsl::FilePaneOp op; };
+struct PaneListed { std::uint64_t token = 0; std::string path; std::vector<mayag::dsl::FileEntry> entries; std::string error; bool quiet = false; };
+struct PaneResize { float dx = 0.0f; };                         ///< grow by dx px
+struct PaneWatch {};                                           ///< re-read the pane's folder (files.watch)
+struct PanePreview { std::string path; std::optional<mayag::dsl::FilePreview> preview; };
 
 using Any = std::variant<Output, Exited, NewTab, CloseTab, SelectTab, StepTab, MoveTab, Blink, Tick, Clock,
                          Copy, PasteReq, Pasted, CopyOutput, CopyKey, Search, OpenUrl, HintPick, Panel, ToggleSettings,
                          Answer, RequestQuit, WindowAct, OpenHosts, HostsKey, ConnectHost, ConnectTyped, Reconnect,
-                         ToggleManager, Manager, FilesListed, FilesDone, UploadPicked, TunnelProbe, TunnelScan, mayag::Edit<Model>>;
+                         ToggleManager, Manager, FilesListed, FilesDone, UploadPicked, TunnelProbe, TunnelScan,
+                         TogglePane, PaneOp, PaneListed, PaneResize, PaneWatch, PanePreview, mayag::Edit<Model>>;
 
 }  // namespace hand::msg

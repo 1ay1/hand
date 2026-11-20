@@ -28,6 +28,12 @@ using namespace mayag::dsl;
 
 /// Where the terminal starts (the strip may sit above it or below it).
 float term_top(const Model& m) { return m.cfg.tab_bottom ? 0.0f : m.strip_h(); }
+/// Where the terminal starts across (the file pane may dock on the left).
+float term_left(const Model& m) { return m.pane_open && m.cfg.files_left ? m.pane_w : 0.0f; }
+bool in_pane(const Model& m, float x) {
+    if (!m.pane_open) return false;
+    return m.cfg.files_left ? x < m.pane_w : x >= m.win.x - m.pane_w;
+}
 bool in_strip(const Model& m, float y) {
     return m.cfg.tab_bottom ? y >= m.win.y - m.strip_h() : y < m.strip_h();
 }
@@ -230,7 +236,10 @@ float minimap_w(const Model& m) { return minimap_on(m) ? std::max(m.mm_w, kMinim
 
 bool corner_buttons(const Model& m) { return !m.cfg.decorations && m.strip_t <= 0.0f; }
 
-CornerControlsProps corner_props(const Model& m) { return {.width = m.win.x, .right_inset = minimap_w(m)}; }
+CornerControlsProps corner_props(const Model& m) {
+    const float pane = m.pane_open && !m.cfg.files_left ? m.pane_w : 0.0f;
+    return {.width = m.win.x, .right_inset = minimap_w(m) + pane};
+}
 
 bool in_corner(const Model& m, Vec2 p) {
     if (!corner_buttons(m)) return false;

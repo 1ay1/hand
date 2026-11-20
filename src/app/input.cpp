@@ -85,6 +85,13 @@ std::optional<App::Msg> App::on(const Model& m, const KeyEvent& k_in) {
         if (cs && k.key == Key::s) return OpenHosts{};
         return HostsKey{k.key, md};
     }
+    if (cs && k.key == Key::e && !m.ask) return TogglePane{};
+    if (m.pane_open && m.pane.focused && !m.ask) {   // the file pane has the keyboard
+        if (k.key == Key::ctrl || k.key == Key::shift || k.key == Key::alt || k.key == Key::super) return std::nullopt;
+        if (!md.ctrl && !md.super)
+            if (auto op = file_pane_key(m.pane, pane_props(m), k.key, md)) return PaneOp{std::move(*op)};
+        if (!md.ctrl && !md.super) return E{[](Model&) {}};   // plain keys never reach the shell
+    }
     if (m.ask.has_value()) {   // the dialog has the keyboard
         const int n = (m.ask && m.ask->kind == Ask::Kind::paste) ? 3 : 2;
         if (k.key == Key::escape) return Answer{-1};
@@ -222,6 +229,10 @@ std::optional<App::Msg> App::on(const Model& m, const TextEvent& t) {
     if (m.hosts_open)
         return E{[s = t.text](Model& mm) { mm.hosts_query.insert(s); mm.hosts_sel = 0; }};
     if (m.ask.has_value()) return E{[](Model&) {}};
+    if (m.pane_open && m.pane.focused) {   // the pane reads keys; text only while filtering
+        if (auto op = file_pane_text(m.pane, t.text)) return PaneOp{std::move(*op)};
+        return E{[](Model&) {}};
+    }
     if (m.link.dropped) return E{[](Model&) {}};
     if (m.ask.has_value()) return E{[](Model&) {}};
     if (m.copy && !m.settings_open) return CopyKey{Key::unknown, {}, t.text};
@@ -249,7 +260,9 @@ std::optional<App::Msg> App::on(const Model& m, const ScrollEvent& s_win) {
     if (in_strip(m, s_win.position.y)) return std::nullopt;   // the tab strip's
     ScrollEvent s = s_win;
     s.position.y -= term_top(m);   // terminal coordinates from here on
+    s.position.x -= term_left(m);
     if (m.settings_open || m.manager_open) return std::nullopt;   // the panel's scroll_view takes it
+    if (in_pane(m, s_win.position.x)) return std::nullopt;   // the file pane's list
     const float ch = std::max(m.metrics.cell_h, 1.0f);
     const int lines = static_cast<int>(std::round(s.delta.y / ch * m.cfg.scroll_lines));
     if (lines == 0 && (m.term->mouse_reporting() || m.term->alt_screen())) return std::nullopt;
@@ -293,7 +306,11 @@ std::optional<App::Msg> App::on(const Model& m, const MouseDown& e_win) {
     if (in_strip(m, e_win.position.y) || in_corner(m, e_win.position)) return std::nullopt;   // the tab strip's / the buttons'
     MouseDown e = e_win;
     e.position.y -= term_top(m);   // terminal coordinates from here on
+    e.position.x -= term_left(m);
     if (m.settings_open || m.manager_open) return std::nullopt;
+    if (in_pane(m, e_win.position.x)) return std::nullopt;   // the file pane's
+    if (m.pane_open && m.pane.focused)   // a click on the terminal takes the keyboard back
+        return E{[](Model& mm) { mm.pane.focused = false; }};
     if (minimap_on(m) && e.position.x > m.size.x - std::max(m.mm_w, kMinimapRest)) return std::nullopt;   // the minimap's
     const int col = cell_of(e.position.x, m.metrics.origin_x, m.metrics.cell_w, m.term->cols());
     const int row = cell_of(e.position.y, m.metrics.origin_y, m.metrics.cell_h, m.term->rows());
@@ -348,7 +365,14 @@ std::optional<App::Msg> App::on(const Model& m, const MouseMove& e_win) {
     if (in_strip(m, e_win.position.y) && m.mouse_button < 0 && !m.selecting) return std::nullopt;   // the tab strip's
     MouseMove e = e_win;
     e.position.y -= term_top(m);   // terminal coordinates from here on
+    e.position.x -= term_left(m);
     if (m.settings_open || m.manager_open) return std::nullopt;
+    if (in_pane(m, e_win.position.x) && m.mouse_button < 0 && !m.selecting) {   // the file pane's
+        // the pointer left the terminal: the scrollback map and its peek fold away
+        if (m.mm_open || m.mm_hover_y >= 0.0f || !m.hover_url.empty())
+            return E{[](Model& mm) { mm.mm_open = false; mm.mm_hover_y = -1.0f; mm.hover_url.clear(); }};
+        return std::nullopt;
+    }
     if (!minimap_on(m) && (m.mm_open || m.mm_hover_y >= 0.0f))
         return E{[](Model& mm) { mm.mm_open = false; mm.mm_hover_y = -1.0f; }};
     if (minimap_on(m) && m.mouse_button < 0 && !m.selecting) {
@@ -402,6 +426,7 @@ std::optional<App::Msg> App::on(const Model& m, const MouseUp& e_win) {
     if (in_strip(m, e_win.position.y) && m.mouse_button < 0 && !m.selecting) return std::nullopt;   // the tab strip's
     MouseUp e = e_win;
     e.position.y -= term_top(m);   // terminal coordinates from here on
+    e.position.x -= term_left(m);
     if (m.mouse_button >= 0) {
         const int col = cell_of(e.position.x, m.metrics.origin_x, m.metrics.cell_w, m.term->cols());
         const int row = cell_of(e.position.y, m.metrics.origin_y, m.metrics.cell_h, m.term->rows());
@@ -511,6 +536,9 @@ App::Sub App::subscribe(const Model& m) {
     if (m.tab_count() > 1) s.push_back(Sub::every(std::chrono::milliseconds(1000), Msg{Clock{}}));   // activity sparklines
     // the host manager's live tunnel status: who listens on each -L / -D port
     if (m.manager_open) s.push_back(Sub::every(std::chrono::milliseconds(900), Msg{TunnelProbe{}}));
+    // the file pane: re-read its folder (new and changed files glow), and follow `ssh` started in a tab
+    if (m.pane_open && m.cfg.files_watch) s.push_back(Sub::every(std::chrono::milliseconds(m.pane_where.empty() ? 1500 : 5000), Msg{PaneWatch{}}));
+    if (m.pane_open && m.tab_count() < 2) s.push_back(Sub::every(std::chrono::milliseconds(1000), Msg{Clock{}}));
     if (m.focused && m.cfg.cursor_blink)
         s.push_back(Sub::every(std::chrono::milliseconds(static_cast<int>(m.cfg.blink_ms)), Msg{Blink{}}));
     const auto cur = m.term->cursor();
@@ -522,7 +550,7 @@ App::Sub App::subscribe(const Model& m) {
                          !motion::tail_settled(m.fx, m.cfg.cursor_anim == CursorAnim::smear ? static_cast<float>(cur.col) : m.cur_x,
                                                m.cfg.cursor_anim == CursorAnim::smear ? static_cast<float>(cur.row) : m.cur_y);
     const bool strip_goal = m.cfg.strip_always() || m.tab_count() > 1;
-    const bool animating = gliding || breathing || tailing || m.fx.busy() || m.ask.has_value() || m.ask_t > 0.0f || m.time - m.copy_flash_at < 0.5 || m.tab_motion.animating() ||
+    const bool animating = (m.pane_open && pane_glowing(m)) || gliding || breathing || tailing || m.fx.busy() || m.ask.has_value() || m.ask_t > 0.0f || m.time - m.copy_flash_at < 0.5 || m.tab_motion.animating() ||
                            m.strip_t != (strip_goal ? 1.0f : 0.0f) || m.switch_t < 1.0f || m.drag_tab >= 0 || m.show_numbers || m.scroll_d != m.scroll_goal || m.out_shift != 0.0f ||
                            (m.bell_at >= 0.0 && m.time - m.bell_at < 0.45) ||
                            (m.cfg.blink_style == BlinkStyle::fade && m.cur_a != (m.cursor_on || !m.focused || !m.cfg.cursor_blink ? 1.0f : 0.0f)) ||

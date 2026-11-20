@@ -3,6 +3,7 @@
 //   tabbed_window
 //   ├── tab_strip            one TermTabInfo per session         (view/tabs.cpp)
 //   └── the terminal         terminal_view + its overlays        (view/terminal.cpp)
+//       └── file_pane        the tab's directory, when open (ctrl+shift+e)
 //
 // Plus what floats over the whole window -- dialog, toasts, host picker,
 // search, resize readout (view/overlays.cpp) -- and the settings window
@@ -12,6 +13,7 @@
 #include "view.hpp"
 
 #include <mayag/widget/terminal/window.hpp>
+#include <mayag/widget/file_pane.hpp>
 #include <mayag/widget/tab_strip.hpp>
 
 namespace hand {
@@ -23,6 +25,13 @@ Node App::view(const Model& m) {
     const Ctx& c = ctx();
     view::overlays(c, m);
     Node body = view::terminal(c, m);
+    if (m.pane_open) {   // the active tab's files, beside its terminal
+        Node pane = file_pane(c, "files", m.pane, detail::pane_props(m),
+                              [](FilePaneOp op) -> App::Msg { return App::PaneOp{std::move(op)}; },
+                              [](float grow) -> App::Msg { return App::PaneResize{grow}; });
+        body = (m.cfg.files_left ? h(node(std::move(pane)), node(std::move(body))) : h(node(std::move(body)), node(std::move(pane))))
+               | width(m.win.x) | height(m.size.y);
+    }
     const float full = std::clamp(m.cfg.tab_height, 22.0f, 60.0f);
     TabbedWindowProps wp{.size = m.win, .strip_full = full, .strip_t = m.strip_t, .bottom = m.cfg.tab_bottom,
                          .switch_t = m.switch_t, .switch_dir = m.switch_dir};

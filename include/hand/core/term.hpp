@@ -132,6 +132,9 @@ class Term {
     /// Scroll to the previous (-1) / next (+1) prompt. False when there is none.
     bool jump_prompt(int dir);
     [[nodiscard]] std::string cwd() const;   ///< OSC 7, as a path ("" if unknown)
+    /// The host OSC 7 named ("" if none): a remote shell reports its own,
+    /// so the directory is the remote one when it is not this machine's.
+    [[nodiscard]] std::string cwd_host() const;
 
     // ── the scrollback as a whole (minimap) ──────────────────────────────────
     struct ScrollInfo { int total = 0, first = 0, visible = 0; };   ///< in absolute rows

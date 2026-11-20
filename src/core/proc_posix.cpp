@@ -155,6 +155,20 @@ void reveal(const std::string& path) {
 #endif
 }
 
+void open_path(const std::string& path) {
+#if defined(__APPLE__)
+    (void)run({"open", path}, {}, 5000);
+#else
+    (void)run({"xdg-open", path}, {}, 5000);
+#endif
+}
+
+std::string host_name() {
+    char b[256] = {};
+    if (::gethostname(b, sizeof b - 1) != 0) return {};
+    return b;
+}
+
 std::string temp_path(std::string_view stem) {
     static unsigned n = 0;
     return (std::filesystem::temp_directory_path() /

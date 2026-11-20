@@ -66,7 +66,10 @@ App::Cmd App::update(Model& m, SelectTab st) {
     m.switch_dir = st.i > m.active ? 1 : -1;
     activate(m, st.i);
     m.switch_t = m.cfg.motion ? 0.0f : 1.0f;
-    return SetTitle{m.title};
+    std::vector<Cmd> cmds;
+    cmds.push_back(SetTitle{m.title});
+    cmds.push_back(pane_sync(m));
+    return Cmd::batch(std::move(cmds));
 }
 
 App::Cmd App::update(Model& m, StepTab st) {

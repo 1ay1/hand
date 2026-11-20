@@ -27,7 +27,10 @@ float App::Model::strip_h() const noexcept {
 }
 
 void App::fit(Model& m) {
-    m.size = Vec2{m.win.x, std::max(m.win.y - m.strip_h(), 1.0f)};
+    // the file pane takes the right side; the terminal keeps at least ~320 px
+    if (m.pane_open) m.pane_w = std::clamp(m.pane_w, 220.0f, std::max(220.0f, std::min(640.0f, m.win.x - 320.0f)));
+    const float side = m.pane_open ? m.pane_w : 0.0f;
+    m.size = Vec2{std::max(m.win.x - side, 1.0f), std::max(m.win.y - m.strip_h(), 1.0f)};
     const float cw = cell_width(m.font_size, m.cfg.font_family);
     const float ch = std::round(m.font_size * m.cfg.line_height);
     const float pad = m.cfg.padding;
@@ -53,6 +56,15 @@ void App::fit(Model& m) {
 void App::apply(Model& m, const Config& before) {
     const Config& c = m.cfg;
     if (c.font_size != before.font_size) m.font_size = c.font_size;
+    if (m.pane_open) {   // the file pane's settings take effect now
+        if (c.files_width != before.files_width) m.pane_w = c.files_width;
+        if (c.files_sort != before.files_sort) m.pane.sort = static_cast<mayag::dsl::FileSort>(std::clamp(c.files_sort, 0, 3));
+        if (c.files_hidden != before.files_hidden) m.pane.show_hidden = c.files_hidden;
+        if (c.files_git != before.files_git || c.files_preview_lines != before.files_preview_lines) {
+            m.pane_preview_path.clear();
+            m.pane_where = "\x01";   // re-list (git marks) on the next sync
+        }
+    }
     if (c.scheme != before.scheme) { m.palette = palette_of(c); m.term->set_palette(m.palette); }
     if (c.scrollback != before.scrollback) m.term->set_scrollback(static_cast<int>(c.scrollback));
     if (!c.cursor_blink) m.cursor_on = true;
@@ -143,6 +155,13 @@ App::Cmd App::init(Model& m) {
     startup::mark("hand: init: shell spawned");
     m.tabs.resize(1);
     m.active = 0;
+    if (m.cfg.files_open) {
+        std::vector<Cmd> cmds;
+        cmds.push_back(SetTitle{"hand"});
+        cmds.push_back(update(m, TogglePane{}));
+        m.pane.focused = false;   // the shell has the keyboard at start
+        return Cmd::batch(std::move(cmds));
+    }
     return SetTitle{"hand"};
 }
 
@@ -237,6 +256,7 @@ App::Cmd App::update(Model& m, Output o) {
         m.toast = Toast{.title = title, .body = cmd, .kind = c.exit_code == 0 ? Toast::Kind::success : Toast::Kind::error};
         m.toast_at = m.time;
     }
+    if (m.pane_open) cmds.push_back(pane_sync(m));   // a cd lands in the output (OSC 7)
     return Cmd::batch(std::move(cmds));
 }
 
@@ -275,7 +295,7 @@ App::Cmd App::update(Model& m, Clock) {
         if (se.activity.size() > 20) se.activity.erase(se.activity.begin());
         se.bytes = 0;
     }
-    return {};
+    return pane_sync(m);   // catches an `ssh` started inside the tab
 }
 
 App::Cmd App::update(Model& m, Blink) {

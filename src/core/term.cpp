@@ -6,6 +6,7 @@
 #include <toe/term/update.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <optional>
 #include <regex>
@@ -383,6 +384,8 @@ std::string uri_to_path(std::string w) {
             i += 2;
         } else out.push_back(w[i]);
     }
+    // "/C:/Users/x" (a Windows shell's file://HOST/C:/Users/x) is C:/Users/x
+    if (out.size() >= 3 && out[0] == '/' && std::isalpha(static_cast<unsigned char>(out[1])) && out[2] == ':') out.erase(0, 1);
     return out;
 }
 }  // namespace
@@ -452,6 +455,13 @@ bool Term::jump_prompt(int dir) {
 }
 
 std::string Term::cwd() const { return uri_to_path(p_->m.working_dir); }
+
+std::string Term::cwd_host() const {
+    const std::string& w = p_->m.working_dir;
+    if (w.rfind("file://", 0) != 0) return {};
+    const auto slash = w.find('/', 7);
+    return w.substr(7, slash == std::string::npos ? std::string::npos : slash - 7);
+}
 
 Term::ScrollInfo Term::scroll_info() const {
     const auto& s = p_->m.screen;

@@ -18,6 +18,7 @@
 
 #include <mayag/mayag.hpp>
 #include <mayag/widget/settings_panel.hpp>
+#include <mayag/widget/file_pane.hpp>
 #include <mayag/widget/ssh_manager.hpp>
 #include <mayag/widget/tab_strip.hpp>
 #include <mayag/widget/term_dialog.hpp>
@@ -26,6 +27,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -178,6 +180,22 @@ struct Model : Session {
     std::vector<std::string>    listen_owners;
     bool                        listen_known = true;
     std::vector<ImportSource>   imports;          ///< other clients' sessions, read when the manager opens
+    // the file pane beside the terminal (ctrl+shift+e): the active tab's directory
+    bool                        pane_open = false;
+    float                       pane_w = 300.0f;
+    mayag::dsl::FilePaneState   pane;
+    std::string                 pane_where;       ///< "" local, else the ssh host's alias
+    std::optional<Host>         pane_host;        ///< the host it lists over SFTP
+    std::string                 pane_path;        ///< the folder shown
+    std::string                 pane_followed;    ///< the shell's directory it last followed
+    bool                        pane_follow = true;
+    std::vector<mayag::dsl::FileEntry> pane_entries;
+    bool                        pane_loading = false;
+    std::string                 pane_error, pane_busy, pane_note;
+    std::uint64_t               pane_token = 0;   ///< the listing awaited (older ones are dropped)
+    std::map<std::string, double> pane_fresh_at;  ///< name -> when a re-read found it new / changed (the glow)
+    std::optional<mayag::dsl::FilePreview> pane_preview;
+    std::string                 pane_preview_path;   ///< what pane_preview shows (or is being read)
 
     [[nodiscard]] std::size_t tab_count() const noexcept { return std::max<std::size_t>(tabs.size(), 1); }
     [[nodiscard]] float strip_h() const noexcept;

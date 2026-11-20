@@ -49,6 +49,10 @@ struct RawSession {
 [[nodiscard]] std::vector<std::string> pick_files(const std::string& title);
 [[nodiscard]] std::string downloads_dir();
 void reveal(const std::string& path);
+/// Open a local file in its default app.
+void open_path(const std::string& path);
+/// This machine's name, as a shell would report it in OSC 7.
+[[nodiscard]] std::string host_name();
 /// A fresh temp file path (not created).
 [[nodiscard]] std::string temp_path(std::string_view stem);
 

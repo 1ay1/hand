@@ -242,6 +242,18 @@ void reveal(const std::string& path) {
     ::ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
 }
 
+void open_path(const std::string& path) {
+    ::ShellExecuteW(nullptr, L"open", widen(path).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+}
+
+std::string host_name() {
+    wchar_t buf[256];
+    DWORD n = 256;
+    if (::GetComputerNameW(buf, &n)) return narrow({buf, n});
+    const char* c = std::getenv("COMPUTERNAME");
+    return c ? c : "";
+}
+
 std::string temp_path(std::string_view stem) {
     static unsigned n = 0;
     return (std::filesystem::temp_directory_path() /

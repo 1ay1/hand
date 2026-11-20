@@ -12,8 +12,11 @@
 #include "app/detail.hpp"   // the self-test checks geometry against the same queries
 
 #include <filesystem>
+#include <thread>
+#include <chrono>
 
 #include <mayag/widget/ssh.hpp>
+#include <mayag/widget/file_pane.hpp>
 #include <hand/config/schemes_gen.hpp>
 #include <hand/ssh/sftp.hpp>
 
@@ -1700,6 +1703,39 @@ int main(int argc, char** argv) {
                                 ok(mh.size() == 1 && mh[0].alias == "db" && mh[0].port == 2200 && mh[0].user == "root" && mh[0].folder == "MobaXterm/Work/EU",
                                    "MobaXterm.ini: SSH bookmarks with their folder; RDP skipped");
                             }
+                            {   // the file pane's list: hidden, sort, dirs first, fuzzy filter, crumbs, ages
+                                namespace fp = mayag::dsl;
+                                std::vector<fp::FileEntry> es = {{.name = "src", .dir = true, .mtime = 100},
+                                                                 {.name = ".git", .dir = true},
+                                                                 {.name = "CMakeLists.txt", .size = 3000, .mtime = 300},
+                                                                 {.name = "README.md", .size = 9000, .mtime = 200},
+                                                                 {.name = "build.sh", .size = 10, .mtime = 400}};
+                                fp::FilePaneState st;
+                                auto v = fp::file_pane_view(es, st);
+                                ok(v.size() == 4 && es[v[0].i].name == "src" && es[v[1].i].name == "build.sh",
+                                   "file pane: dotfiles hidden, folders first, names case-insensitive");
+                                st.sort = fp::FileSort::size;
+                                v = fp::file_pane_view(es, st);
+                                const bool by_size = es[v[1].i].name == "README.md";
+                                st.sort = fp::FileSort::modified;
+                                v = fp::file_pane_view(es, st);
+                                ok(by_size && es[v[1].i].name == "build.sh" && es[v[3].i].name == "README.md", "file pane: sorts by size and by age");
+                                st.filter = "cmk";
+                                v = fp::file_pane_view(es, st);
+                                ok(v.size() == 1 && es[v[0].i].name == "CMakeLists.txt" && v[0].hits.size() == 3, "file pane: fuzzy filter lights its matches");
+                                st.filter = ".gi";
+                                ok(fp::file_pane_view(es, st).size() == 1, "file pane: a filter starting with . finds dotfiles");
+                                const auto cr = fp::file_pane_detail::crumbs("C:/Users/me/src/hand", "C:/Users/me", '/');
+                                ok(cr.size() == 3 && cr[0].first == "~" && cr[2].second == "C:/Users/me/src/hand", "file pane: crumbs fold home into ~");
+                                ok(fp::file_pane_detail::age(10000, 10000 - 7200) == "2h" && fp::file_pane_detail::age(10000, 0).empty(),
+                                   "file pane: ages read 2h, unknown is blank");
+                                fp::FilePaneState fs2;
+                                auto k1 = fp::file_pane_key(fs2, fp::FilePaneProps{.entries = es}, mayag::Key::slash, {});
+                                if (k1) (*k1)(fs2);
+                                if (auto t1 = fp::file_pane_text(fs2, "/")) (*t1)(fs2);   // the / that began it
+                                if (auto t2 = fp::file_pane_text(fs2, "rea")) (*t2)(fs2);
+                                ok(fs2.filtering && fs2.filter == "rea", "file pane: / starts a filter, typing narrows it");
+                            }
                         }
                         ok(!rt.model().hosts_open, "esc closes the picker");
                     }
@@ -1944,6 +1980,33 @@ int main(int argc, char** argv) {
                                 hand::motion::step(m.fx, 0.018f);
                             }
                         hand::motion::step(m.fx, k == 7 ? 0.28f : 0.12f); }}});
+                }
+                if (shot.rfind("files", 0) == 0) {   // the file pane beside a shell in this repo
+                    std::error_code ec;
+                    std::string here = std::filesystem::current_path(ec).generic_string();
+                    if (!here.empty() && here[0] != '/') here = "/" + here;
+                    if (shot == "files-right") rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) { m.cfg.files_left = false; }}});
+                    rt.send(hand::App::Msg{hand::App::Output{"\x1b]7;file://localhost" + here + "\a\x1b]133;A\a\x1b[1;34m~/src/hand\x1b[0m \x1b[35m\u276F\x1b[0m \x1b]133;B\agit status -s\r\n\x1b]133;C\a"
+                        " M src/app/input.cpp\r\n M src/view/window.cpp\r\n?? src/app/pane.cpp\r\n\x1b]133;D;0\a"
+                        "\x1b]133;A\a\x1b[1;34m~/src/hand\x1b[0m \x1b[35m\u276F\x1b[0m \x1b]133;B\a"}});
+                    rt.tick();
+                    rt.press_key(mayag::Key::e, mayag::Mods{.shift = true, .ctrl = true});
+                    for (int i = 0; i < 100 && rt.model().pane_loading; ++i) {   // the listing is a task
+                        rt.settle([](const auto&) { return false; }, std::chrono::milliseconds(20));
+                        rt.tick();
+                    }
+                    rt.press_key(mayag::Key::down, {});
+                    rt.press_key(mayag::Key::down, {});
+                    if (shot == "files-filter") {
+                        rt.press_key(mayag::Key::slash, {});
+                        rt.type("cmk");
+                    } else {
+                        for (int i = 0; i < 5; ++i) rt.press_key(mayag::Key::down, {});
+                    }
+                    for (int i = 0; i < 50; ++i) {   // the preview is a task too
+                        rt.settle([](const auto&) { return false; }, std::chrono::milliseconds(20));
+                        rt.tick();
+                    }
                 }
                 if (shot == "tabs") {
                     using E3 = mayag::Edit<hand::App::Model>;

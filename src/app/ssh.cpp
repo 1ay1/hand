@@ -366,19 +366,25 @@ App::Cmd App::update(Model& m, FilesListed r) {
 
 App::Cmd App::update(Model& m, FilesDone d) {
     if (m.files.alias == d.alias) m.files.busy.clear();
+    if (m.pane_where == d.alias) m.pane_busy.clear();
     m.toast = d.error.empty() ? Toast{.title = d.title, .body = d.reveal.empty() ? d.alias : d.reveal, .kind = Toast::Kind::success}
                               : Toast{.title = "transfer failed", .body = d.error, .kind = Toast::Kind::error};
     m.toast_at = m.time;
+    std::vector<Cmd> cmds;
+    if (d.error.empty() && !d.refresh_path.empty() && m.pane_open && m.pane_where == d.alias && m.pane_path == d.refresh_path)
+        cmds.push_back(update(m, PaneOp{FilePaneOp{[p = d.refresh_path](FilePaneState& s) { s.out.push_back({FilePaneAction::Kind::list, p}); }}}));
     if (d.error.empty() && !d.refresh_path.empty() && m.files.alias == d.alias)
-        if (const Host* h = m.book.find(d.alias)) return list_files(m, *h, d.refresh_path);
-    return {};
+        if (const Host* h = m.book.find(d.alias)) cmds.push_back(list_files(m, *h, d.refresh_path));
+    return Cmd::batch(std::move(cmds));
 }
 
 App::Cmd App::update(Model& m, UploadPicked u) {
     if (u.files.empty()) return {};
     const Host* h = m.book.find(u.alias);
+    if (!h && m.pane_host && m.pane_host->alias == u.alias) h = &*m.pane_host;
     if (!h) return {};
     if (m.files.alias == u.alias) m.files.busy = "Uploading " + std::to_string(u.files.size()) + (u.files.size() == 1 ? " file\u2026" : " files\u2026");
+    if (m.pane_where == u.alias) m.pane_busy = "Uploading " + std::to_string(u.files.size()) + (u.files.size() == 1 ? " file\u2026" : " files\u2026");
     return Cmd::task([](Sk out, Host host, HostBook book, std::string dir, std::vector<std::string> files) {
         const std::string err = sftp::put(host, book, files, dir);
         out.send(App::Msg{App::FilesDone{host.alias, dir, "Uploaded " + std::to_string(files.size()) + (files.size() == 1 ? " file" : " files"), err, ""}});
