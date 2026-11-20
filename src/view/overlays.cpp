@@ -2,7 +2,8 @@
 //
 //   term_dialog     paste guard / close / quit (built while asking, kept while it fades)
 //   settings_panel  over the terminal (ctrl+,)
-//   ssh_hosts       the host picker
+//   ssh_hosts       the host picker (ctrl+shift+s)
+//   ssh_manager     every host, organised and editable (ctrl+shift+h)
 //   term_search     the scrollback search bar
 //   resize_hud, toasts, hint_bar
 
@@ -10,10 +11,13 @@
 
 #include <mayag/widget/resize_hud.hpp>
 #include <mayag/widget/ssh.hpp>
+#include <mayag/widget/ssh_manager.hpp>
 #include <mayag/widget/term_dialog.hpp>
 #include <mayag/widget/term_search.hpp>
 #include <mayag/widget/terminal/overlays.hpp>
 #include <mayag/widget/toast.hpp>
+
+#include <filesystem>
 
 namespace hand::view {
 
@@ -130,6 +134,25 @@ void overlays(const Ctx& c, const Model& m) {
         ssh_hosts(c, "hosts", m.hosts_query, hosts, rank_hosts(hosts, m.hosts_query.text, unix_now()), m.hosts_sel,
                   SshHostsProps{.now = unix_now(), .source = m.book.config_label.empty() ? "~/.ssh/config" : m.book.config_label,
                                 .action = "new tab", .width = std::min(720.0f, m.win.x - 48.0f)});
+    }
+    if (m.manager_open || m.manager_t > 0.0f) {
+        const float e = 1.0f - (1.0f - m.manager_t) * (1.0f - m.manager_t);   // ease-out
+        std::string store = (std::filesystem::path{m.host_src.store}.filename()).string();
+        c.overlay(Overlay{
+            .content = (node(ssh_manager(c, "mgr", picker_hosts(m), m.manager,
+                                         SshManagerProps{.now = unix_now(),
+                                                         .source = m.book.config_label.empty() ? "~/.ssh/config" : m.book.config_label,
+                                                         .store = store.empty() ? "hosts.vibe" : store,
+                                                         .width = std::min(980.0f, m.win.x - 40.0f),
+                                                         .height = std::min(640.0f, m.win.y - 40.0f)},
+                                         [](SshManagerOp op) -> App::Msg { return App::Manager{std::move(op)}; }))
+                        | opacity(e) | translate(0.0f, (1.0f - e) * 16.0f)).build(),
+            .id = part_id("mgr", part_menu),
+            .placement = Placement::centered,
+            .dismiss = m.manager_open ? Dismiss::modal : Dismiss::never,
+            .layer = 12,
+            .scrim = 0.4f * e,
+            .passthrough = !m.manager_open});
     }
     dialog(c, m);
 }

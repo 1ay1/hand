@@ -4,6 +4,7 @@
 #include <hand/config/config.hpp>
 
 #include <vibe.h>
+#include <mayag/widget/ssh_forward.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -22,7 +23,18 @@ namespace {
 
 namespace fs = std::filesystem;
 
+/// The home ssh resolves `~` against. On Windows that is %USERPROFILE%,
+/// ALWAYS: Microsoft's OpenSSH reads %USERPROFILE%\.ssh and ignores $HOME.
+/// Taking $HOME (set by MSYS2 / Git Bash, here to AppData\Roaming) read a
+/// ~/.ssh/config that ssh never uses, and missed the real one.
 std::string home() {
+#if defined(_WIN32)
+    if (const char* u = std::getenv("USERPROFILE"); u && *u) {
+        std::string s = u;
+        for (char& ch : s) if (ch == '\\') ch = '/';
+        return s;
+    }
+#endif
     const char* h = std::getenv("HOME");
     return h && *h ? h : "";
 }
@@ -306,7 +318,21 @@ HostBook hosts_load(const HostSources& s) {
                 };
                 Host* h = nullptr;
                 for (auto& x : book.hosts) if (x.alias == key) { h = &x; break; }
-                if (!h) {
+                const bool saved = str("source") == "saved";
+                if (!h && saved) {
+                    // made in hand's host manager: every field is here
+                    Host d;
+                    d.alias = key;
+                    d.hostname = str("hostname");
+                    if (d.hostname.empty()) d.hostname = key;
+                    d.user = str("user");
+                    if (auto p = num("port"); p > 0 && p < 65536) d.port = static_cast<int>(p);
+                    d.jump = str("jump");
+                    d.identity = str("identity");
+                    d.source = HostSource::saved;
+                    book.hosts.push_back(std::move(d));
+                    h = &book.hosts.back();
+                } else if (!h) {
                     // not in ~/.ssh/config: an ad-hoc destination remembered from history
                     std::optional<Host> d = parse_destination(key);
                     if (!d) continue;
@@ -326,6 +352,12 @@ HostBook hosts_load(const HostSources& s) {
                 }
                 h->uses = static_cast<int>(num("uses"));
                 h->last = num("last");
+                if (VibeValue* x = vibe_object_get(e, "forwards"); x && vibe_is_array(x)) {
+                    VibeArray* a = vibe_value_array(x);
+                    for (std::size_t k = 0; k < vibe_array_size(a); ++k)
+                        if (VibeValue* t = vibe_array_get(a, k); t && vibe_is_string(t)) h->forwards.emplace_back(vibe_value_string(t));
+                }
+                h->command = str("command");
             }
         }
     }
@@ -389,6 +421,56 @@ void hosts_set_pinned(const HostSources& s, const Host& h, bool pinned) {
             if (h.port != 22) vibe_object_set_int(e, "port", h.port);
         }
     });
+}
+
+void hosts_save(const HostSources& s, const Host& h, std::string_view old_alias) {
+    edit_store(s, [&](VibeObject* hosts) {
+        // keep what hand tracks (uses, last) across an edit or a rename
+        std::int64_t uses = 0, last = 0;
+        const std::string from = old_alias.empty() ? h.alias : std::string{old_alias};
+        if (VibeValue* o = vibe_object_get(hosts, from.c_str()); o && vibe_is_object(o)) {
+            VibeObject* oe = vibe_value_object(o);
+            if (VibeValue* x = vibe_object_get(oe, "uses"); x && vibe_is_integer(x)) uses = vibe_value_int(x);
+            if (VibeValue* x = vibe_object_get(oe, "last"); x && vibe_is_integer(x)) last = vibe_value_int(x);
+        }
+        if (!old_alias.empty() && old_alias != h.alias) vibe_object_remove(hosts, from.c_str());
+        vibe_object_remove(hosts, h.alias.c_str());   // written fresh: cleared fields go away
+        VibeObject* e = child(hosts, h.alias.c_str());
+        if (h.editable()) {
+            vibe_object_set_string(e, "source", "saved");
+            if (!h.hostname.empty() && h.hostname != h.alias) vibe_object_set_string(e, "hostname", h.hostname.c_str());
+            if (!h.user.empty()) vibe_object_set_string(e, "user", h.user.c_str());
+            if (h.port != 22) vibe_object_set_int(e, "port", h.port);
+            if (!h.jump.empty()) vibe_object_set_string(e, "jump", h.jump.c_str());
+            if (!h.identity.empty()) vibe_object_set_string(e, "identity", h.identity.c_str());
+        }
+        if (h.pinned) vibe_object_set_bool(e, "pinned", true);
+        if (h.env_set && h.env != HostEnv::none) vibe_object_set_string(e, "env", env_word(h.env));
+        if (!h.tags.empty()) {
+            VibeValue* arr = vibe_value_new_array();
+            for (const auto& t : h.tags) vibe_array_push_string(vibe_value_array(arr), t.c_str());
+            vibe_object_set(e, "tags", arr);
+        }
+        if (!h.forwards.empty()) {
+            VibeValue* arr = vibe_value_new_array();
+            for (const auto& f : h.forwards) vibe_array_push_string(vibe_value_array(arr), f.c_str());
+            vibe_object_set(e, "forwards", arr);
+        }
+        if (!h.command.empty()) vibe_object_set_string(e, "command", h.command.c_str());
+        if (uses > 0) vibe_object_set_int(e, "uses", uses);
+        if (last > 0) vibe_object_set_int(e, "last", last);
+    });
+}
+
+void hosts_remove(const HostSources& s, std::string_view alias) {
+    edit_store(s, [&](VibeObject* hosts) { vibe_object_remove(hosts, std::string{alias}.c_str()); });
+}
+
+std::optional<std::pair<std::string, std::string>> parse_forward(std::string_view in, std::string* err) {
+    // one parser for the UI and the argv: mayag's (widget/ssh_forward.hpp)
+    const auto f = mayag::dsl::ssh_forward_parse(in, err);
+    if (!f) return std::nullopt;
+    return std::pair{std::string{f->flag()}, f->arg()};
 }
 
 std::optional<Host> parse_destination(std::string_view typed) {
@@ -465,20 +547,42 @@ std::vector<std::string> ssh_argv(const Host& h, const HostBook& book, SshFlags 
     }
     if (f.keepalive && !book.sets_alive)
         a.insert(a.end(), {"-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4"});
+    // the host manager's forwards: -L / -R / -D, each checked on save and again here
+    for (const auto& fw : h.forwards)
+        if (auto p = parse_forward(fw)) a.insert(a.end(), {p->first, p->second});
     if (h.source == HostSource::config) {
         a.push_back(h.alias);   // ssh applies the config itself
     } else {
         if (h.port != 22) a.insert(a.end(), {"-p", std::to_string(h.port)});
+        if (!h.jump.empty()) a.insert(a.end(), {"-J", h.jump});
+        if (!h.identity.empty()) {
+            std::string id = h.identity;
+            if (id.rfind("~/", 0) == 0) id = home() + id.substr(1);
+            a.insert(a.end(), {"-i", id});
+        }
         a.push_back(h.user.empty() ? h.hostname : h.user + "@" + h.hostname);
+    }
+    // a command on connect needs a tty (tmux, a shell with flags)
+    if (!h.command.empty()) {
+        a.insert(a.begin() + 1, "-t");
+        a.push_back(h.command);
     }
     return a;
 }
 
 std::string ssh_command(const Host& h) {
-    if (h.source == HostSource::config) return "ssh " + h.alias;
     std::string s = "ssh ";
-    if (h.port != 22) s += "-p " + std::to_string(h.port) + " ";
-    return s + (h.user.empty() ? h.hostname : h.user + "@" + h.hostname);
+    for (const auto& fw : h.forwards)
+        if (auto p = parse_forward(fw)) s += p->first + " " + p->second + " ";
+    if (h.source == HostSource::config) s += h.alias;
+    else {
+        if (h.port != 22) s += "-p " + std::to_string(h.port) + " ";
+        if (!h.jump.empty()) s += "-J " + h.jump + " ";
+        if (!h.identity.empty()) s += "-i " + h.identity + " ";
+        s += h.user.empty() ? h.hostname : h.user + "@" + h.hostname;
+    }
+    if (!h.command.empty()) s += " -t '" + h.command + "'";
+    return s;
 }
 
 std::string ago(std::int64_t then, std::int64_t now) {

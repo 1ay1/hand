@@ -310,6 +310,7 @@ App::Cmd App::update(Model& m, Tick t) {
         if (m.cfg.blink_style == BlinkStyle::fade)
             toward(m.cur_a, m.cursor_on || !m.focused || !m.cfg.cursor_blink ? 1.0f : 0.0f, 16.0f * m.cfg.motion_speed);
         toward(m.settings_t, m.settings_open ? 1.0f : 0.0f, m.cfg.motion ? 22.0f : 1000.0f);
+        toward(m.manager_t, m.manager_open ? 1.0f : 0.0f, m.cfg.motion ? 22.0f : 1000.0f);
         toward(m.out_shift, 0.0f, 22.0f);
         toward(m.ask_t, m.ask.has_value() ? 1.0f : 0.0f, m.cfg.motion ? 20.0f : 1000.0f);
     }

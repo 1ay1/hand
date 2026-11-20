@@ -25,7 +25,9 @@
 namespace hand {
 
 enum class HostEnv : std::uint8_t { none, dev, staging, prod };
-enum class HostSource : std::uint8_t { config, known, history };
+/// Where a host comes from. `saved`: created in hand's host manager, every
+/// field lives in hosts.vibe and can be edited there.
+enum class HostSource : std::uint8_t { config, known, history, saved };
 
 struct Host {
     std::string alias;            ///< what you type after `ssh` (a Host name, or user@host for ad-hoc)
@@ -42,6 +44,10 @@ struct Host {
     std::vector<std::string> tags;
     int         uses = 0;
     std::int64_t last = 0;        ///< unix seconds of the last connection, 0 = never
+    // from hosts.vibe, for ANY host (config ones too): what hand adds to ssh
+    std::vector<std::string> forwards;   ///< "L5432:localhost:5432", "R8080:localhost:80", "D1080"
+    std::string command;          ///< run on connect (`ssh -t host CMD`): "tmux new -A -s main"
+    [[nodiscard]] bool editable() const noexcept { return source != HostSource::config && source != HostSource::known; }
 };
 
 struct HostSources {
@@ -65,6 +71,17 @@ struct HostBook {
 /// hosts.vibe edits (read-modify-write; the file is small).
 void hosts_record_use(const HostSources& s, const Host& h, std::int64_t now);
 void hosts_set_pinned(const HostSources& s, const Host& h, bool pinned);
+/// Write `h` to hosts.vibe: every field for a host hand owns (saved,
+/// history), only hand's notes (env, tags, pin, forwards, command) for one
+/// from ~/.ssh/config or known_hosts. `old_alias`: the entry it replaces
+/// (a rename), "" for a new one.
+void hosts_save(const HostSources& s, const Host& h, std::string_view old_alias);
+/// Forget a host hand owns; for any other, drop hand's notes on it.
+void hosts_remove(const HostSources& s, std::string_view alias);
+/// A forward as typed ("L5432:db:5432", "-L 5432:db:5432", "D1080",
+/// "5432" = L5432:localhost:5432): the ssh flag and its argument, or
+/// nullopt with why in `err`.
+[[nodiscard]] std::optional<std::pair<std::string, std::string>> parse_forward(std::string_view s, std::string* err = nullptr);
 
 /// "prod-db", "api.staging.example" -> prod / staging; dev/test/local -> dev.
 [[nodiscard]] HostEnv guess_env(std::string_view alias, std::string_view hostname);

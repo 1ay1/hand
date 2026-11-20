@@ -74,6 +74,12 @@ std::optional<App::Msg> App::on(const Model& m, const KeyEvent& k_in) {
         return std::nullopt;
     }
     const bool cs = md.ctrl && md.shift && !md.alt;
+    if (cs && k.key == Key::h) return ToggleManager{};
+    if (m.manager_open) {   // the host manager has the keyboard
+        if (k.key == Key::ctrl || k.key == Key::shift || k.key == Key::alt || k.key == Key::super) return std::nullopt;
+        if (auto op = ssh_manager_key(m.manager, picker_hosts(m), unix_now(), k.key, md)) return Manager{std::move(*op)};
+        return E{[](Model&) {}};   // never to the shell underneath
+    }
     if (m.hosts_open) {   // the host picker has the keyboard
         if (k.key == Key::ctrl || k.key == Key::shift || k.key == Key::alt || k.key == Key::super) return std::nullopt;
         if (cs && k.key == Key::s) return OpenHosts{};
@@ -209,6 +215,10 @@ std::optional<App::Msg> App::on(const Model& m, const ComposeEndEvent&) {
 }
 
 std::optional<App::Msg> App::on(const Model& m, const TextEvent& t) {
+    if (m.manager_open) {
+        if (auto op = ssh_manager_text(m.manager, picker_hosts(m), unix_now(), t.text)) return Manager{std::move(*op)};
+        return E{[](Model&) {}};
+    }
     if (m.hosts_open)
         return E{[s = t.text](Model& mm) { mm.hosts_query.insert(s); mm.hosts_sel = 0; }};
     if (m.ask.has_value()) return E{[](Model&) {}};
@@ -239,7 +249,7 @@ std::optional<App::Msg> App::on(const Model& m, const ScrollEvent& s_win) {
     if (in_strip(m, s_win.position.y)) return std::nullopt;   // the tab strip's
     ScrollEvent s = s_win;
     s.position.y -= term_top(m);   // terminal coordinates from here on
-    if (m.settings_open) return std::nullopt;   // the panel's scroll_view takes it
+    if (m.settings_open || m.manager_open) return std::nullopt;   // the panel's scroll_view takes it
     const float ch = std::max(m.metrics.cell_h, 1.0f);
     const int lines = static_cast<int>(std::round(s.delta.y / ch * m.cfg.scroll_lines));
     if (lines == 0 && (m.term->mouse_reporting() || m.term->alt_screen())) return std::nullopt;
@@ -283,7 +293,7 @@ std::optional<App::Msg> App::on(const Model& m, const MouseDown& e_win) {
     if (in_strip(m, e_win.position.y) || in_corner(m, e_win.position)) return std::nullopt;   // the tab strip's / the buttons'
     MouseDown e = e_win;
     e.position.y -= term_top(m);   // terminal coordinates from here on
-    if (m.settings_open) return std::nullopt;
+    if (m.settings_open || m.manager_open) return std::nullopt;
     if (minimap_on(m) && e.position.x > m.size.x - std::max(m.mm_w, kMinimapRest)) return std::nullopt;   // the minimap's
     const int col = cell_of(e.position.x, m.metrics.origin_x, m.metrics.cell_w, m.term->cols());
     const int row = cell_of(e.position.y, m.metrics.origin_y, m.metrics.cell_h, m.term->rows());
@@ -338,7 +348,7 @@ std::optional<App::Msg> App::on(const Model& m, const MouseMove& e_win) {
     if (in_strip(m, e_win.position.y) && m.mouse_button < 0 && !m.selecting) return std::nullopt;   // the tab strip's
     MouseMove e = e_win;
     e.position.y -= term_top(m);   // terminal coordinates from here on
-    if (m.settings_open) return std::nullopt;
+    if (m.settings_open || m.manager_open) return std::nullopt;
     if (!minimap_on(m) && (m.mm_open || m.mm_hover_y >= 0.0f))
         return E{[](Model& mm) { mm.mm_open = false; mm.mm_hover_y = -1.0f; }};
     if (minimap_on(m) && m.mouse_button < 0 && !m.selecting) {
@@ -514,7 +524,8 @@ App::Sub App::subscribe(const Model& m) {
                            m.strip_t != (strip_goal ? 1.0f : 0.0f) || m.switch_t < 1.0f || m.drag_tab >= 0 || m.show_numbers || m.scroll_d != m.scroll_goal || m.out_shift != 0.0f ||
                            (m.bell_at >= 0.0 && m.time - m.bell_at < 0.45) ||
                            (m.cfg.blink_style == BlinkStyle::fade && m.cur_a != (m.cursor_on || !m.focused || !m.cfg.cursor_blink ? 1.0f : 0.0f)) ||
-                           m.settings_t != (m.settings_open ? 1.0f : 0.0f) || (m.selecting && m.sel_edge != 0.0f) ||
+                           m.settings_t != (m.settings_open ? 1.0f : 0.0f) || m.manager_t != (m.manager_open ? 1.0f : 0.0f) ||
+                           (m.selecting && m.sel_edge != 0.0f) ||
                            m.mm_w != (m.mm_open ? kMinimapOpen : kMinimapRest) ||
                            m.peek_t != ((m.cfg.peek && m.mm_hover_y >= 0.0f) ? 1.0f : 0.0f) ||
                            m.tail_t != (tail_wanted(m) ? 1.0f : 0.0f) ||

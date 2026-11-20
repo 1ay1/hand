@@ -18,6 +18,7 @@
 
 #include <mayag/mayag.hpp>
 #include <mayag/widget/settings_panel.hpp>
+#include <mayag/widget/ssh_manager.hpp>
 #include <mayag/widget/tab_strip.hpp>
 #include <mayag/widget/term_dialog.hpp>
 #include <mayag/widget/terminal_view.hpp>
@@ -167,6 +168,10 @@ struct Model : Session {
     int                     hosts_sel = 0;
     HostSources             host_src;
     HostBook                book;                 ///< loaded when the picker opens (files can change)
+    // the ssh host manager (ctrl+shift+h): every host, organised and editable
+    bool                    manager_open = false;
+    float                   manager_t = 0.0f;     ///< 0..1, eased in and out
+    mayag::dsl::SshManagerState manager;
 
     [[nodiscard]] std::size_t tab_count() const noexcept { return std::max<std::size_t>(tabs.size(), 1); }
     [[nodiscard]] float strip_h() const noexcept;

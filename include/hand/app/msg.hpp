@@ -49,10 +49,12 @@ struct HostsKey { mayag::Key key; mayag::Mods mods; };
 struct ConnectHost { Host host; bool here = false; };         ///< here: in this tab (else a new one)
 struct ConnectTyped {};                                       ///< the picker's query as a destination
 struct Reconnect {};                                          ///< the dropped ssh tab, again
+struct ToggleManager {};                                      ///< ctrl+shift+h: the host manager
+struct Manager { mayag::dsl::SshManagerOp op; };              ///< an interaction in it
 
 using Any = std::variant<Output, Exited, NewTab, CloseTab, SelectTab, StepTab, MoveTab, Blink, Tick, Clock,
                          Copy, PasteReq, Pasted, CopyOutput, CopyKey, Search, OpenUrl, HintPick, Panel, ToggleSettings,
                          Answer, RequestQuit, WindowAct, OpenHosts, HostsKey, ConnectHost, ConnectTyped, Reconnect,
-                         mayag::Edit<Model>>;
+                         ToggleManager, Manager, mayag::Edit<Model>>;
 
 }  // namespace hand::msg

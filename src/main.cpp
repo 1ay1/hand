@@ -1553,6 +1553,65 @@ int main(int argc, char** argv) {
                         ok(rt.node_rect(dsl::part_id("hosts", dsl::part_inc)).has_value(), "an unknown user@host:port offers to connect as typed");
                         rt.press_key(K::escape);
                         rt.tick();
+                        {
+                            // ── the host manager ─────────────────────────────────────────────
+                            rt.press_key(K::h, Mods{.shift = true, .ctrl = true});
+                            rt.tick();
+                            ok(rt.model().manager_open && rt.node_rect(dsl::node_id("mgr.connect")).has_value(),
+                               "ctrl+shift+h opens the host manager on a host, ready to connect");
+                            const std::size_t n0 = rt.model().book.hosts.size();
+                            // a new host: n, fields by typing and tab, a bad tunnel refused
+                            rt.press_key(K::n);
+                            rt.tick();
+                            ok(rt.model().manager.editing && rt.model().manager.edit_host < 0, "n starts a new host");
+                            rt.type("metrics"); rt.press_key(K::tab);
+                            rt.type("10.0.9.7"); rt.press_key(K::tab);
+                            rt.type("deploy"); rt.press_key(K::tab);
+                            rt.type("2222");
+                            for (int i = 0; i < 5; ++i) rt.press_key(K::tab);   // jump, key, env, tags -> tunnels
+                            rt.type("L99999");
+                            rt.press_key(K::enter);
+                            rt.tick();
+                            ok(rt.model().manager.editing && !rt.model().manager.error.empty() && rt.model().book.hosts.size() == n0,
+                               "a bad tunnel (port 99999) is refused, with why");
+                            for (int i = 0; i < 6; ++i) rt.press_key(K::backspace);
+                            rt.type("L3000:grafana:3000");
+                            rt.press_key(K::enter);
+                            rt.tick();
+                            const auto& hb = rt.model().book.hosts;
+                            const auto* made = hb.size() == n0 + 1 ? &hb.back() : nullptr;
+                            ok(!rt.model().manager.editing && made && made->alias == "metrics" && made->hostname == "10.0.9.7" && made->user == "deploy" &&
+                               made->port == 2222 && made->forwards.size() == 1 && made->forwards[0] == "L3000:grafana:3000" &&
+                               made->source == hand::HostSource::saved,
+                               "enter saves the new host, every field and its tunnel");
+                            if (made) {
+                                const auto argv = hand::ssh_argv(*made, rt.model().book, {.multiplex = false, .keepalive = false});
+                                const std::string joined = [&] { std::string s; for (const auto& a : argv) s += a + " "; return s; }();
+                                ok(joined.find("-L 3000:grafana:3000") != std::string::npos && joined.find("-p 2222") != std::string::npos &&
+                                   joined.find("deploy@10.0.9.7") != std::string::npos,
+                                   "connecting runs ssh -L 3000:grafana:3000 -p 2222 deploy@10.0.9.7");
+                            }
+                            // pin it, then delete it (asks once)
+                            rt.press_key(K::p);
+                            rt.tick();
+                            ok(!rt.model().book.hosts.empty() && rt.model().book.hosts.back().pinned, "p pins the selected host");
+                            rt.press_key(K::del);
+                            rt.tick();
+                            ok(rt.model().manager.confirm_delete && rt.model().book.hosts.size() == n0 + 1, "delete asks first");
+                            rt.press_key(K::del);
+                            rt.tick();
+                            ok(rt.model().book.hosts.size() == n0, "and deletes on the second press");
+                            // filter, then enter on a host connects in a new tab
+                            rt.type("/gpu");
+                            rt.press_key(K::enter);
+                            const std::size_t t0 = rt.model().tab_count();
+                            rt.press_key(K::enter);
+                            for (int i = 0; i < 10; ++i) rt.tick();
+                            ok(!rt.model().manager_open && rt.model().tab_count() == t0 + 1 && rt.model().remote && rt.model().remote->alias == "gpu-box",
+                               "filter + enter connects to the host in a new tab");
+                            rt.send(hand::App::Msg{hand::App::Exited{0, rt.model().sid}});
+                            for (int i = 0; i < 10; ++i) rt.tick();
+                        }
                         ok(!rt.model().hosts_open, "esc closes the picker");
                     }
                     {
@@ -1823,7 +1882,7 @@ int main(int argc, char** argv) {
                         for (int i = 0; i < 30; ++i) rt.tick();
                     }
                 }
-                if (shot == "hosts" || shot == "ssh" || shot == "ssh-drop") {
+                if (shot == "hosts" || shot == "ssh" || shot == "ssh-drop" || shot.rfind("manager", 0) == 0) {
                     using E7 = mayag::Edit<hand::App::Model>;
                     rt.send(hand::App::Msg{E7{[](hand::App::Model& m) {
                         const std::int64_t now = static_cast<std::int64_t>(std::time(nullptr));
@@ -1849,6 +1908,28 @@ int main(int argc, char** argv) {
                     rt.tick();
                     if (shot == "hosts") {
                         rt.send(hand::App::Msg{E7{[](hand::App::Model& m) { m.hosts_open = true; m.hosts_sel = 0; }}});
+                    } else if (shot.rfind("manager", 0) == 0) {
+                        // the host manager: a detail view, editing a config host, a new host
+                        rt.send(hand::App::Msg{E7{[shot](hand::App::Model& m) {
+                            auto& db = m.book.hosts[0];
+                            db.forwards = {"L5432:localhost:5432", "D1080"};
+                            db.command = "tmux new -A -s main";
+                            hand::Host mine; mine.alias = "lab-nas"; mine.hostname = "192.168.1.20"; mine.user = "admin";
+                            mine.port = 2200; mine.identity = "~/.ssh/id_ed25519"; mine.source = hand::HostSource::saved;
+                            mine.tags = {"home"}; mine.uses = 4; mine.last = static_cast<std::int64_t>(std::time(nullptr)) - 7200;
+                            m.book.hosts.push_back(mine);
+                            m.manager_open = true; m.manager_t = 1.0f; m.manager.sel = 0;
+                            const auto hosts = hand::detail::picker_hosts(m);
+                            if (shot == "manager-edit") mayag::dsl::ssh_manager_ops::begin_edit(m.manager, hosts, 0);
+                            if (shot == "manager-new") {
+                                mayag::dsl::ssh_manager_ops::begin_edit(m.manager, hosts, -1, "deploy@10.0.9.7:2222");
+                                m.manager.fields[static_cast<std::size_t>(mayag::dsl::SshField::alias)].text = "metrics";
+                                m.manager.fields[static_cast<std::size_t>(mayag::dsl::SshField::forwards)].text = "L3000:grafana:3000, 9090, L99999";
+                                m.manager.env = 2;
+                                m.manager.focus = mayag::dsl::SshField::forwards;
+                                m.manager.detail_scroll.offset.y = 330.0f;
+                            }
+                        }}});
                     } else {
                         // connect to gpu-box and prod-db; prod-db is the one in view
                         for (const char* a : {"gpu-box", "prod-db"}) {

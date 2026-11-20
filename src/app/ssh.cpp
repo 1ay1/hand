@@ -131,6 +131,110 @@ App::Cmd App::update(Model& m, ConnectTyped) {
     return update(m, ConnectHost{*h});
 }
 
+App::Cmd App::update(Model& m, ToggleManager) {
+    if (m.manager_open) { m.manager_open = false; m.manager.editing = false; return {}; }
+    if (m.ask.has_value()) return {};
+    m.settings_open = false;
+    m.hosts_open = false;
+    // the files may have changed since launch (or since the picker read them)
+    m.host_src = resolve(HostSources{.read_known = m.cfg.ssh_known_hosts});
+    if (!m.cfg.demo) m.book = hosts_load(m.host_src);
+    m.manager_open = true;
+    m.manager.close = false;
+    m.manager.out.clear();
+    m.manager.filter.clear();
+    m.manager.filtering = false;
+    m.manager.editing = false;
+    m.manager.confirm_delete = false;
+    // start on the host this tab talks to, else the best-ranked one
+    const auto hosts = picker_hosts(m);
+    m.manager.sel = -1;
+    if (m.remote)
+        for (std::size_t i = 0; i < m.book.hosts.size(); ++i)
+            if (m.book.hosts[i].alias == m.remote->alias) m.manager.sel = static_cast<int>(i);
+    if (m.manager.sel < 0) {
+        const auto r = rank_hosts(hosts, "", unix_now());
+        m.manager.sel = r.empty() ? 0 : r.front();
+    }
+    return {};
+}
+
+App::Cmd App::update(Model& m, Manager p) {
+    using A = SshManagerAction;
+    p.op(m.manager);
+    std::vector<Cmd> cmds;
+    for (auto& a : std::exchange(m.manager.out, {})) {
+        const bool known = a.host >= 0 && a.host < static_cast<int>(m.book.hosts.size());
+        switch (a.kind) {
+            case A::Kind::connect:
+            case A::Kind::connect_here:
+                if (!known) break;
+                m.manager_open = false;
+                cmds.push_back(update(m, ConnectHost{m.book.hosts[static_cast<std::size_t>(a.host)], a.kind == A::Kind::connect_here}));
+                break;
+            case A::Kind::pin: {
+                if (!known) break;
+                Host& h = m.book.hosts[static_cast<std::size_t>(a.host)];
+                h.pinned = !h.pinned;
+                if (!m.cfg.demo) hosts_set_pinned(m.host_src, h, h.pinned);
+                break;
+            }
+            case A::Kind::copy_command: {
+                if (!known) break;
+                const std::string cmd = ssh_command(m.book.hosts[static_cast<std::size_t>(a.host)]);
+                m.toast = Toast{.title = "copied", .body = cmd, .kind = Toast::Kind::info};
+                m.toast_at = m.time;
+                cmds.push_back(WriteClipboard{cmd});
+                break;
+            }
+            case A::Kind::save: {
+                // the draft back into a Host: a new one is hand's own; an
+                // existing one keeps where it came from
+                const SshHost& d = a.draft;
+                Host h = known ? m.book.hosts[static_cast<std::size_t>(a.host)] : Host{};
+                if (!known) h.source = HostSource::saved;
+                if (h.editable()) {
+                    h.alias = d.alias; h.hostname = d.hostname; h.user = d.user; h.port = d.port;
+                    h.jump = d.jump; h.identity = d.identity;
+                    if (h.source == HostSource::history) h.source = HostSource::saved;
+                }
+                h.env = static_cast<HostEnv>(d.env);
+                h.env_set = d.env != SshHost::Env::none;
+                if (!h.env_set) h.env = guess_env(h.alias, h.hostname);
+                h.tags = d.tags; h.forwards = d.forwards; h.command = d.command;
+                if (!m.cfg.demo) hosts_save(m.host_src, h, a.old_alias);
+                if (known) m.book.hosts[static_cast<std::size_t>(a.host)] = h;
+                else m.book.hosts.push_back(h);
+                // stay on it (a rename or a new host moves it in the list)
+                for (std::size_t i = 0; i < m.book.hosts.size(); ++i)
+                    if (m.book.hosts[i].alias == h.alias) m.manager.sel = static_cast<int>(i);
+                m.toast = Toast{.title = known ? "saved" : "host added", .body = h.alias, .kind = Toast::Kind::success};
+                m.toast_at = m.time;
+                break;
+            }
+            case A::Kind::remove: {
+                if (!known) break;
+                const Host h = m.book.hosts[static_cast<std::size_t>(a.host)];
+                if (!m.cfg.demo) hosts_remove(m.host_src, h.alias);
+                if (h.editable()) {
+                    m.book.hosts.erase(m.book.hosts.begin() + a.host);
+                    m.manager.sel = std::min(m.manager.sel, static_cast<int>(m.book.hosts.size()) - 1);
+                } else {
+                    // a ~/.ssh/config host stays; only hand's notes on it go
+                    Host& x = m.book.hosts[static_cast<std::size_t>(a.host)];
+                    x.pinned = false; x.tags.clear(); x.forwards.clear(); x.command.clear();
+                    x.env_set = false; x.env = guess_env(x.alias, x.hostname);
+                }
+                m.toast = Toast{.title = h.editable() ? "host deleted" : "notes forgotten", .body = h.alias, .kind = Toast::Kind::info};
+                m.toast_at = m.time;
+                break;
+            }
+        }
+    }
+    if (std::exchange(m.manager.close, false)) { m.manager_open = false; m.manager.editing = false; }
+    return Cmd::batch(std::move(cmds));
+}
+
 App::Cmd App::update(Model& m, Reconnect) {
     if (!m.link.dropped || !m.remote) return {};
     (void)m.term->feed("\r\n\x1b[2m\u21C4 reconnecting to " + m.remote->alias + "\u2026\x1b[0m\r\n");

@@ -82,6 +82,9 @@ std::vector<SshHost> picker_hosts(const Model& m) {
         s.env = static_cast<SshHost::Env>(h.env);   // same order: none, dev, staging, prod
         s.tags = h.tags; s.pinned = h.pinned; s.uses = h.uses; s.last_used = h.last;
         s.source = h.source == HostSource::known ? "known" : h.source == HostSource::history ? "typed" : "";
+        s.forwards = h.forwards;
+        s.command = h.command;
+        s.editable = h.editable();
         for (std::size_t i = 0; i < m.tab_count(); ++i) {
             const Session& se = m.at(i);
             const auto& r = remote_of(se);
