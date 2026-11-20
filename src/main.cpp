@@ -610,6 +610,16 @@ int main(int argc, char** argv) {
                             rt.press_key(K::escape);
                             if (rt.model().settings_open) rt.press_key(K::escape);
                         }
+                        {
+                            // ── the close button ─────────────────────────────────────────────
+                            rt.press_key(K::comma, Mods{.ctrl = true});
+                            rt.tick();
+                            const bool was_open = rt.model().settings_open;
+                            rt.click(dsl::node_id("settings.close"));
+                            rt.tick();
+                            ok(was_open && !rt.model().settings_open, "the settings panel's close button closes it");
+                            if (rt.model().settings_open) rt.press_key(K::escape);
+                        }
                     }
                     {
                         // ── EVERY setting: step it through the panel, check it took effect ──
