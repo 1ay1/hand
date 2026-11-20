@@ -1,6 +1,8 @@
-// hand::Pty — forkpty + nonblocking I/O.
+// hand::Pty — forkpty + nonblocking I/O. (POSIX; see pty_win.cpp for ConPTY.)
 
 #include <hand/core/pty.hpp>
+
+#if !defined(_WIN32)
 
 #include <cerrno>
 #include <csignal>
@@ -121,6 +123,9 @@ bool pty_read(int fd, std::string& out, int timeout_ms) {
     }
 }
 
+/// On POSIX the fd IS the waitable object; nothing to translate.
+std::intptr_t pty_handle(int fd) { return fd; }
+
 int pty_reap(pid_t pid) {
     int status = 0;
     const pid_t r = ::waitpid(pid, &status, WNOHANG);
@@ -196,3 +201,5 @@ void spawn_detached(const std::vector<std::string>& argv) {
 }
 
 }  // namespace hand
+
+#endif  // !_WIN32

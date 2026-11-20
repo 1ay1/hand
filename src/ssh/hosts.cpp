@@ -10,9 +10,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
-#include <fnmatch.h>
+#include <hand/core/platform.hpp>
 #include <fstream>
-#include <glob.h>
 #include <map>
 #include <set>
 #include <sstream>
@@ -73,7 +72,7 @@ bool host_matches(const std::vector<std::string>& pats, const std::string& name)
     for (const auto& p : pats) {
         const bool neg = !p.empty() && p[0] == '!';
         const std::string pat = lower(neg ? p.substr(1) : p);
-        if (::fnmatch(pat.c_str(), lower(name).c_str(), 0) == 0) {
+        if (plat::glob_match(pat, lower(name))) {
             if (neg) return false;
             hit = true;
         }
@@ -108,11 +107,11 @@ void read_config(const std::string& path, std::vector<Block>& blocks, int depth,
         } else if (key == "include") {
             for (std::size_t i = 1; i < w.size(); ++i) {
                 std::string p = expand_tilde(w[i]);
-                if (!p.empty() && p[0] != '/') p = home() + "/.ssh/" + p;
-                glob_t g{};
-                if (::glob(p.c_str(), 0, nullptr, &g) == 0)
-                    for (std::size_t k = 0; k < g.gl_pathc; ++k) read_config(g.gl_pathv[k], blocks, depth + 1, seen);
-                ::globfree(&g);
+                // Relative Includes resolve against ~/.ssh. "Relative" must be
+                // asked the platform's way: a Windows absolute path starts
+                // "C:\" or "\\server", not "/".
+                if (!p.empty() && !std::filesystem::path{p}.is_absolute()) p = home() + "/.ssh/" + p;
+                for (const auto& hit : plat::glob_paths(p)) read_config(hit, blocks, depth + 1, seen);
             }
         } else if (w.size() >= 2) {
             std::string val = w[1];

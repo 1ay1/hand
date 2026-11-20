@@ -59,8 +59,23 @@ file(GLOB HAND_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/core/*.
      ${CMAKE_CURRENT_SOURCE_DIR}/src/ssh/*.cpp ${CMAKE_CURRENT_SOURCE_DIR}/src/app/*.cpp ${CMAKE_CURRENT_SOURCE_DIR}/src/view/*.cpp)
 add_executable(hand src/main.cpp ${HAND_SOURCES})
 target_include_directories(hand PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(hand PRIVATE mayag::mayag toe::toe vibe util)
+target_link_libraries(hand PRIVATE mayag::mayag toe::toe vibe)
 target_compile_options(hand PRIVATE ${HAND_WARNINGS})
+
+# ── the OS seam ──────────────────────────────────────────────────────────
+# The pty is the only part of hand that is not portable C++: forkpty lives in
+# libutil on glibc, and on Windows it is ConPTY (kernel32) plus shlwapi for
+# the host-glob fallback. src/core/platform_{posix,win}.cpp are guarded
+# internally, so the glob above can stay dumb.
+if(WIN32)
+    target_link_libraries(hand PRIVATE shlwapi)
+    # ConPTY needs Windows 10 1809 (the API that makes a real terminal
+    # possible at all); say so rather than inheriting MinGW's older default.
+    target_compile_definitions(hand PRIVATE _WIN32_WINNT=0x0A00 WINVER=0x0A00
+                                            WIN32_LEAN_AND_MEAN NOMINMAX NOGDI)
+elseif(NOT APPLE)
+    target_link_libraries(hand PRIVATE util)   # glibc forkpty
+endif()
 
 if(HAND_BUILD_TESTS)
     enable_testing()

@@ -342,12 +342,12 @@ std::optional<App::Msg> App::on(const Model& m, const MouseMove& e_win) {
     if (!minimap_on(m) && (m.mm_open || m.mm_hover_y >= 0.0f))
         return E{[](Model& mm) { mm.mm_open = false; mm.mm_hover_y = -1.0f; }};
     if (minimap_on(m) && m.mouse_button < 0 && !m.selecting) {
-        const bool near = !in_corner(m, e_win.position)   // the buttons beside it are theirs
-                       && e.position.x > m.size.x - (m.mm_open ? kMinimapOpen + 8.0f : kMinimapRest + 4.0f);
-        const bool over = near && e.position.x > m.size.x - std::max(m.mm_w, kMinimapRest);
+        const bool adjacent = !in_corner(m, e_win.position)   // the buttons beside it are theirs
+                           && e.position.x > m.size.x - (m.mm_open ? kMinimapOpen + 8.0f : kMinimapRest + 4.0f);
+        const bool over = adjacent && e.position.x > m.size.x - std::max(m.mm_w, kMinimapRest);
         const float y = over ? e.position.y : -1.0f;
-        if (near != m.mm_open || y != m.mm_hover_y) return E{[near, y](Model& mm) { mm.mm_open = near; mm.mm_hover_y = y; }};
-        if (near) return std::nullopt;
+        if (adjacent != m.mm_open || y != m.mm_hover_y) return E{[adjacent, y](Model& mm) { mm.mm_open = adjacent; mm.mm_hover_y = y; }};
+        if (adjacent) return std::nullopt;
     }
     // The app wants the mouse: motion is the app's, reported once per CELL
     // (a TUI redraws per report; per pixel floods the pty). Any-motion mode

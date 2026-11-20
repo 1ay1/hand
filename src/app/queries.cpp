@@ -15,12 +15,10 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
-#include <fcntl.h>
 #include <memory>
 #include <mutex>
-#include <poll.h>
+#include <hand/core/platform.hpp>
 #include <thread>
-#include <unistd.h>
 #include <unordered_map>
 
 namespace hand::detail {
@@ -223,17 +221,14 @@ bool tail_wanted(const Model& m) {
 namespace {
 
 /// One shell's credit: is a chunk on its way to the UI? The loop returns it
-/// by writing a byte to `wake`, so the reader sleeps in ONE poll on the pty
-/// and the credit together -- no spinning, no missed wakeups. Keyed by
-/// session id so only the id rides in messages.
+/// by signalling `wake`, so the reader sleeps in ONE wait on the pty and the
+/// credit together -- no spinning, no missed wakeups. Keyed by session id so
+/// only the id rides in messages. plat::Waker is a self-pipe on POSIX and an
+/// event on Windows; the loop below does not care which.
 struct Flow {
-    int wake[2] = {-1, -1};   // [0] the reader polls, [1] pty_fed writes
+    plat::Waker wake;   // the reader waits on it, pty_fed signals it
     std::atomic<bool> in_flight{false};
-    Flow() {
-        if (::pipe(wake) == 0)
-            for (const int f : wake) { ::fcntl(f, F_SETFL, ::fcntl(f, F_GETFL) | O_NONBLOCK); ::fcntl(f, F_SETFD, FD_CLOEXEC); }
-    }
-    ~Flow() { for (const int f : wake) if (f >= 0) ::close(f); }
+    Flow() = default;
     Flow(const Flow&) = delete;
     Flow& operator=(const Flow&) = delete;
 };
@@ -261,8 +256,7 @@ void pty_fed(std::uint64_t sid) {
     if (it == g_flows.end()) return;
     Flow& f = *it->second;
     f.in_flight.store(false, std::memory_order_release);
-    const char b = 1;
-    (void)!::write(f.wake[1], &b, 1);   // full pipe: a wake is already pending
+    f.wake.signal();   // already pending: the signal simply collapses
 }
 
 void read_pty(Sink<App::Msg> out, std::stop_token st, int fd, int pid, std::uint64_t sid) {
@@ -298,10 +292,8 @@ void read_pty(Sink<App::Msg> out, std::stop_token st, int fd, int pid, std::uint
         if (!busy && !buf.empty()) { ship(); continue; }
         if (!alive) {
             if (busy) {   // the last output lands before the exit
-                pollfd w{flow->wake[0], POLLIN, 0};
-                (void)::poll(&w, 1, 50);
-                char sink[64];
-                while (::read(flow->wake[0], sink, sizeof sink) > 0) {}
+                (void)plat::wait_readable(flow->wake, -1, 50);
+                flow->wake.drain();
                 continue;
             }
             int code = -1;
@@ -313,11 +305,12 @@ void read_pty(Sink<App::Msg> out, std::stop_token st, int fd, int pid, std::uint
             return;
         }
         const bool room = buf.size() < kCap;
-        pollfd p[2] = {{flow->wake[0], POLLIN, 0}, {room ? fd : -1, POLLIN, 0}};
-        const int r = ::poll(p, 2, 50);   // 50 ms: stop is always prompt
-        if (r < 0 && errno != EINTR) { alive = false; continue; }
-        if (p[0].revents & POLLIN) { char sink[64]; while (::read(flow->wake[0], sink, sizeof sink) > 0) {} }
-        if (room && (p[1].revents & (POLLIN | POLLHUP | POLLERR))) alive = pty_read(fd, buf, 0);
+        // 50 ms: stop is always prompt. pty = -1 while back-pressured, so a
+        // stalled reader waits only on the credit, never on the pty.
+        const plat::Ready r = plat::wait_readable(flow->wake, room ? pty_handle(fd) : -1, 50);
+        if (r.error) { alive = false; continue; }
+        if (r.woke) flow->wake.drain();
+        if (room && r.data) alive = pty_read(fd, buf, 0);
     }
 }
 

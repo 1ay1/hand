@@ -2,10 +2,11 @@
 
 #include <hand/core/shell.hpp>
 
+#include <hand/core/platform.hpp>
+
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <unistd.h>
 
 namespace hand {
 
@@ -88,7 +89,12 @@ fi
 
 fs::path runtime_dir() {
     if (const char* x = std::getenv("XDG_RUNTIME_DIR"); x && *x) return fs::path{x} / "hand" / "shell";
-    return fs::temp_directory_path() / ("hand-shell-" + std::to_string(::getuid()));
+#if defined(_WIN32)
+    // %LOCALAPPDATA% is the per-user, non-roaming spot for generated files;
+    // it survives reboots (unlike temp), which keeps the scripts stable.
+    if (const char* l = std::getenv("LOCALAPPDATA"); l && *l) return fs::path{l} / "hand" / "shell";
+#endif
+    return fs::temp_directory_path() / ("hand-shell-" + plat::user_token());
 }
 
 bool write_file(const fs::path& p, const char* text) {
