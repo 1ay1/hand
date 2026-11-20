@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <string>
 #include <variant>
+#include <vector>
 
 namespace hand::msg {
 
@@ -51,10 +52,18 @@ struct ConnectTyped {};                                       ///< the picker's 
 struct Reconnect {};                                          ///< the dropped ssh tab, again
 struct ToggleManager {};                                      ///< ctrl+shift+h: the host manager
 struct Manager { mayag::dsl::SshManagerOp op; };              ///< an interaction in it
+/// A remote listing came back (a task ran sftp).
+struct FilesListed { std::string alias; std::string path; std::vector<mayag::dsl::SshRemoteEntry> entries; std::string error; };
+/// A transfer finished: refresh `refresh_path` on `alias` if it is shown.
+struct FilesDone { std::string alias; std::string refresh_path; std::string title; std::string error; std::string reveal; };
+/// Files picked for upload (empty: cancelled).
+struct UploadPicked { std::string alias; std::string dir; std::vector<std::string> files; };
+struct TunnelProbe {};                                        ///< 1 Hz while the manager is open
+struct TunnelScan { std::vector<int> ports; std::vector<std::string> owners; bool known = true; };
 
 using Any = std::variant<Output, Exited, NewTab, CloseTab, SelectTab, StepTab, MoveTab, Blink, Tick, Clock,
                          Copy, PasteReq, Pasted, CopyOutput, CopyKey, Search, OpenUrl, HintPick, Panel, ToggleSettings,
                          Answer, RequestQuit, WindowAct, OpenHosts, HostsKey, ConnectHost, ConnectTyped, Reconnect,
-                         ToggleManager, Manager, mayag::Edit<Model>>;
+                         ToggleManager, Manager, FilesListed, FilesDone, UploadPicked, TunnelProbe, TunnelScan, mayag::Edit<Model>>;
 
 }  // namespace hand::msg

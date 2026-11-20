@@ -2,6 +2,7 @@
 
 #include <hand/ssh/hosts.hpp>
 #include <hand/config/config.hpp>
+#include <hand/core/proc.hpp>
 
 #include <vibe.h>
 #include <mayag/widget/ssh_forward.hpp>
@@ -358,6 +359,25 @@ HostBook hosts_load(const HostSources& s) {
                         if (VibeValue* t = vibe_array_get(a, k); t && vibe_is_string(t)) h->forwards.emplace_back(vibe_value_string(t));
                 }
                 h->command = str("command");
+                h->folder = str("folder");
+            }
+        }
+        if (VibeValue* fv = vibe_object_get(vibe_value_object(doc.v), "folders"); fv && vibe_is_object(fv)) {
+            VibeObject* fo = vibe_value_object(fv);
+            for (std::size_t i = 0; i < vibe_object_size(fo); ++i) {
+                const char* key = vibe_object_key_at(fo, i);
+                VibeValue* ev = vibe_object_value_at(fo, i);
+                if (!key || !ev || !vibe_is_object(ev)) continue;
+                VibeObject* e = vibe_value_object(ev);
+                const auto str = [&](const char* k) {
+                    VibeValue* x = vibe_object_get(e, k);
+                    return x && vibe_is_string(x) ? std::string{vibe_value_string(x)} : std::string{};
+                };
+                Folder f;
+                f.name = key;
+                f.user = str("user"); f.jump = str("jump"); f.identity = str("identity");
+                if (VibeValue* x = vibe_object_get(e, "port"); x && vibe_is_integer(x)) f.port = static_cast<int>(vibe_value_int(x));
+                book.folders.push_back(std::move(f));
             }
         }
     }
@@ -457,9 +477,217 @@ void hosts_save(const HostSources& s, const Host& h, std::string_view old_alias)
             vibe_object_set(e, "forwards", arr);
         }
         if (!h.command.empty()) vibe_object_set_string(e, "command", h.command.c_str());
+        if (!h.folder.empty()) vibe_object_set_string(e, "folder", h.folder.c_str());
         if (uses > 0) vibe_object_set_int(e, "uses", uses);
         if (last > 0) vibe_object_set_int(e, "last", last);
     });
+}
+
+const Folder* HostBook::folder(std::string_view name) const {
+    for (const auto& f : folders) if (f.name == name) return &f;
+    return nullptr;
+}
+
+void folder_save(const HostSources& s, const Folder& f, std::string_view old_name) {
+    VibeValue* v = read_store(s.store);
+    Doc doc{v && vibe_is_object(v) ? v : vibe_value_new_object()};
+    if (v && !vibe_is_object(v)) vibe_value_free(v);
+    VibeObject* root = vibe_value_object(doc.v);
+    VibeObject* folders = child(root, "folders");
+    if (!old_name.empty()) vibe_object_remove(folders, std::string{old_name}.c_str());
+    vibe_object_remove(folders, f.name.c_str());
+    VibeObject* e = child(folders, f.name.c_str());
+    if (!f.user.empty()) vibe_object_set_string(e, "user", f.user.c_str());
+    if (!f.jump.empty()) vibe_object_set_string(e, "jump", f.jump.c_str());
+    if (!f.identity.empty()) vibe_object_set_string(e, "identity", f.identity.c_str());
+    if (f.port > 0) vibe_object_set_int(e, "port", f.port);
+    // a rename moves the hosts in it, and in its sub-folders
+    if (!old_name.empty() && old_name != f.name) {
+        const std::string from{old_name};
+        VibeObject* hosts = child(root, "hosts");
+        for (std::size_t i = 0; i < vibe_object_size(hosts); ++i) {
+            VibeValue* hv = vibe_object_value_at(hosts, i);
+            if (!hv || !vibe_is_object(hv)) continue;
+            VibeObject* he = vibe_value_object(hv);
+            VibeValue* x = vibe_object_get(he, "folder");
+            if (!x || !vibe_is_string(x)) continue;
+            const std::string cur = vibe_value_string(x);
+            if (cur == from) vibe_object_set_string(he, "folder", f.name.c_str());
+            else if (cur.rfind(from + "/", 0) == 0) vibe_object_set_string(he, "folder", (f.name + cur.substr(from.size())).c_str());
+        }
+    }
+    (void)write_store(s.store, doc.v);
+}
+
+void folder_remove(const HostSources& s, std::string_view name) {
+    VibeValue* v = read_store(s.store);
+    if (!v) return;
+    Doc doc{v};
+    if (!vibe_is_object(v)) return;
+    VibeObject* folders = child(vibe_value_object(doc.v), "folders");
+    vibe_object_remove(folders, std::string{name}.c_str());
+    (void)write_store(s.store, doc.v);
+}
+
+Host effective_host(const Host& h, const HostBook& book) {
+    Host e = h;
+    e.inherited = 0;
+    if (!h.editable() || h.folder.empty()) return e;
+    // nearest folder first: "Work/EU", then "Work"
+    std::string f = h.folder;
+    while (!f.empty()) {
+        if (const Folder* d = book.folder(f)) {
+            if (e.user.empty() && !d->user.empty()) { e.user = d->user; e.inherited |= inherit_user; }
+            if (e.jump.empty() && !d->jump.empty()) { e.jump = d->jump; e.inherited |= inherit_jump; }
+            if (e.identity.empty() && !d->identity.empty()) { e.identity = d->identity; e.inherited |= inherit_identity; }
+            if (e.port == 22 && d->port > 0 && d->port != 22 && !(e.inherited & inherit_port)) { e.port = d->port; e.inherited |= inherit_port; }
+        }
+        const auto slash = f.rfind('/');
+        f = slash == std::string::npos ? std::string{} : f.substr(0, slash);
+    }
+    return e;
+}
+
+// ── importing other clients' sessions ───────────────────────────────────────────────────
+
+namespace {
+/// An alias ssh and a person can both type: spaces and odd characters to '-'.
+std::string alias_of(std::string_view name) {
+    std::string a;
+    for (char ch : name) {
+        const unsigned char u = static_cast<unsigned char>(ch);
+        a += (std::isalnum(u) || ch == '.' || ch == '_' || ch == '-' || ch == '@' || u >= 0x80) ? ch : '-';
+    }
+    while (a.find("--") != std::string::npos) a.erase(a.find("--"), 1);
+    while (!a.empty() && a.back() == '-') a.pop_back();
+    while (!a.empty() && a.front() == '-') a.erase(a.begin());
+    return a;
+}
+/// PuTTY's "L5432=db:5432,4D1080,R8080=localhost:80" as ssh forward specs.
+std::vector<std::string> putty_forwards(std::string_view v) {
+    std::vector<std::string> out;
+    std::string cur;
+    const auto flush = [&] {
+        std::string s = cur;
+        cur.clear();
+        if (!s.empty() && (s[0] == '4' || s[0] == '6')) s.erase(0, 1);   // address family
+        if (s.empty()) return;
+        if (const auto eq = s.find('='); eq != std::string::npos) s[eq] = ':';
+        if (parse_forward(s)) out.push_back(mayag::dsl::ssh_forward_parse(s)->spec());
+    };
+    for (char ch : v) { if (ch == ',') flush(); else cur += ch; }
+    flush();
+    return out;
+}
+}  // namespace
+
+std::vector<Host> parse_mobaxterm_ini(std::string_view text) {
+    // [Bookmarks] / [Bookmarks_N] sections: SubRep=Folder\Sub, then
+    //   name=#icon#type%host%port%user%...   (type 0 = SSH)
+    std::vector<Host> out;
+    std::string section, subrep;
+    std::size_t p = 0;
+    const auto decode = [](std::string s) {
+        for (const auto& [from, to] : {std::pair<const char*, const char*>{"__PIPE__", "|"}, {"__DIEZE__", "#"}, {"__PTVIRG__", ";"}, {"__DBLQUO__", "\""}}) {
+            for (std::size_t k; (k = s.find(from)) != std::string::npos;) s.replace(k, std::strlen(from), to);
+        }
+        return s;
+    };
+    while (p < text.size()) {
+        std::size_t e = text.find('\n', p);
+        if (e == std::string_view::npos) e = text.size();
+        std::string line = trim(text.substr(p, e - p));
+        p = e + 1;
+        if (line.empty()) continue;
+        if (line.front() == '[') { section = line; subrep.clear(); continue; }
+        if (section.rfind("[Bookmarks", 0) != 0) continue;
+        const auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        const std::string key = line.substr(0, eq), val = line.substr(eq + 1);
+        if (key == "SubRep") { subrep = val; for (char& ch : subrep) if (ch == '\\') ch = '/'; continue; }
+        if (key == "ImgNum" || val.empty() || val[0] != '#') continue;
+        const auto h2 = val.find('#', 1);
+        if (h2 == std::string::npos) continue;
+        std::vector<std::string> f;
+        {
+            std::string cur;
+            for (std::size_t k = h2 + 1; k < val.size() && val[k] != '#'; ++k) {
+                if (val[k] == '%') { f.push_back(cur); cur.clear(); }
+                else cur += val[k];
+            }
+            f.push_back(cur);
+        }
+        if (f.size() < 4 || f[0] != "0" || f[1].empty()) continue;   // SSH sessions only
+        Host h;
+        h.alias = alias_of(decode(key));
+        h.hostname = decode(f[1]);
+        if (const int port = std::atoi(f[2].c_str()); port > 0 && port < 65536) h.port = port;
+        h.user = decode(f[3]);
+        // the key file is one of the later fields: the one that looks like one
+        for (std::size_t k = 4; k < f.size(); ++k) {
+            const std::string v = decode(f[k]);
+            if (v.find("_ProfileDir_") != std::string::npos || v.find("_CurrentDrive_") != std::string::npos) continue;
+            const bool looks = v.find(".ssh") != std::string::npos || v.ends_with(".pem") || v.find("id_") != std::string::npos;
+            if (looks && !v.ends_with(".ppk")) { h.identity = v; break; }
+        }
+        h.source = HostSource::saved;
+        h.folder = subrep.empty() ? std::string{"MobaXterm"} : "MobaXterm/" + subrep;
+        if (!h.alias.empty()) out.push_back(std::move(h));
+    }
+    return out;
+}
+
+std::vector<ImportSource> import_sources(const std::string& putty_root, const std::string& moba_ini) {
+    std::vector<ImportSource> out;
+    {
+        ImportSource src{"PuTTY", putty_root.empty() ? std::string{"PuTTY saved sessions"} : putty_root, {}};
+        for (const auto& rs : proc::putty_sessions(putty_root)) {
+            const auto get = [&](const char* k) { auto it = rs.values.find(k); return it == rs.values.end() ? std::string{} : it->second; };
+            if (rs.name == "Default Settings" || get("Protocol") != "ssh" || get("HostName").empty()) continue;
+            Host h;
+            h.alias = alias_of(rs.name);
+            std::string host = get("HostName");
+            if (const auto at = host.find('@'); at != std::string::npos) { h.user = host.substr(0, at); host = host.substr(at + 1); }
+            h.hostname = host;
+            if (h.user.empty()) h.user = get("UserName");
+            if (const int port = std::atoi(get("PortNumber").c_str()); port > 0 && port < 65536) h.port = port;
+            // a .ppk is PuTTY's own format, which OpenSSH cannot read; an
+            // OpenSSH key with the same name beside it is used if present
+            if (std::string k = get("PublicKeyFile"); !k.empty()) {
+                if (k.ends_with(".ppk")) {
+                    const std::string bare = k.substr(0, k.size() - 4);
+                    std::error_code ec;
+                    if (fs::exists(bare, ec)) h.identity = bare;
+                } else h.identity = k;
+            }
+            h.forwards = putty_forwards(get("PortForwardings"));
+            h.source = HostSource::saved;
+            h.folder = "PuTTY";
+            if (!h.alias.empty()) src.hosts.push_back(std::move(h));
+        }
+        if (!src.hosts.empty()) out.push_back(std::move(src));
+    }
+    {
+        std::vector<std::string> paths;
+        if (!moba_ini.empty()) paths.push_back(moba_ini);
+        else {
+            for (const char* env : {"APPDATA", "USERPROFILE"}) {
+                if (const char* b = std::getenv(env); b && *b) {
+                    paths.push_back(std::string{b} + "/MobaXterm/MobaXterm.ini");
+                    paths.push_back(std::string{b} + "/Documents/MobaXterm/MobaXterm.ini");
+                }
+            }
+        }
+        for (const auto& path : paths) {
+            std::ifstream in{path, std::ios::binary};
+            if (!in) continue;
+            std::ostringstream ss;
+            ss << in.rdbuf();
+            ImportSource src{"MobaXterm", path, parse_mobaxterm_ini(ss.str())};
+            if (!src.hosts.empty()) { out.push_back(std::move(src)); break; }
+        }
+    }
+    return out;
 }
 
 void hosts_remove(const HostSources& s, std::string_view alias) {
@@ -534,7 +762,8 @@ std::optional<Host> ssh_destination(const std::vector<std::string>& argv) {
     return std::nullopt;
 }
 
-std::vector<std::string> ssh_argv(const Host& h, const HostBook& book, SshFlags f) {
+std::vector<std::string> ssh_argv(const Host& host, const HostBook& book, SshFlags f) {
+    const Host h = effective_host(host, book);   // folder defaults: user, jump, key, port
     std::vector<std::string> a{"ssh"};
     if (f.multiplex && !book.sets_control) {
         // one TCP+auth per host: a second tab opens instantly, and only one

@@ -75,10 +75,13 @@ std::int64_t unix_now() { return static_cast<std::int64_t>(std::time(nullptr)); 
 std::vector<SshHost> picker_hosts(const Model& m) {
     std::vector<SshHost> out;
     out.reserve(m.book.hosts.size());
-    for (const auto& h : m.book.hosts) {
+    for (const auto& h0 : m.book.hosts) {
+        const Host h = effective_host(h0, m.book);   // what connecting uses (folder defaults filled in)
         SshHost s;
         s.alias = h.alias; s.user = h.user; s.hostname = h.hostname; s.port = h.port;
         s.jump = h.jump; s.identity = h.identity;
+        s.folder = h.folder;
+        s.inherited = h.inherited;
         s.env = static_cast<SshHost::Env>(h.env);   // same order: none, dev, staging, prod
         s.tags = h.tags; s.pinned = h.pinned; s.uses = h.uses; s.last_used = h.last;
         s.source = h.source == HostSource::known ? "known" : h.source == HostSource::history ? "typed" : "";
@@ -93,6 +96,30 @@ std::vector<SshHost> picker_hosts(const Model& m) {
                 ++s.sessions;
         }
         s.connected = s.sessions > 0;
+        // each tunnel, live: who listens on its local port right now
+        for (const auto& fw : h.forwards) {
+            const auto f = mayag::dsl::ssh_forward_parse(fw);
+            using T = SshHost::Tunnel;
+            T st = T::idle;
+            std::string note;
+            if (!f) { s.tunnel.push_back(T::idle); s.tunnel_note.emplace_back(); continue; }
+            if (f->kind == mayag::dsl::SshForward::Kind::remote) {
+                st = s.connected ? T::remote : T::idle;
+                note = s.connected ? "listening on the server's port " + std::to_string(f->listen) : "";
+            } else if (m.listen_known) {
+                std::string owner;
+                bool listening = false;
+                for (std::size_t k = 0; k < m.listen_ports.size(); ++k)
+                    if (m.listen_ports[k] == f->listen) { listening = true; if (owner.empty()) owner = m.listen_owners[k]; }
+                const bool ssh_owns = owner.empty() || owner.find("ssh") != std::string::npos;
+                if (listening && !ssh_owns) { st = T::conflict; note = "port " + std::to_string(f->listen) + " is in use by " + owner; }
+                else if (s.connected) { st = listening ? T::up : T::down; note = listening ? "ssh is listening on " + std::to_string(f->listen)
+                                                                              : "connected, but nothing listens on " + std::to_string(f->listen) + " (in use when ssh started?)"; }
+                else if (listening) { st = T::up; note = "another ssh holds port " + std::to_string(f->listen); }
+            }
+            s.tunnel.push_back(st);
+            s.tunnel_note.push_back(std::move(note));
+        }
         out.push_back(std::move(s));
     }
     return out;

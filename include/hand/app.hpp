@@ -41,6 +41,8 @@ struct App {
     using OpenHosts = msg::OpenHosts; using HostsKey = msg::HostsKey; using ConnectHost = msg::ConnectHost;
     using ConnectTyped = msg::ConnectTyped; using Reconnect = msg::Reconnect;
     using ToggleManager = msg::ToggleManager; using Manager = msg::Manager;
+    using FilesListed = msg::FilesListed; using FilesDone = msg::FilesDone; using UploadPicked = msg::UploadPicked;
+    using TunnelProbe = msg::TunnelProbe; using TunnelScan = msg::TunnelScan;
 
     static inline Config config{};   ///< set by main() before run
     /// Advance of one mono cell at `size` pt in face `family` (main binds the font stack).
@@ -82,6 +84,11 @@ struct App {
     static Cmd update(Model& m, Reconnect);
     static Cmd update(Model& m, ToggleManager);
     static Cmd update(Model& m, Manager);
+    static Cmd update(Model& m, FilesListed);
+    static Cmd update(Model& m, FilesDone);
+    static Cmd update(Model& m, UploadPicked);
+    static Cmd update(Model& m, TunnelProbe);
+    static Cmd update(Model& m, TunnelScan);
     static Cmd update(Model& m, mayag::Edit<Model> e) { e(m); settle_scroll(m); return {}; }
 
     // src/app/input.cpp: window input -> messages

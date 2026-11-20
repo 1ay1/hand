@@ -77,7 +77,7 @@ std::optional<App::Msg> App::on(const Model& m, const KeyEvent& k_in) {
     if (cs && k.key == Key::h) return ToggleManager{};
     if (m.manager_open) {   // the host manager has the keyboard
         if (k.key == Key::ctrl || k.key == Key::shift || k.key == Key::alt || k.key == Key::super) return std::nullopt;
-        if (auto op = ssh_manager_key(m.manager, picker_hosts(m), unix_now(), k.key, md)) return Manager{std::move(*op)};
+        if (auto op = ssh_manager_key(m.manager, picker_hosts(m), unix_now(), k.key, md, &m.files)) return Manager{std::move(*op)};
         return E{[](Model&) {}};   // never to the shell underneath
     }
     if (m.hosts_open) {   // the host picker has the keyboard
@@ -509,6 +509,8 @@ App::Sub App::subscribe(const Model& m) {
                                             static_cast<int>(se.pty->pid()), se.sid));
     }
     if (m.tab_count() > 1) s.push_back(Sub::every(std::chrono::milliseconds(1000), Msg{Clock{}}));   // activity sparklines
+    // the host manager's live tunnel status: who listens on each -L / -D port
+    if (m.manager_open) s.push_back(Sub::every(std::chrono::milliseconds(900), Msg{TunnelProbe{}}));
     if (m.focused && m.cfg.cursor_blink)
         s.push_back(Sub::every(std::chrono::milliseconds(static_cast<int>(m.cfg.blink_ms)), Msg{Blink{}}));
     const auto cur = m.term->cursor();

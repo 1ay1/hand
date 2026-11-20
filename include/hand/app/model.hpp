@@ -172,6 +172,12 @@ struct Model : Session {
     bool                    manager_open = false;
     float                   manager_t = 0.0f;     ///< 0..1, eased in and out
     mayag::dsl::SshManagerState manager;
+    mayag::dsl::SshFilesView    files;            ///< the manager's Files tab, as shown (dotfiles filtered)
+    std::vector<mayag::dsl::SshRemoteEntry> files_all;   ///< the whole listing
+    std::vector<int>            listen_ports;     ///< listening TCP ports (tunnel status), refreshed 1 Hz while open
+    std::vector<std::string>    listen_owners;
+    bool                        listen_known = true;
+    std::vector<ImportSource>   imports;          ///< other clients' sessions, read when the manager opens
 
     [[nodiscard]] std::size_t tab_count() const noexcept { return std::max<std::size_t>(tabs.size(), 1); }
     [[nodiscard]] float strip_h() const noexcept;

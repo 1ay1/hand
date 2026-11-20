@@ -15,6 +15,7 @@
 
 #include <mayag/widget/ssh.hpp>
 #include <hand/config/schemes_gen.hpp>
+#include <hand/ssh/sftp.hpp>
 
 #include <mayag/backend/tiled.hpp>
 #ifdef MAYAG_WITH_VULKAN
@@ -1568,7 +1569,7 @@ int main(int argc, char** argv) {
                             rt.type("10.0.9.7"); rt.press_key(K::tab);
                             rt.type("deploy"); rt.press_key(K::tab);
                             rt.type("2222");
-                            for (int i = 0; i < 5; ++i) rt.press_key(K::tab);   // jump, key, env, tags -> tunnels
+                            for (int i = 0; i < 6; ++i) rt.press_key(K::tab);   // jump, key, folder, env, tags -> tunnels
                             rt.type("L99999");
                             rt.press_key(K::enter);
                             rt.tick();
@@ -1611,6 +1612,89 @@ int main(int argc, char** argv) {
                                "filter + enter connects to the host in a new tab");
                             rt.send(hand::App::Msg{hand::App::Exited{0, rt.model().sid}});
                             for (int i = 0; i < 10; ++i) rt.tick();
+                            // ── folders, import, files, tunnels ────────────────────────────────────
+                            rt.press_key(K::h, Mods{.shift = true, .ctrl = true});
+                            rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& mm) {
+                                hand::Host h; h.alias = "ci-1"; h.hostname = "ci-1.internal"; h.source = hand::HostSource::saved; h.folder = "Work/CI";
+                                h.forwards = {"L5432:localhost:5432", "L8080:localhost:80"};
+                                mm.book.hosts.push_back(h);
+                                hand::ImportSource src{"PuTTY", "test", {}};
+                                hand::Host a; a.alias = "router"; a.hostname = "192.168.1.1"; a.source = hand::HostSource::saved; a.folder = "PuTTY";
+                                src.hosts = {a, h};   // ci-1 exists already: skipped
+                                mm.imports = {src};
+                                mm.manager.sel = static_cast<int>(mm.book.hosts.size()) - 1;
+                            }}});
+                            rt.tick();
+                            // a folder's defaults, through the folder editor
+                            rt.send(hand::App::Msg{hand::App::Manager{mayag::dsl::SshManagerOp{[](mayag::dsl::SshManagerState& s) {
+                                mayag::dsl::ssh_manager_ops::begin_folder_edit(s, {}, "Work");
+                            }}}});
+                            rt.type("x");   // name field focus is on user for an existing folder
+                            rt.press_key(K::backspace);
+                            rt.type("ops"); rt.press_key(K::tab); rt.type("2222"); rt.press_key(K::tab); rt.type("bastion");
+                            rt.press_key(K::enter);
+                            rt.tick();
+                            const hand::Folder* wf = rt.model().book.folder("Work");
+                            ok(wf && wf->user == "ops" && wf->port == 2222 && wf->jump == "bastion" && !rt.model().manager.editing,
+                               "the folder editor saves what its hosts share");
+                            const auto& ci = rt.model().book.hosts.back();
+                            std::string av; for (const auto& x : hand::ssh_argv(ci, rt.model().book, {.multiplex = false, .keepalive = false})) av += x + " ";
+                            ok(av.find("-p 2222") != std::string::npos && av.find("-J bastion") != std::string::npos && av.find("ops@ci-1.internal") != std::string::npos,
+                               "a host in Work/CI connects with Work's user, port and jump");
+                            // tunnel status from a port scan
+                            rt.send(hand::App::Msg{hand::App::TunnelScan{{5432, 8080}, {"ssh", "postgres"}, true}});
+                            rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& mm) { mm.remote = mm.book.hosts.back(); }}});
+                            rt.tick();
+                            {
+                                const auto hs = hand::detail::picker_hosts(rt.model());
+                                const auto& s = hs.back();
+                                using T = mayag::dsl::SshHost::Tunnel;
+                                ok(s.tunnel.size() == 2 && s.tunnel[0] == T::up && s.tunnel[1] == T::conflict && s.tunnel_note[1].find("postgres") != std::string::npos,
+                                   "tunnels: ssh's port is up, a port taken by another program says by whom");
+                            }
+                            rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& mm) { mm.remote.reset(); }}});
+                            // import: new sessions only, into their folder
+                            const std::size_t nb = rt.model().book.hosts.size();
+                            rt.press_key(K::i);
+                            rt.tick();
+                            ok(rt.model().manager.import_open && rt.node_rect(dsl::part_id("mgr.imp", 0)).has_value(), "i opens the import drawer, one row per client");
+                            rt.click(dsl::part_id("mgr.imp", 0));
+                            rt.tick();
+                            ok(rt.model().book.hosts.size() == nb + 1 && rt.model().book.hosts.back().alias == "router" && rt.model().book.hosts.back().folder == "PuTTY",
+                               "import adds only the sessions not here yet, in a folder named for the client");
+                            // the Files tab: f lists, a listing arrives, enter goes into a directory
+                            rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& mm) { mm.manager.sel = static_cast<int>(mm.book.hosts.size()) - 2; }}});
+                            rt.press_key(K::f);
+                            rt.tick();
+                            ok(rt.model().manager.tab == 1 && rt.model().files.alias == "ci-1" && rt.model().files.loading, "f opens the host's files and starts listing");
+                            rt.send(hand::App::Msg{hand::App::FilesListed{"ci-1", "/home/ci", {{"logs", "Nov 20 09:12", "", true, false, 0}, {"a.txt", "Nov 1 10:00", "", false, false, 12}}, ""}});
+                            rt.tick();
+                            ok(!rt.model().files.loading && rt.model().files.entries.size() == 2 && rt.node_rect(dsl::part_id("mgr.file", 1)).has_value(),
+                               "the listing shows, directories first");
+                            rt.press_key(K::enter);
+                            rt.tick();
+                            ok(rt.model().files.loading, "enter on a directory lists it");
+                            rt.press_key(K::escape);
+                            rt.press_key(K::escape);
+                            rt.tick();
+                            ok(!rt.model().manager_open, "esc leaves the files, then the manager");
+                            {
+                                const auto l = hand::sftp::parse_listing(
+                                    "Remote working directory: /srv\n"
+                                    "-rw-r--r--    1 a a     220145 Nov 18 22:01 my report.pdf\n"
+                                    "drwxr-xr-x    2 a a       4096 Nov 17 09:12 logs\n"
+                                    "lrwxrwxrwx    1 a a         11 Nov 10 10:00 current -> releases/42\n");
+                                ok(l.path == "/srv" && l.entries.size() == 3 && l.entries[0].name == "logs" && l.entries[1].target == "releases/42" &&
+                                   l.entries[2].name == "my report.pdf" && l.entries[2].size == 220145,
+                                   "sftp listings: dirs first, names with spaces, links with targets");
+                                ok(hand::sftp::explain("x: Permission denied (publickey,password).", 255).find("key login") != std::string::npos,
+                                   "sftp: a password-only host is explained, not a raw error");
+                                const auto mh = hand::parse_mobaxterm_ini(
+                                    "[Bookmarks_1]\nSubRep=Work\\EU\nImgNum=41\ndb=#109#0%10.1.2.3%2200%root%%-1%-1#MobaFont#0# #-1\n"
+                                    "rdp=#91#4%r.example%3389%admin%0#MobaFont#0# #-1\n");
+                                ok(mh.size() == 1 && mh[0].alias == "db" && mh[0].port == 2200 && mh[0].user == "root" && mh[0].folder == "MobaXterm/Work/EU",
+                                   "MobaXterm.ini: SSH bookmarks with their folder; RDP skipped");
+                            }
                         }
                         ok(!rt.model().hosts_open, "esc closes the picker");
                     }
@@ -1918,8 +2002,40 @@ int main(int argc, char** argv) {
                             mine.port = 2200; mine.identity = "~/.ssh/id_ed25519"; mine.source = hand::HostSource::saved;
                             mine.tags = {"home"}; mine.uses = 4; mine.last = static_cast<std::int64_t>(std::time(nullptr)) - 7200;
                             m.book.hosts.push_back(mine);
+                            // folders that share settings, live tunnels, other clients' sessions
+                            for (auto& h : m.book.hosts) {
+                                if (h.alias == "build-01" || h.alias == "build-02") {
+                                    h.folder = "Work/CI"; h.source = hand::HostSource::saved; h.user.clear(); h.jump.clear();
+                                }
+                                if (h.alias == "api.staging" || h.alias == "gpu-box") h.folder = "Work";
+                                if (h.alias == "lab-nas" || h.alias == "pi") h.folder = "Home";
+                            }
+                            m.book.folders = {{"Work", "ops", "bastion", "~/.ssh/work_ed25519", 0}, {"Work/CI", "ci", "", "", 0}};
+                            db.forwards = {"L5432:localhost:5432", "L3000:grafana:3000", "D1080"};
+                            m.listen_ports = {3000, 1080, 5432}; m.listen_owners = {"ssh", "ssh", "postgres"};
+                            hand::ImportSource ps{"PuTTY", "HKCU\\Software\\SimonTatham\\PuTTY\\Sessions", {}};
+                            for (const char* a : {"router", "nas-old", "vpn-gw"}) { hand::Host h; h.alias = a; h.hostname = a; ps.hosts.push_back(h); }
+                            m.imports = {ps, hand::ImportSource{"MobaXterm", "%APPDATA%\\MobaXterm\\MobaXterm.ini", {m.book.hosts[1]}}};
                             m.manager_open = true; m.manager_t = 1.0f; m.manager.sel = 0;
                             const auto hosts = hand::detail::picker_hosts(m);
+                            if (shot == "manager-import") m.manager.import_open = true;
+                            if (shot == "manager-folder") {
+                                std::vector<mayag::dsl::SshFolder> fl;
+                                for (const auto& f : m.book.folders) fl.push_back({f.name, f.user, f.jump, f.identity, f.port});
+                                mayag::dsl::ssh_manager_ops::begin_folder_edit(m.manager, fl, "Work");
+                            }
+                            if (shot == "manager-files") {
+                                m.manager.tab = 1; m.manager.files_sel = 3;
+                                m.files = mayag::dsl::SshFilesView{.alias = "prod-db", .path = "/home/deploy/app"};
+                                using RE = mayag::dsl::SshRemoteEntry;
+                                m.files.entries = {RE{"config", "Nov 18 22:01", "", true, false, 4096}, RE{"logs", "Nov 20 09:12", "", true, false, 4096},
+                                                   RE{"current", "Nov 10 10:00", "releases/42", false, true, 11}, RE{"backup-2024-11-19.sql.gz", "Nov 19 03:00", "", false, false, 1874329600},
+                                                   RE{"deploy.sh", "Oct  2 14:20", "", false, false, 2311}, RE{"README.md", "Sep 30 11:05", "", false, false, 8730}};
+                                m.files.busy = "Downloading backup-2024-11-19.sql.gz\u2026";
+                            }
+                            if (shot == "manager-folder-host") {
+                                for (std::size_t q = 0; q < m.book.hosts.size(); ++q) if (m.book.hosts[q].alias == "build-01") m.manager.sel = static_cast<int>(q);
+                            }
                             if (shot == "manager-edit") mayag::dsl::ssh_manager_ops::begin_edit(m.manager, hosts, 0);
                             if (shot == "manager-new") {
                                 mayag::dsl::ssh_manager_ops::begin_edit(m.manager, hosts, -1, "deploy@10.0.9.7:2222");

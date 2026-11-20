@@ -3,6 +3,8 @@
 #include "detail.hpp"
 
 #include <hand/core/shell.hpp>
+#include <hand/core/proc.hpp>
+#include <hand/ssh/sftp.hpp>
 
 #include <mayag/widget/ssh.hpp>
 #include <mayag/widget/term_dialog.hpp>
@@ -138,7 +140,12 @@ App::Cmd App::update(Model& m, ToggleManager) {
     m.hosts_open = false;
     // the files may have changed since launch (or since the picker read them)
     m.host_src = resolve(HostSources{.read_known = m.cfg.ssh_known_hosts});
-    if (!m.cfg.demo) m.book = hosts_load(m.host_src);
+    if (!m.cfg.demo) {
+        m.book = hosts_load(m.host_src);
+        m.imports = import_sources();   // PuTTY's registry and MobaXterm.ini: a few ms
+    }
+    m.manager.import_open = false;
+    m.manager.tab = 0;
     m.manager_open = true;
     m.manager.close = false;
     m.manager.out.clear();
@@ -156,12 +163,42 @@ App::Cmd App::update(Model& m, ToggleManager) {
         const auto r = rank_hosts(hosts, "", unix_now());
         m.manager.sel = r.empty() ? 0 : r.front();
     }
-    return {};
+    return update(m, TunnelProbe{});   // tunnel status from the first frame
 }
+
+namespace {
+using Sk = Sink<App::Msg>;
+/// What the Files tab shows of the full listing: dotfiles only on request.
+void refilter(Model& m) {
+    m.files.entries.clear();
+    for (const auto& e : m.files_all)
+        if (m.manager.show_hidden || e.name.empty() || e.name[0] != '.') m.files.entries.push_back(e);
+    m.manager.files_sel = std::clamp(m.manager.files_sel, 0, std::max(static_cast<int>(m.files.entries.size()) - 1, 0));
+}
+App::Cmd list_files(Model& m, const Host& h, std::string path) {
+    if (m.files.alias != h.alias) m.files = SshFilesView{.alias = h.alias};
+    m.files.loading = true;
+    m.files.error.clear();
+    if (m.cfg.demo) return {};
+    return App::Cmd::task([](Sk out, Host host, HostBook book, std::string p) {
+        const auto l = sftp::list(host, book, p);
+        App::FilesListed r{host.alias, l.path.empty() ? p : l.path, {}, l.error};
+        for (const auto& e : l.entries) r.entries.push_back({e.name, e.when, e.target, e.dir, e.link, e.size});
+        out.send(App::Msg{std::move(r)});
+    }, h, m.book, std::move(path));
+}
+std::string base_name(const std::string& p) {
+    std::string s = p;
+    while (s.size() > 1 && s.back() == '/') s.pop_back();
+    return s.substr(s.rfind('/') == std::string::npos ? 0 : s.rfind('/') + 1);
+}
+}  // namespace
 
 App::Cmd App::update(Model& m, Manager p) {
     using A = SshManagerAction;
+    const bool hidden_before = m.manager.show_hidden;
     p.op(m.manager);
+    if (m.manager.show_hidden != hidden_before) refilter(m);
     std::vector<Cmd> cmds;
     for (auto& a : std::exchange(m.manager.out, {})) {
         const bool known = a.host >= 0 && a.host < static_cast<int>(m.book.hosts.size());
@@ -201,7 +238,7 @@ App::Cmd App::update(Model& m, Manager p) {
                 h.env = static_cast<HostEnv>(d.env);
                 h.env_set = d.env != SshHost::Env::none;
                 if (!h.env_set) h.env = guess_env(h.alias, h.hostname);
-                h.tags = d.tags; h.forwards = d.forwards; h.command = d.command;
+                h.tags = d.tags; h.forwards = d.forwards; h.command = d.command; h.folder = d.folder;
                 if (!m.cfg.demo) hosts_save(m.host_src, h, a.old_alias);
                 if (known) m.book.hosts[static_cast<std::size_t>(a.host)] = h;
                 else m.book.hosts.push_back(h);
@@ -229,10 +266,141 @@ App::Cmd App::update(Model& m, Manager p) {
                 m.toast_at = m.time;
                 break;
             }
+            case A::Kind::save_folder: {
+                Folder f{a.folder.name, a.folder.user, a.folder.jump, a.folder.identity, a.folder.port};
+                if (!m.cfg.demo) folder_save(m.host_src, f, a.old_alias);
+                std::erase_if(m.book.folders, [&](const Folder& x) { return x.name == f.name || (!a.old_alias.empty() && x.name == a.old_alias); });
+                m.book.folders.push_back(f);
+                if (!a.old_alias.empty() && a.old_alias != f.name)   // a rename moves its hosts
+                    for (auto& h : m.book.hosts) {
+                        if (h.folder == a.old_alias) h.folder = f.name;
+                        else if (h.folder.rfind(a.old_alias + "/", 0) == 0) h.folder = f.name + h.folder.substr(a.old_alias.size());
+                    }
+                m.toast = Toast{.title = "folder saved", .body = f.name, .kind = Toast::Kind::success};
+                m.toast_at = m.time;
+                break;
+            }
+            case A::Kind::remove_folder:
+                if (!m.cfg.demo) folder_remove(m.host_src, a.old_alias);
+                std::erase_if(m.book.folders, [&](const Folder& x) { return x.name == a.old_alias; });
+                m.toast = Toast{.title = "folder settings removed", .body = a.old_alias + ": its hosts keep their own", .kind = Toast::Kind::info};
+                m.toast_at = m.time;
+                break;
+            case A::Kind::import_source: {
+                if (a.host < 0 || a.host >= static_cast<int>(m.imports.size())) break;
+                const auto& src = m.imports[static_cast<std::size_t>(a.host)];
+                int added = 0;
+                for (Host h : src.hosts) {
+                    if (m.book.find(h.alias)) continue;   // already here (same name): theirs wins
+                    h.env = guess_env(h.alias, h.hostname);
+                    if (!m.cfg.demo) hosts_save(m.host_src, h, "");
+                    m.book.hosts.push_back(std::move(h));
+                    ++added;
+                }
+                m.toast = Toast{.title = added ? "imported" : "nothing new",
+                                .body = added ? std::to_string(added) + (added == 1 ? " host" : " hosts") + " from " + src.name + ", in folder " + src.name
+                                              : "every " + src.name + " session is here already",
+                                .kind = added ? Toast::Kind::success : Toast::Kind::info};
+                m.toast_at = m.time;
+                break;
+            }
+            case A::Kind::open_url:
+                cmds.push_back(update(m, OpenUrl{a.path}));
+                break;
+            case A::Kind::files_open:
+                if (known) cmds.push_back(list_files(m, m.book.hosts[static_cast<std::size_t>(a.host)], a.path));
+                break;
+            case A::Kind::files_copy_path:
+                m.toast = Toast{.title = "copied", .body = a.path, .kind = Toast::Kind::info};
+                m.toast_at = m.time;
+                cmds.push_back(WriteClipboard{a.path});
+                break;
+            case A::Kind::files_terminal: {
+                if (!known) break;
+                // a tab that starts in that directory: cd, then the login shell
+                Host h = m.book.hosts[static_cast<std::size_t>(a.host)];
+                std::string q = "'";
+                for (char ch : a.path) q += ch == '\'' ? std::string{"'\\''"} : std::string(1, ch);
+                q += "'";
+                h.command = "cd " + q + " && exec \"$SHELL\" -l";
+                m.manager_open = false;
+                cmds.push_back(update(m, ConnectHost{h, false}));
+                break;
+            }
+            case A::Kind::files_get: {
+                if (!known || m.cfg.demo) break;
+                const Host& h = m.book.hosts[static_cast<std::size_t>(a.host)];
+                m.files.busy = "Downloading " + base_name(a.path) + "\u2026";
+                cmds.push_back(Cmd::task([](Sk out, Host host, HostBook book, std::string remote) {
+                    const std::string dir = proc::downloads_dir();
+                    const std::string err = sftp::get(host, book, {remote}, dir);
+                    out.send(App::Msg{App::FilesDone{host.alias, "", "Downloaded " + base_name(remote), err, dir + "/" + base_name(remote)}});
+                }, h, m.book, a.path));
+                break;
+            }
+            case A::Kind::files_put: {
+                if (!known || m.cfg.demo) break;
+                cmds.push_back(Cmd::task([](Sk out, std::string alias, std::string dir) {
+                    out.send(App::Msg{App::UploadPicked{alias, dir, proc::pick_files("Upload to " + dir)}});
+                }, m.book.hosts[static_cast<std::size_t>(a.host)].alias, a.path));
+                break;
+            }
+            case A::Kind::files_mkdir:
+                break;   // not offered yet
         }
     }
     if (std::exchange(m.manager.close, false)) { m.manager_open = false; m.manager.editing = false; }
     return Cmd::batch(std::move(cmds));
+}
+
+App::Cmd App::update(Model& m, FilesListed r) {
+    if (m.files.alias != r.alias) return {};   // another host since
+    if (m.files.path != r.path) { m.manager.files_sel = 0; m.manager.files_scroll.offset.y = 0.0f; }
+    m.files.path = r.path;
+    m.files.loading = false;
+    m.files.error = r.error;
+    if (r.error.empty() || !r.entries.empty()) m.files_all = std::move(r.entries);
+    refilter(m);
+    return {};
+}
+
+App::Cmd App::update(Model& m, FilesDone d) {
+    if (m.files.alias == d.alias) m.files.busy.clear();
+    m.toast = d.error.empty() ? Toast{.title = d.title, .body = d.reveal.empty() ? d.alias : d.reveal, .kind = Toast::Kind::success}
+                              : Toast{.title = "transfer failed", .body = d.error, .kind = Toast::Kind::error};
+    m.toast_at = m.time;
+    if (d.error.empty() && !d.refresh_path.empty() && m.files.alias == d.alias)
+        if (const Host* h = m.book.find(d.alias)) return list_files(m, *h, d.refresh_path);
+    return {};
+}
+
+App::Cmd App::update(Model& m, UploadPicked u) {
+    if (u.files.empty()) return {};
+    const Host* h = m.book.find(u.alias);
+    if (!h) return {};
+    if (m.files.alias == u.alias) m.files.busy = "Uploading " + std::to_string(u.files.size()) + (u.files.size() == 1 ? " file\u2026" : " files\u2026");
+    return Cmd::task([](Sk out, Host host, HostBook book, std::string dir, std::vector<std::string> files) {
+        const std::string err = sftp::put(host, book, files, dir);
+        out.send(App::Msg{App::FilesDone{host.alias, dir, "Uploaded " + std::to_string(files.size()) + (files.size() == 1 ? " file" : " files"), err, ""}});
+    }, *h, m.book, u.dir, u.files);
+}
+
+App::Cmd App::update(Model& m, TunnelProbe) {
+    if (!m.manager_open || m.cfg.demo) return {};
+    return Cmd::task([](Sk out) {
+        bool known = true;
+        App::TunnelScan s;
+        for (const auto& l : proc::tcp_listeners(&known)) { s.ports.push_back(l.port); s.owners.push_back(l.process); }
+        s.known = known;
+        out.send(App::Msg{std::move(s)});
+    });
+}
+
+App::Cmd App::update(Model& m, TunnelScan s) {
+    m.listen_ports = std::move(s.ports);
+    m.listen_owners = std::move(s.owners);
+    m.listen_known = s.known;
+    return {};
 }
 
 App::Cmd App::update(Model& m, Reconnect) {

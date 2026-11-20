@@ -138,13 +138,21 @@ void overlays(const Ctx& c, const Model& m) {
     if (m.manager_open || m.manager_t > 0.0f) {
         const float e = 1.0f - (1.0f - m.manager_t) * (1.0f - m.manager_t);   // ease-out
         std::string store = (std::filesystem::path{m.host_src.store}.filename()).string();
+        SshManagerProps mp{.now = unix_now(),
+                           .source = m.book.config_label.empty() ? "~/.ssh/config" : m.book.config_label,
+                           .store = store.empty() ? "hosts.vibe" : store,
+                           .width = std::min(1020.0f, m.win.x - 40.0f),
+                           .height = std::min(660.0f, m.win.y - 40.0f)};
+        for (const auto& f : m.book.folders) mp.folders.push_back({f.name, f.user, f.jump, f.identity, f.port});
+        for (const auto& s : m.imports) {
+            SshImportSource is{s.name, s.where, static_cast<int>(s.hosts.size()), 0};
+            for (const auto& h : s.hosts) is.fresh += m.book.find(h.alias) ? 0 : 1;
+            mp.imports.push_back(std::move(is));
+        }
+        mp.files = m.files;
+        mp.tunnels_known = m.listen_known;
         c.overlay(Overlay{
-            .content = (node(ssh_manager(c, "mgr", picker_hosts(m), m.manager,
-                                         SshManagerProps{.now = unix_now(),
-                                                         .source = m.book.config_label.empty() ? "~/.ssh/config" : m.book.config_label,
-                                                         .store = store.empty() ? "hosts.vibe" : store,
-                                                         .width = std::min(980.0f, m.win.x - 40.0f),
-                                                         .height = std::min(640.0f, m.win.y - 40.0f)},
+            .content = (node(ssh_manager(c, "mgr", picker_hosts(m), m.manager, mp,
                                          [](SshManagerOp op) -> App::Msg { return App::Manager{std::move(op)}; }))
                         | opacity(e) | translate(0.0f, (1.0f - e) * 16.0f)).build(),
             .id = part_id("mgr", part_menu),
