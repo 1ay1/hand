@@ -21,6 +21,7 @@ using Kind = dsl::SettingSpec::Kind;
 namespace {
 
 std::vector<std::string> g_fonts;
+std::string g_pending_family;   ///< font.family from hand.vibe, before the faces are known
 
 std::size_t default_scheme() {
     static const std::size_t i = [] {
@@ -333,6 +334,16 @@ std::size_t scheme_count() { return presets::all.size(); }
 void set_font_names(std::vector<std::string> names) { g_fonts = std::move(names); }
 const std::vector<std::string>& font_names() { return g_fonts; }
 
+std::string resolve_font_family(Config& c) {
+    if (g_pending_family.empty()) return {};
+    std::string val = std::move(g_pending_family);
+    g_pending_family.clear();
+    const auto f = std::find(g_fonts.begin(), g_fonts.end(), val);
+    if (f == g_fonts.end()) return "font.family: no option \"" + val + "\"\n";
+    c.font_family = static_cast<int>(f - g_fonts.begin());
+    return {};
+}
+
 // ── hand.vibe ──────────────────────────────────────────────────────────────
 //
 //   # hand.vibe -- every key is a setting (ctrl+, edits them live)
@@ -423,6 +434,10 @@ std::string config_load(Config& c, const std::string& path) {
                     if (!vibe_is_string(x)) { problems += name + ": expected a name\n"; continue; }
                     const auto o = r.options ? r.options() : std::vector<std::string>{};
                     const std::string val = vibe_value_string(x);
+                    // font.family names a face, and the faces are discovered
+                    // on a worker while the window opens: keep the name and
+                    // resolve it once they are known (resolve_font_family).
+                    if (sec == "font" && key == "family" && g_fonts.empty()) { g_pending_family = val; continue; }
                     const auto f = std::find(o.begin(), o.end(), val);
                     if (f == o.end()) { problems += name + ": no option \"" + val + "\"\n"; continue; }
                     r.set(c, static_cast<float>(f - o.begin()));

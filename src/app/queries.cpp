@@ -311,6 +311,11 @@ void read_pty(Sink<App::Msg> out, std::stop_token st, int fd, int pid, std::uint
         if (r.error) { alive = false; continue; }
         if (r.woke) flow->wake.drain();
         if (room && r.data) alive = pty_read(fd, buf, 0);
+        // A quiet pty: ask whether the child is gone. On POSIX a dead child
+        // breaks the pty (r.data, then EOF above); a ConPTY pipe stays open
+        // until the pseudoconsole is closed, so only pty_read can tell, and
+        // without this `exit` left the tab (and the window) open forever.
+        else if (room && !r.woke) alive = pty_read(fd, buf, 0);
     }
 }
 

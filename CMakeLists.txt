@@ -74,8 +74,17 @@ if(WIN32)
     # NOGDI is deliberately NOT set: mayag's Win32 backend blits through GDI.
     target_compile_definitions(hand PRIVATE _WIN32_WINNT=0x0A00 WINVER=0x0A00
                                             WIN32_LEAN_AND_MEAN NOMINMAX)
+    # (A fully static MinGW link was measured: +15 ms to first text, as the
+    # bigger image pages in cold, while the shared runtime DLLs are already
+    # resident. So the runtime stays dynamic.)
 elseif(NOT APPLE)
     target_link_libraries(hand PRIVATE util)   # glibc forkpty
+endif()
+# Release ships no symbols: an 8.9 MB unstripped hand.exe took 11 ms longer
+# to launch than the stripped 5.1 MB one (on-access scanning reads the whole
+# image). RelWithDebInfo keeps them for profiling.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND NOT APPLE)
+    target_link_options(hand PRIVATE $<$<CONFIG:Release,MinSizeRel>:-s>)
 endif()
 
 if(HAND_BUILD_TESTS)

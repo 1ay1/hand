@@ -130,6 +130,9 @@ bool setting_apply(Config& c, const mayag::dsl::SettingEdit& e);
 /// Monospace faces found at startup (main sets them; family index → name).
 void set_font_names(std::vector<std::string> names);
 [[nodiscard]] const std::vector<std::string>& font_names();
+/// Apply a font.family that hand.vibe named before the faces were known
+/// (they are found on a worker during startup). Returns a problem, or "".
+std::string resolve_font_family(Config& c);
 
 // ── the file ───────────────────────────────────────────────────────────────
 [[nodiscard]] std::string config_path();   ///< $HAND_CONFIG or ~/.config/hand/hand.vibe

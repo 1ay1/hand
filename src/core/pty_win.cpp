@@ -29,6 +29,7 @@
 #include <cstdio>
 #include <cstring>
 #include <mutex>
+#include <thread>
 #include <string>
 #include <vector>
 
@@ -42,6 +43,11 @@ struct Session {
     HANDLE proc = INVALID_HANDLE_VALUE;
     DWORD pid = 0;
     bool used = false;
+    /// Held only while the spawn worker runs, or for good if the spawn
+    /// failed: then the error text sits in the pipe and the reader never
+    /// sees EOF, so the tab stays open showing it (as a sync failure did).
+    HANDLE out_w = INVALID_HANDLE_VALUE;
+    COORD size{80, 24};                  ///< the latest size asked for (applied once pc exists)
 };
 
 // 64 concurrent ptys is far more than tabs anyone opens, and a fixed table
@@ -50,6 +56,14 @@ struct Session {
 constexpr int kMaxSessions = 64;
 std::array<Session, kMaxSessions> g_sessions{};
 std::mutex g_mu;
+/// The spawn worker per slot (conhost + CreateProcessW, ~50 ms): joined
+/// before the slot is torn down.
+std::array<std::thread, kMaxSessions> g_spawners{};
+
+/// A pid stand-in while the shell is still being started: negative, so it
+/// is never a real pid, and it names the slot so pty_reap can find it.
+constexpr int pending_pid(int slot) { return -(slot + 2); }
+constexpr int slot_of_pending(int pid) { return -pid - 2; }
 
 Session* session_of(int fd) {
     if (fd < 0 || fd >= kMaxSessions) return nullptr;
@@ -150,9 +164,14 @@ std::string narrow(const std::wstring& w) {
 }  // namespace
 
 Pty::~Pty() {
+    if (fd_ < 0 || fd_ >= kMaxSessions) return;
+    // The spawn worker writes the slot; let it finish first (outside g_mu,
+    // which it takes).
+    if (auto& t = g_spawners[static_cast<std::size_t>(fd_)]; t.joinable()) t.join();
     std::lock_guard lk{g_mu};
     Session* s = session_of(fd_);
     if (s == nullptr) return;
+    if (s->out_w != INVALID_HANDLE_VALUE) ::CloseHandle(s->out_w);
     // Order matters: close our input end first so the shell sees EOF and
     // exits on its own, then the HPCON (which waits for conhost to drain),
     // then the handles. Closing the HPCON first can hang on a busy child.
@@ -187,10 +206,13 @@ std::string Pty::resolve_shell(std::string shell) {
     return n > 0 ? std::string(buf.data(), n) + "\\cmd.exe" : "cmd.exe";
 }
 
+namespace {
+bool start_child(HPCON pc, const std::string& shell, const std::vector<std::pair<std::string, std::string>>& env,
+                 const std::vector<std::string>& args, const std::string& cwd, HANDLE& proc_out, DWORD& pid_out);
+}  // namespace
+
 bool Pty::spawn(int cols, int rows, std::string shell, const std::vector<std::pair<std::string, std::string>>& env,
                 const std::vector<std::string>& args, const std::string& cwd) {
-    shell = resolve_shell(std::move(shell));
-
     int slot = -1;
     {
         std::lock_guard lk{g_mu};
@@ -204,32 +226,72 @@ bool Pty::spawn(int cols, int rows, std::string shell, const std::vector<std::pa
     if (slot < 0) return false;
     Session& s = g_sessions[static_cast<std::size_t>(slot)];
 
-    const auto fail = [&] {
+    // Two pipes, crossed: conhost reads our input pipe and writes our output
+    // pipe. We keep the far ends; the HPCON owns the near ones. Made HERE,
+    // synchronously, so the pty is usable the moment spawn returns: the
+    // reader can wait on `out`, keys typed early queue in `in`.
+    HANDLE in_read = INVALID_HANDLE_VALUE, out_write = INVALID_HANDLE_VALUE;
+    if (::CreatePipe(&in_read, &s.in, nullptr, 0) == FALSE || ::CreatePipe(&s.out, &out_write, nullptr, 0) == FALSE) {
         std::lock_guard lk{g_mu};
+        if (in_read != INVALID_HANDLE_VALUE) ::CloseHandle(in_read);
         if (s.in != INVALID_HANDLE_VALUE) ::CloseHandle(s.in);
-        if (s.out != INVALID_HANDLE_VALUE) ::CloseHandle(s.out);
-        if (s.pc != nullptr) ::ClosePseudoConsole(s.pc);
         s = Session{};
         return false;
-    };
-
-    // Two pipes, crossed: conhost reads our input pipe and writes our output
-    // pipe. We keep the far ends; the HPCON owns the near ones.
-    HANDLE in_read = INVALID_HANDLE_VALUE, out_write = INVALID_HANDLE_VALUE;
-    if (::CreatePipe(&in_read, &s.in, nullptr, 0) == FALSE) return fail();
-    if (::CreatePipe(&s.out, &out_write, nullptr, 0) == FALSE) {
-        ::CloseHandle(in_read);
-        return fail();
     }
+    s.out_w = out_write;
+    s.size = COORD{static_cast<SHORT>(cols > 0 ? cols : 80), static_cast<SHORT>(rows > 0 ? rows : 24)};
+    fd_ = slot;
+    pid_ = static_cast<pid_t>(pending_pid(slot));
 
-    const COORD size{static_cast<SHORT>(cols > 0 ? cols : 80), static_cast<SHORT>(rows > 0 ? rows : 24)};
-    const HRESULT hr = ::CreatePseudoConsole(size, in_read, out_write, 0, &s.pc);
-    // conhost dup'd both ends; ours are dead weight now and MUST be closed,
-    // or the child never sees EOF when the pty goes away.
-    ::CloseHandle(in_read);
-    ::CloseHandle(out_write);
-    if (FAILED(hr) || s.pc == nullptr) return fail();
+    // conhost (~20 ms) and the shell's process (~30 ms) start on a worker:
+    // the window draws its first frame meanwhile instead of after them.
+    g_spawners[static_cast<std::size_t>(slot)] =
+        std::thread{[slot, in_read, shell = std::move(shell), env, args, cwd]() mutable {
+            Session& ss = g_sessions[static_cast<std::size_t>(slot)];
+            const auto fail = [&](const char* what) {
+                // The message goes down the output pipe, so it shows in the
+                // tab exactly where the shell's first prompt would have.
+                const std::string msg = std::string{"\x1b[31mhand: could not start a shell ("} + what + ")\x1b[0m\r\n";
+                DWORD w = 0;
+                (void)::WriteFile(ss.out_w, msg.data(), static_cast<DWORD>(msg.size()), &w, nullptr);
+                ::CloseHandle(in_read);
+            };
+            shell = resolve_shell(std::move(shell));
+            HPCON pc = nullptr;
+            COORD size;
+            {
+                std::lock_guard lk{g_mu};
+                size = ss.size;
+            }
+            const HRESULT hr = ::CreatePseudoConsole(size, in_read, ss.out_w, 0, &pc);
+            if (FAILED(hr) || pc == nullptr) return fail("CreatePseudoConsole");
+            // conhost dup'd both ends; ours are dead weight now and MUST be
+            // closed, or the child never sees EOF when the pty goes away.
+            ::CloseHandle(in_read);
+            HANDLE proc = INVALID_HANDLE_VALUE;
+            DWORD pid = 0;
+            const bool ok = start_child(pc, shell, env, args, cwd, proc, pid);
+            std::lock_guard lk{g_mu};
+            ss.pc = pc;
+            if (ss.size.X != size.X || ss.size.Y != size.Y) (void)::ResizePseudoConsole(pc, ss.size);   // resized meanwhile
+            if (!ok) {
+                const std::string msg = "\x1b[31mhand: could not start a shell (" + shell + ")\x1b[0m\r\n";
+                DWORD w = 0;
+                (void)::WriteFile(ss.out_w, msg.data(), static_cast<DWORD>(msg.size()), &w, nullptr);
+                return;   // out_w stays open: the message stays on screen
+            }
+            ss.proc = proc;
+            ss.pid = pid;
+            ::CloseHandle(ss.out_w);   // conhost holds its own copy; EOF now follows the shell
+            ss.out_w = INVALID_HANDLE_VALUE;
+        }};
+    return true;
+}
 
+namespace {
+/// Start `shell` attached to `pc`. Any thread.
+bool start_child(HPCON pc, const std::string& shell, const std::vector<std::pair<std::string, std::string>>& env,
+                 const std::vector<std::string>& args, const std::string& cwd, HANDLE& proc_out, DWORD& pid_out) {
     // The child is attached to the pty through a thread attribute, which is
     // how ConPTY replaces forkpty's "child inherits the slave side".
     STARTUPINFOEXW si{};
@@ -248,11 +310,11 @@ bool Pty::spawn(int cols, int rows, std::string shell, const std::vector<std::pa
     ::InitializeProcThreadAttributeList(nullptr, 1, 0, &attr_size);
     std::vector<char> attrs(attr_size);
     si.lpAttributeList = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attrs.data());
-    if (::InitializeProcThreadAttributeList(si.lpAttributeList, 1, 0, &attr_size) == FALSE) return fail();
-    if (::UpdateProcThreadAttribute(si.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, s.pc, sizeof s.pc,
+    if (::InitializeProcThreadAttributeList(si.lpAttributeList, 1, 0, &attr_size) == FALSE) return false;
+    if (::UpdateProcThreadAttribute(si.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, pc, sizeof pc,
                                     nullptr, nullptr) == FALSE) {
         ::DeleteProcThreadAttributeList(si.lpAttributeList);
-        return fail();
+        return false;
     }
 
     std::string cmd;
@@ -291,15 +353,14 @@ bool Pty::spawn(int cols, int rows, std::string shell, const std::vector<std::pa
                                      EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT, wenv.data(),
                                      wcwd.empty() ? nullptr : wcwd.c_str(), &si.StartupInfo, &pi);
     ::DeleteProcThreadAttributeList(si.lpAttributeList);
-    if (ok == FALSE) return fail();
+    if (ok == FALSE) return false;
 
     ::CloseHandle(pi.hThread);
-    s.proc = pi.hProcess;
-    s.pid = pi.dwProcessId;
-    fd_ = slot;
-    pid_ = static_cast<pid_t>(pi.dwProcessId);
+    proc_out = pi.hProcess;
+    pid_out = pi.dwProcessId;
     return true;
 }
+}  // namespace
 
 void Pty::write(std::string_view bytes) const {
     Session* s = session_of(fd_);
@@ -313,11 +374,13 @@ void Pty::write(std::string_view bytes) const {
 }
 
 void Pty::resize(int cols, int rows, int /*px_w*/, int /*px_h*/) const {
+    std::lock_guard lk{g_mu};   // the spawn worker may be creating the HPCON
     Session* s = session_of(fd_);
-    if (s == nullptr || s->pc == nullptr) return;
+    if (s == nullptr) return;
     // ConPTY has no pixel geometry; cells are all it models.
     const COORD size{static_cast<SHORT>(cols > 0 ? cols : 80), static_cast<SHORT>(rows > 0 ? rows : 24)};
-    (void)::ResizePseudoConsole(s->pc, size);
+    s->size = size;   // still starting: the worker applies it
+    if (s->pc != nullptr) (void)::ResizePseudoConsole(s->pc, size);
 }
 
 bool pty_read(int fd, std::string& out, int timeout_ms) {
@@ -327,9 +390,24 @@ bool pty_read(int fd, std::string& out, int timeout_ms) {
     // Only read what is actually buffered: ReadFile on a pipe blocks until it
     // gets at least one byte, and the reader thread must not block here (it
     // owns the stop check). The caller polls via plat::wait_readable.
+    //
+    // EOF: unlike a POSIX pty, ConPTY's output pipe does NOT break when the
+    // shell exits -- conhost holds it open until ClosePseudoConsole -- so
+    // `exit` left a dead tab (and a window that never closed). An empty pipe
+    // whose shell has exited is EOF.
+    const auto exited = [&] {
+        const HANDLE p = s->proc;
+        return p != INVALID_HANDLE_VALUE && ::WaitForSingleObject(p, 0) == WAIT_OBJECT_0;
+    };
     const auto avail = [&]() -> DWORD {
         DWORD n = 0;
         if (::PeekNamedPipe(s->out, nullptr, 0, nullptr, &n, nullptr) == FALSE) return 0xFFFFFFFFu;
+        if (n == 0 && exited()) {
+            // The shell's last bytes may still be in flight through conhost:
+            // look once more after it has had a moment to flush them.
+            ::Sleep(15);
+            if (::PeekNamedPipe(s->out, nullptr, 0, nullptr, &n, nullptr) == FALSE || n == 0) return 0xFFFFFFFFu;
+        }
         return n;
     };
 
@@ -365,6 +443,16 @@ int pty_reap(pid_t pid) {
     // Find the session by pid so the process handle can be waited on; a bare
     // pid cannot be waited for without reopening it.
     std::lock_guard lk{g_mu};
+    if (pid < -1) {
+        // A pid captured while the shell was still starting (pending_pid):
+        // the slot knows the real one by now. Not started yet, or the start
+        // failed (its error stays on screen): still running.
+        const int slot = slot_of_pending(static_cast<int>(pid));
+        if (slot < 0 || slot >= kMaxSessions) return -1;
+        const Session& ps = g_sessions[static_cast<std::size_t>(slot)];
+        if (!ps.used || ps.proc == INVALID_HANDLE_VALUE) return -1;
+        pid = static_cast<pid_t>(ps.pid);
+    }
     for (Session& s : g_sessions) {
         if (!s.used || s.pid != static_cast<DWORD>(pid)) continue;
         DWORD code = 0;

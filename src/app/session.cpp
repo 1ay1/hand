@@ -127,6 +127,7 @@ App::Session App::spawn_ssh(Model& m, const Host& h) {
 }
 
 App::Cmd App::init(Model& m) {
+    startup::mark("hand: init");
     m.cfg = config;
     m.palette = palette_of(m.cfg);
     m.font_size = m.cfg.font_size;
@@ -137,7 +138,9 @@ App::Cmd App::init(Model& m) {
         m.host_src = resolve(HostSources{.read_known = m.cfg.ssh_known_hosts});
         m.book = hosts_load(m.host_src);
     }
+    startup::mark("hand: init: host book");
     static_cast<Session&>(m) = spawn_session(m, "");
+    startup::mark("hand: init: shell spawned");
     m.tabs.resize(1);
     m.active = 0;
     return SetTitle{"hand"};
