@@ -50,8 +50,8 @@ SettingsPanelProps settings_props(const Ctx& c, const Model& m) {
     return SettingsPanelProps{.title = "hand", .subtitle = "terminal settings", .brand = "h",
                               .logo = hand_mark(c, 44.0f, {.cursor = m.cursor_on, .roundness = m.cfg.roundness}),
                               .footer = cfgp,
-                              .width = std::min(900.0f, m.win.x - 48.0f),
-                              .height = std::min(640.0f, m.win.y - 48.0f)};
+                              .width = std::min(960.0f, m.win.x - 48.0f),
+                              .height = std::min(680.0f, m.win.y - 48.0f)};
 }
 
 }  // namespace view
