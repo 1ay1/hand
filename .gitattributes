@@ -1,0 +1,10 @@
+# Keep the tree LF everywhere. hand is built on Linux, macOS and Windows from
+# the same checkout; without this, Git's autocrlf would rewrite sources on
+# Windows and every file would show as modified on the next platform.
+* text=auto eol=lf
+
+# Binary assets must never be touched.
+*.png binary
+*.ttf binary
+*.otf binary
+*.spv binary

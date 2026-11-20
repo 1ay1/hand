@@ -1329,20 +1329,32 @@ int main(int argc, char** argv) {
                         const bool up = pty->spawn(rt.model().term->cols(), rt.model().term->rows(),
                                                    hand::self_exe(), {}, {"--cat-v"});
                         std::string got;
-                        // the app's own pty reader feeds cat's echo into the terminal:
+                        // the app's own pty reader feeds the echo into the terminal:
                         // read it back from the screen
-                        const auto drain = [&](int ms) {
-                            rt.settle([](const auto&) { return false; }, std::chrono::milliseconds(ms));
-                            rt.tick();
+                        const auto scrape = [&] {
                             got.clear();
                             const auto g = rt.model().term->snapshot();
                             for (const auto& l : g.lines) for (const auto& c : l.cells) got += c.text;
                         };
+                        // Wait for what we EXPECT rather than for a fixed time: a
+                        // pty round trip through a real child is at the mercy of
+                        // the scheduler, and a loaded machine (a parallel build,
+                        // CI) makes a fixed sleep flaky. `ms` stays the ceiling.
+                        const auto drain_until = [&](int ms, std::string_view want) {
+                            const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+                            do {
+                                rt.settle([](const auto&) { return false; }, std::chrono::milliseconds(20));
+                                rt.tick();
+                                scrape();
+                                if (!want.empty() && got.find(want) != std::string::npos) return;
+                            } while (std::chrono::steady_clock::now() < deadline);
+                        };
+                        const auto drain = [&](int ms) { drain_until(ms, {}); };
                         rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[pty](hand::App::Model& mm) {
                             mm.ask.reset(); mm.ask_t = 0.0f; mm.settings_open = false; mm.hosts_open = false;
                             mm.selecting = false; mm.mouse_button = -1; mm.pty = pty; }}});
                         for (int i = 0; i < 30; ++i) rt.tick();   // any closing overlay is gone
-                        drain(400);
+                        drain_until(2000, "ready");
                         ok(up && rt.model().term->mouse_reporting(), "a TUI turns on any-motion mouse tracking");
                         const float top = rt.model().strip_h(), cw = rt.model().metrics.cell_w, chh = rt.model().metrics.cell_h;
                         const float ox = rt.model().metrics.origin_x, oy = rt.model().metrics.origin_y + top;
@@ -1354,7 +1366,7 @@ int main(int argc, char** argv) {
                         rt.tick();
                         rt.window().move_to(at(12, 6));
                         rt.tick();
-                        drain(300);
+                        drain_until(2000, "^[[<35;13;7M");
                         const auto count = [&](std::string_view s) { std::size_t n = 0; for (auto p = got.find(s); p != std::string::npos; p = got.find(s, p + 1)) ++n; return n; };
                         ok(count("^[[<35;11;6M") == 1 && count("^[[<35;13;7M") == 1,
                            "hovering reports buttonless motion, once per cell (SGR 35)");
@@ -1365,7 +1377,7 @@ int main(int argc, char** argv) {
                         rt.tick();
                         rt.window().release(at(5, 3));
                         rt.tick();
-                        drain(300);
+                        drain_until(2000, "^[[<0;6;4m");   // the release is the last of the three
                         ok(got.find("^[[<0;4;4M") != std::string::npos && got.find("^[[<32;6;4M") != std::string::npos &&
                            got.find("^[[<0;6;4m") != std::string::npos, "press, drag and release reach the program at the cells under the pointer");
                         rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& mm) {

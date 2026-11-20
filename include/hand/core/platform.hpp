@@ -34,9 +34,8 @@
 #  ifndef NOMINMAX
 #    define NOMINMAX 1
 #  endif
-#  ifndef NOGDI
-#    define NOGDI 1
-#  endif
+// NOGDI is deliberately not defined: mayag's Win32 window backend blits
+// through GDI (SetDIBitsToDevice), and it would lose those declarations.
 #endif
 
 namespace hand::plat {

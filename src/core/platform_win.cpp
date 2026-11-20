@@ -165,9 +165,24 @@ Ready wait_readable(const Waker& w, std::intptr_t pty, int timeout_ms) {
         return out;
     }
 
-    // Otherwise wait on the waker in short slices, peeking between them.
+    // Otherwise wait on the waker in slices, peeking between them.
+    //
+    // The slice length is the whole performance question here. Anonymous
+    // pipes are not waitable, so "has the shell written something" can only
+    // be answered by asking -- but asking every millisecond forever costs a
+    // timer wakeup per millisecond per tab, which is ~25% of a core for an
+    // idle terminal. So the duty cycle ADAPTS: start tight, because output
+    // usually arrives in bursts and the first byte after a keystroke is the
+    // one a human perceives, then relax toward 16 ms once nothing has shown
+    // up. A burst is caught within a millisecond; an idle shell costs ~60
+    // wakeups a second instead of a thousand.
+    //
+    // Latency is unaffected in the cases that matter: the WAKER is waited on
+    // properly, so a keystroke, a resize, or a stop request returns at once
+    // regardless of where the backoff has got to.
     const DWORD total = timeout_ms < 0 ? INFINITE : static_cast<DWORD>(timeout_ms);
-    const DWORD slice = 1;
+    DWORD slice = 1;
+    constexpr DWORD kMaxSlice = 16;
     for (DWORD spent = 0; total == INFINITE || spent < total;) {
         const DWORD step = total == INFINITE ? slice : std::min(slice, total - spent);
         const DWORD r = ::WaitForSingleObject(wake, step);
@@ -186,6 +201,7 @@ Ready wait_readable(const Waker& w, std::intptr_t pty, int timeout_ms) {
             return out;
         }
         spent += step;
+        if (slice < kMaxSlice) slice *= 2;
     }
     return out;  // timeout: nothing ready, nothing wrong
 }

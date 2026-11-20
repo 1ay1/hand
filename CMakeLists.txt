@@ -71,8 +71,9 @@ if(WIN32)
     target_link_libraries(hand PRIVATE shlwapi)
     # ConPTY needs Windows 10 1809 (the API that makes a real terminal
     # possible at all); say so rather than inheriting MinGW's older default.
+    # NOGDI is deliberately NOT set: mayag's Win32 backend blits through GDI.
     target_compile_definitions(hand PRIVATE _WIN32_WINNT=0x0A00 WINVER=0x0A00
-                                            WIN32_LEAN_AND_MEAN NOMINMAX NOGDI)
+                                            WIN32_LEAN_AND_MEAN NOMINMAX)
 elseif(NOT APPLE)
     target_link_libraries(hand PRIVATE util)   # glibc forkpty
 endif()
