@@ -14,6 +14,7 @@
 #include <filesystem>
 
 #include <mayag/widget/ssh.hpp>
+#include <hand/config/schemes_gen.hpp>
 
 #include <mayag/backend/tiled.hpp>
 #ifdef MAYAG_WITH_VULKAN
@@ -434,6 +435,10 @@ int main(int argc, char** argv) {
     }
     startup::mark("hand: config loaded");
     cfg.demo = mode != Mode::window && shot != "flood";
+    // Scripted shots in any colour scheme: HAND_SCHEME="Clu" (by name).
+    if (const char* sch = std::getenv("HAND_SCHEME"); sch && *sch && mode != Mode::window)
+        for (std::size_t k = 0; k < hand::presets::all.size(); ++k)
+            if (hand::presets::all[k].name == sch) { cfg.scheme = static_cast<int>(k); break; }
     hand::App::config = cfg;
 
     hand::App::cell_width = [](float s, int family) {
