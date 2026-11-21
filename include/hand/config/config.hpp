@@ -1,7 +1,7 @@
 #pragma once
 // hand::Config — everything configurable, and the one table describing it.
 //
-// Every setting is a row in src/settings.cpp: section, key, hint, kind,
+// Every setting is a row in src/config/settings.cpp: section, key, hint, kind,
 // range, and a get/set pair over Config. That single table generates the
 // settings panel (mayag settings_panel), reads and writes ~/.config/hand/
 // hand.vibe, and validates input. Adding a setting is adding a row.

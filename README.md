@@ -43,7 +43,7 @@ in `hosts.vibe` beside `hand.vibe`.
 
 `ctrl+,` opens settings over the terminal. Every edit applies live and is saved to
 `~/.config/hand/hand.vibe` (the file is generated from the settings table in
-`src/settings.cpp`; every key is a setting). Colours come from all 913
+`src/config/settings.cpp`; every key is a setting). Colours come from all 913
 [iTerm2-Color-Schemes](https://github.com/mbadolato/iTerm2-Color-Schemes);
 regenerate the catalogue with `tools/gen_schemes.py`.
 
@@ -57,3 +57,6 @@ cmake --build build --target hand
 ./build/hand --headless --last-resort     # the self-test (also: ctest)
 ./build/hand --png out.png --shot tabs    # a screenshot (tabs, settings, hosts, ssh, ...)
 ```
+
+How the code is laid out (layers, the model and message trees, the type
+rules) is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
