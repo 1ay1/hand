@@ -83,7 +83,7 @@ hand_layer(hand_config DIRS config LINK hand_core vibe)
 hand_layer(hand_ssh    DIRS ssh    LINK hand_core vibe)
 hand_layer(hand_app    DIRS app view LINK hand_config hand_ssh)
 
-file(GLOB HAND_CLI CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/cli/*.cpp)
+file(GLOB HAND_CLI CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/cli/*.cpp ${CMAKE_CURRENT_SOURCE_DIR}/src/cli/checks/*.cpp)
 add_executable(hand src/main.cpp ${HAND_CLI})   # main + its run modes (src/cli)
 target_link_libraries(hand PRIVATE hand_app)
 target_compile_options(hand PRIVATE ${HAND_WARNINGS})

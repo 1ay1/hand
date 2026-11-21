@@ -177,11 +177,18 @@ Messages follow the same rules:
 | flag | file | what |
 |------|------|------|
 | *(none)* | `main.cpp` | the window |
-| `--headless` | `cli/selftest.cpp` | the self-test; exit code = failures |
+| `--headless` | `cli/selftest.cpp` → `cli/checks/*.cpp` | the self-test, one suite per feature; exit code = failures |
 | `--png F --shot NAME` | `cli/shots.cpp` | one staged frame to PNG |
 | `--bench`, `--flood CMD` | `cli/shots.cpp` | frame cost, throughput, memory |
 | `--repro-narrow[-fish]`, `--repro-resize` | `cli/repro.cpp` | resize repros on real shells |
 | `--emit-red`, `--cat-v` | `cli/fixtures.cpp` | hand as a pty test fixture |
+
+The self-test's suites (`src/cli/checks/`) run in a fixed order on one
+runtime: `pty`, `settings_panel`, `every_setting`, `visual_settings`,
+`terminal_features`, `fish_integration`, `resize_fish`, `wide_squeeze`,
+`wrap_spaces`, `selection`, `tabs`, `tui_mouse`, `mac`, `ssh`,
+`config_roundtrip`. Each reports through a `Check`. To add a suite, declare it
+in `checks/suites.hpp`, add a file, and list it in `selftest.cpp`.
 
 ## Build and test
 

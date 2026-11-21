@@ -8,41 +8,20 @@
 
 #include "cli.hpp"
 
-#include <hand/app.hpp>
 #include <hand/core/shell.hpp>
-#include <hand/core/pty.hpp>
-
-
-#include <filesystem>
-#include <thread>
-#include <chrono>
-
-#include <mayag/widget/ssh.hpp>
-#include <mayag/widget/file_pane.hpp>
-#include <hand/config/schemes_gen.hpp>
-#include <hand/ssh/sftp.hpp>
-
-#include <mayag/backend/tiled.hpp>
-#ifdef MAYAG_WITH_VULKAN
-#include <mayag/backend/vulkan.hpp>
-#endif
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <filesystem>
 #include <string>
 #include <string_view>
-#include <hand/core/platform.hpp>
-#include <csignal>
-
-#if defined(_WIN32)
-#  include <windows.h>   // --cat-v puts the console in raw mode
-#else
-#  include <termios.h>
-#  include <unistd.h>
-#endif
+#include <thread>
+#include <vector>
 
 namespace hand::cli {
 
