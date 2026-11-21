@@ -16,8 +16,8 @@ using namespace hand::detail;
 
 namespace {
 
-/// What each dialog offers, by index (the view lists them in this order).
-namespace paste_action { inline constexpr std::size_t cancel = 0, one_line = 1, paste = 2; }
+/// The paste dialog's actions, in the order the view lists them.
+enum class PasteAction : std::size_t { cancel = 0, one_line = 1, paste = 2 };
 
 /// Saving quits the app: hand.vibe first (a demo never writes it).
 App::Cmd save_and_quit(const Model& m) {
@@ -72,7 +72,7 @@ App::Cmd App::update(Model& m, Answer a) {
         case Ask::Kind::paste: {
             std::string text = std::exchange(m.pending_paste, {});
             if (!yes) return {};
-            if (action == paste_action::one_line) text = one_line(text);
+            if (action == std::to_underlying(PasteAction::one_line)) text = one_line(text);
             return update(m, Pasted{std::move(text), Confirm::given});
         }
         case Ask::Kind::close_tab:

@@ -1,0 +1,35 @@
+#pragma once
+// hand::cli — hand's run modes besides the window, one file each. main.cpp
+// parses the arguments and hands over; nothing here is linked into the app
+// layer, and the app layer never knows these exist.
+//
+//   fixtures.cpp   --emit-red, --cat-v           hand as a test fixture on a pty
+//   repro.cpp      --repro-narrow[-fish], --repro-resize   resize repros, real shells
+//   selftest.cpp   --headless                    the self-test, `ok` / `FAIL` per check
+//   shots.cpp      --png --shot NAME, --bench, --flood     a frame to PNG, benchmarks
+
+#include <hand/app.hpp>
+
+#include <mayag/mayag.hpp>
+
+#include <optional>
+#include <string>
+
+namespace hand::cli {
+
+/// The headless runtime every scripted mode drives.
+using Runtime = mayag::headless_app<App>;
+
+/// A fixture program, when argv asks for one: its exit code.
+[[nodiscard]] std::optional<int> fixture(int argc, char** argv);
+/// A resize repro, when argv asks for one: 0 = intact, 1 = corrupted.
+[[nodiscard]] std::optional<int> repro(int argc, char** argv);
+/// The self-test, on a runtime showing the demo screen. Returns the failures.
+[[nodiscard]] int selftest(Runtime& rt, mayag::Vec2 size);
+/// Stage `shot`, render one frame, write it to `out` (bench / flood print stats).
+[[nodiscard]] int shoot(Runtime& rt, mayag::Vec2 size, const std::string& shot, const std::string& out);
+
+/// Has the cursor's motion (and its particles) come to rest?
+[[nodiscard]] inline bool motion_settled(const App::Model& m) { return motion::tail_settled(m.fx, m.cur_x, m.cur_y); }
+
+}  // namespace hand::cli

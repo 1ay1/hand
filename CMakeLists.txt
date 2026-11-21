@@ -56,7 +56,8 @@ set_target_properties(vibe PROPERTIES C_STANDARD 11)
 #   hand_ssh     src/ssh      hosts: ~/.ssh/config, known_hosts, hosts.vibe, sftp
 #   hand_app     src/app      the program: update + input, one file per domain
 #                src/view     the widget tree (App::view), mayag widgets only
-#   hand         src/main.cpp fonts, config, modes (window / --png / --headless)
+#   hand         src/main.cpp fonts, config, picks a mode
+#                src/cli      the scripted modes: self-test, shots, bench, repros
 #
 #   core ◀─ config ◀─┐
 #   core ◀─ ssh    ◀─┴─ app ◀─ hand          (and every layer may use mayag/toe)
@@ -82,7 +83,8 @@ hand_layer(hand_config DIRS config LINK hand_core vibe)
 hand_layer(hand_ssh    DIRS ssh    LINK hand_core vibe)
 hand_layer(hand_app    DIRS app view LINK hand_config hand_ssh)
 
-add_executable(hand src/main.cpp)
+file(GLOB HAND_CLI CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/cli/*.cpp)
+add_executable(hand src/main.cpp ${HAND_CLI})   # main + its run modes (src/cli)
 target_link_libraries(hand PRIVATE hand_app)
 target_compile_options(hand PRIVATE ${HAND_WARNINGS})
 
