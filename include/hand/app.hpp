@@ -175,7 +175,7 @@ struct App {
     // Edit: a direct model edit (the self-test and scripted shots only)
     static Cmd update(Model& m, msg::Edit e) { e(m); settle_scroll(m); return {}; }
 
-    // src/app/input.cpp: window input -> messages
+    // src/app/input_{keys,pointer,widgets}.cpp: window input -> messages (pure: decide, never change)
     static std::optional<Msg> on(const Model& m, const mayag::KeyEvent& k);
     static std::optional<Msg> on(const Model& m, const mayag::TextEvent& t);
     static std::optional<Msg> on(const Model& m, const mayag::ComposeEvent& c);

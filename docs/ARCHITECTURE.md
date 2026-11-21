@@ -111,7 +111,7 @@ Msg ─┬─ ShellMsg    Output Exited
      └─ Edit        a direct model edit -- the self-test and shots only
 ```
 
-Input handlers (`src/app/input.cpp`) are pure: they read the model, decide
+Input handlers (`src/app/input_*.cpp`) are pure: they read the model, decide
 which message a key, click or drag is, encode any bytes, and return it. Every
 change to the model is a named message with its own `update`. The `layering`
 test rejects an anonymous `mayag::Edit` anywhere in `src/app` or `src/view`.
@@ -139,7 +139,10 @@ domain's file.
 | Panel, ToggleSettings | `src/app/settings.cpp` |
 | SshMsg, ManagerMsg | `src/app/ssh.cpp` |
 | PaneMsg    | `src/app/pane.cpp`      |
-| (input)    | `src/app/input.cpp` — window events → Msg |
+| (input: keys) | `src/app/input_keys.cpp` — chords, text, the input method → Msg |
+| (input: pointer) | `src/app/input_pointer.cpp` — wheel, press/move/release → Msg |
+| (input: widgets) | `src/app/input_widgets.cpp` — resize, focus, gestures on nodes → Msg |
+| (subscriptions) | `src/app/subscribe.cpp` — pty readers, blink, clock, frames |
 
 ### View: composition only
 

@@ -5,7 +5,7 @@
 //   SelectBegin ─▶ SelectExtend* ─▶ SelectEnd{keep | discard}
 //   ReportPress ─▶ ReportMotion* ─▶ ReportRelease        (mouse reporting on)
 //
-// input.cpp decides WHICH of these a gesture is (and encodes the bytes);
+// input_pointer.cpp decides WHICH of these a gesture is (and encodes the bytes);
 // this file only applies them.
 
 #include "detail.hpp"
