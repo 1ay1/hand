@@ -4,7 +4,66 @@ hand is one Elm-style program on mayag (the GPU UI), with toe as its VT
 engine. This page is the map and the rules. When code and this page disagree,
 fix one of them in the same commit.
 
-## Layers
+## The hierarchy: hand → mayag → jaal
+
+```
+  hand    the terminal: names mayag only, through its public surface
+    │       <mayag/mayag.hpp>, <mayag/widget/...>, <mayag/core/event.hpp>
+    ▼
+  mayag   the GPU UI: widgets, theme, the window host. It reaches jaal only
+    │       through jaal's public API, and re-exports what an app needs under
+    │       its own names: Cmd, Sub, Sink, CoOwned, Shared, Guarded, Sendable,
+    ▼       Sync, MAYAG_SYNC / MAYAG_SENDABLE / MAYAG_FROZEN
+  jaal    the runtime: the loop, tasks, streams, the thread-safety concepts;
+            names nothing above it
+```
+
+Each arrow is one-way and checked by ctest on every hand build:
+
+| test | wall |
+|------|------|
+| `layering` | hand's own layers (below). hand never names jaal (no include, no `jaal::`, no jaal macro), never includes mayag's internals or `mayag::detail`, and `core` never pulls in the mayag runtime |
+| `mayag_layering` | mayag's layers, and only mayag's runtime glue includes jaal |
+| `mayag_uses_jaal_public_api` | mayag never reaches into `jaal::detail` or jaal's private keys |
+| `jaal_upward` | jaal never names mayag or hand |
+| `concurrency_*`, `mayag_concurrency` | jaal's own banlist over hand and over mayag (next section) |
+
+When hand needs something only jaal has, it is added to mayag's vocabulary
+first (for example `mayag::Sendable`, `mayag::Sync` and `MAYAG_SYNC`), never
+reached around.
+
+## Concurrency: race-free by construction
+
+hand's app code has no threads, locks or atomics. Concurrency comes in three
+shapes, and the compiler checks each one:
+
+- **Background work** is a mayag `Cmd::task` or `Sub::stream`. Its body is
+  captureless, every argument must be `Sendable` (owned, nothing borrowed),
+  and it talks back only through a weak `Sink`. A stream stops when
+  `subscribe` stops asking for it, and late messages from it are dropped.
+- **Messages** cross threads, so `msg.hpp` ends with
+  `static_assert(mayag::Sendable<msg::Any>)`. A pointer, view or
+  `shared_ptr` in any leaf of the tree fails the build and names the field.
+- **Shared mutable state** is a `mayag::CoOwned<T>`, which requires
+  `mayag::Sync<T>`. There is one in hand: `OutputCredit`
+  (`core/credit.hpp`), the pty reader's flow control. It travels inside
+  each `Output`, and `update` gives it back when the bytes are fed, so at
+  most one chunk is ever in flight. A firehose like `yes` is throttled by
+  the kernel's pty buffer instead of the mailbox. Its Sync claim, with the
+  reason, is in `msg.hpp`.
+
+jaal's banlist runs over hand (`concurrency_src`, `concurrency_include_hand`).
+`std::thread`, `mutex`, `atomic`, `detach`, `thread_local`, `async`,
+`future` and `const_cast` are allowed only where `tests/allow_raw_*.txt`
+grants them, each with a reason:
+- the Windows ConPTY spawner and pipe-drain threads (joined);
+- the one atomic inside `OutputCredit`;
+- `exec`'s `char* const argv[]`.
+
+The `_allowlist_tight` tests fail when a grant is no longer used, so the
+lists can only shrink.
+
+## Layers inside hand
 
 ```
             ┌──────────── hand (src/main.cpp + src/cli/) ────────────┐
@@ -23,8 +82,9 @@ fix one of them in the same commit.
             │ Term (toe glue), Pty, procs, shell integration,        │
             │ the OS seam, Palette, vocabulary types (types.hpp)     │
             └────────────────────────────────────────────────────────┘
-                   every layer may use: mayag, toe, vibe, std
-                   no layer may use:    jaal (mayag's implementation)
+                   every layer may use: toe, vibe, std, and mayag's public
+                   headers (core: <mayag/core/event.hpp> only, no runtime)
+                   no layer may use:    jaal, mayag internals
 ```
 
 Each layer is a static library that links only what is below it
@@ -174,25 +234,27 @@ Messages follow the same rules:
 ## Rules
 
 1. **Layering.** Include only downward. A lower layer gets what it needs as a
-   parameter. Never include jaal.
-2. **One domain per file.** A file holds one domain's handlers (or one
+   parameter. hand → mayag (public headers) → jaal, never around.
+2. **No raw concurrency.** Use a task, a stream, or a `CoOwned<Sync T>`. A
+   raw primitive needs a grant in `tests/allow_raw_*.txt` with its reason.
+3. **One domain per file.** A file holds one domain's handlers (or one
    widget-tree branch, one run mode) and starts with a comment saying what it
    owns.
-3. **State is typed data.** Use a sub-model struct per feature and
+4. **State is typed data.** Use a sub-model struct per feature and
    `optional` for modes. No `bool` beside the data it guards.
-4. **No magic values in messages.** Ids are `Strong`, directions are `Step`,
+5. **No magic values in messages.** Ids are `Strong`, directions are `Step`,
    choices are enums, and alternatives are variants.
-5. **Changes are named.** Input decides; `update` changes. No anonymous model
+6. **Changes are named.** Input decides; `update` changes. No anonymous model
    edits in the app or view (enforced by `layering`).
-6. **Effects are returned.** `update` mutates the model and returns a `Cmd`:
+7. **Effects are returned.** `update` mutates the model and returns a `Cmd`:
    clipboard, title, window actions, tasks. Threads exist only as mayag
    streams and tasks (`Sub::stream`, `Task`).
-7. **The UI is mayag.** View code composes widgets with theme tokens. A new
+8. **The UI is mayag.** View code composes widgets with theme tokens. A new
    visual is a mayag widget.
-8. **Every behaviour has a check.** `hand --headless` (ctest `app_headless`)
+9. **Every behaviour has a check.** `hand --headless` (ctest `app_headless`)
    drives the app like a user. Add an `ok(...)` for every fix. Screens are
    reproducible with `hand --png out.png --shot NAME`.
-9. **Zero warnings.** hand builds with `-Wall -Wextra -Wshadow -Wconversion`,
+10. **Zero warnings.** hand builds with `-Wall -Wextra -Wshadow -Wconversion`,
    and a new warning is a bug.
 
 ## Run modes (`src/cli/`)
@@ -217,5 +279,5 @@ in `checks/suites.hpp`, add a file, and list it in `selftest.cpp`.
 
 ```sh
 cmake -S . -B build && cmake --build build --target hand -j8
-cd build && ctest --timeout 120      # app_headless + layering
+cd build && ctest --timeout 120      # the self-test and every wall (ctest -L static: walls only)
 ```

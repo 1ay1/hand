@@ -23,8 +23,12 @@
 // or bool. jaal routes the tree to update(Model&, Leaf) and refuses to compile
 // a leaf nobody handles. A leaf converts implicitly into Msg (the domain
 // accepting it is unique), so `return NewTab{};` works everywhere.
+//
+// Every message crosses threads (a pty reader, a task, the loop), so the
+// whole tree is checked Sendable at the bottom of this file.
 
 #include <hand/app/model.hpp>
+#include <hand/core/credit.hpp>
 #include <hand/core/types.hpp>
 
 #include <mayag/mayag.hpp>
@@ -35,10 +39,18 @@
 #include <variant>
 #include <vector>
 
+// Every member of OutputCredit (core/credit.hpp) is one atomic load/store or
+// one syscall on a pipe (POSIX) / event (Windows) that the OS makes
+// thread-safe, and only its reader thread waits on it: any thread may call
+// any member at any time. That is what CoOwned<OutputCredit> needs.
+MAYAG_SYNC(hand::OutputCredit);
+
 namespace hand::msg {
 
 // ── the shells ─────────────────────────────────────────────────────────────
-struct Output { std::string bytes; SessionId sid = kNoSession; };   ///< a pty printed something
+/// A pty printed something. `credit` is the reader's flow control: the UI
+/// gives it back once the bytes are fed, and only then does the next chunk come.
+struct Output { std::string bytes; SessionId sid = kNoSession; std::optional<mayag::CoOwned<OutputCredit>> credit; };
 struct Exited { int code = 0; SessionId sid = kNoSession; };        ///< a pty's program ended
 using ShellMsg = std::variant<Output, Exited>;
 
@@ -211,3 +223,8 @@ struct Any : AnyBase {
 };
 
 }  // namespace hand::msg
+
+// The proof, at compile time: every message may move between threads (it
+// holds nothing the sender can still reach). A borrowed pointer, a view or a
+// shared_ptr in any leaf fails the build here, naming the culprit.
+static_assert(mayag::Sendable<hand::msg::Any>, "a hand message holds something borrowed");

@@ -1,0 +1,25 @@
+# tests/allow_raw_{src,include_hand}.txt — the ONLY places in hand that may use a raw concurrency
+# primitive (or const_cast), and which ones. Checked by jaal's own banlist
+# (external/mayag/third_party/jaal/tests/lint/banlist.cmake), run over src/
+# and include/hand/ by ctest `concurrency`. A line that is no longer needed
+# fails `concurrency_allowlist_tight`, so this list cannot rot.
+#
+# Everything else -- the whole app, view, config, ssh and cli -- gets NOTHING:
+# background work is a mayag task or stream (Sendable arguments, a weak Sink
+# back), shared state is a mayag CoOwned<T> of a Sync T. Each grant below is a
+# claim a human checked, with the reason beside it.
+
+# Windows ConPTY: CreateProcess for a pseudoconsole runs off the UI thread
+# (it can block on the console host), one spawner per session slot, joined
+# before its slot is reused; g_mu guards the slot table those threads write.
+core/pty_win.cpp: thread mutex
+
+# Windows proc::run: stdout and stderr drained on two threads so a child that
+# fills one pipe can't deadlock on the other; both joined before return.
+core/proc_win.cpp: thread
+
+# POSIX exec* takes char* const argv[]; the strings outlive the call and exec
+# never writes them. The C API's signature, not a mutation.
+core/pty.cpp: const_cast
+core/proc_posix.cpp: const_cast
+

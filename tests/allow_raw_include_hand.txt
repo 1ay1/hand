@@ -1,0 +1,14 @@
+# tests/allow_raw_{src,include_hand}.txt — the ONLY places in hand that may use a raw concurrency
+# primitive (or const_cast), and which ones. Checked by jaal's own banlist
+# (external/mayag/third_party/jaal/tests/lint/banlist.cmake), run over src/
+# and include/hand/ by ctest `concurrency`. A line that is no longer needed
+# fails `concurrency_allowlist_tight`, so this list cannot rot.
+#
+# Everything else -- the whole app, view, config, ssh and cli -- gets NOTHING:
+# background work is a mayag task or stream (Sendable arguments, a weak Sink
+# back), shared state is a mayag CoOwned<T> of a Sync T. Each grant below is a
+# claim a human checked, with the reason beside it.
+
+# The flow-control token every pty reader shares with the UI: one atomic flag
+# and a waker; app/msg.hpp makes its Sync claim. It IS the safe type the app uses.
+core/credit.hpp: atomic

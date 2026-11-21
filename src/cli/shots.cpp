@@ -20,10 +20,6 @@
 #include <hand/config/schemes_gen.hpp>
 #include <hand/ssh/sftp.hpp>
 
-#include <mayag/backend/tiled.hpp>
-#ifdef MAYAG_WITH_VULKAN
-#include <mayag/backend/vulkan.hpp>
-#endif
 
 #include <algorithm>
 #include <array>

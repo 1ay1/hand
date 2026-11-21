@@ -2,13 +2,13 @@
 
 #include "detail.hpp"
 
+#include <hand/core/credit.hpp>
 #include <hand/core/pty.hpp>
 
 #include <mayag/widget/ssh.hpp>
 #include <mayag/widget/terminal/window.hpp>
 
 #include <algorithm>
-#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <cmath>
@@ -17,10 +17,8 @@
 #include <cstring>
 #include <ctime>
 #include <memory>
-#include <mutex>
 #include <hand/core/platform.hpp>
 #include <thread>
-#include <unordered_map>
 
 namespace hand::detail {
 
@@ -265,47 +263,6 @@ bool tail_wanted(const Model& m) {
 }
 
 /// The pty reader: one background stream per shell (see detail.hpp).
-namespace {
-
-/// One shell's credit: is a chunk on its way to the UI? The loop returns it
-/// by signalling `wake`, so the reader sleeps in ONE wait on the pty and the
-/// credit together -- no spinning, no missed wakeups. Keyed by session id so
-/// only the id rides in messages. plat::Waker is a self-pipe on POSIX and an
-/// event on Windows; the loop below does not care which.
-struct Flow {
-    plat::Waker wake;   // the reader waits on it, pty_fed signals it
-    std::atomic<bool> in_flight{false};
-    Flow() = default;
-    Flow(const Flow&) = delete;
-    Flow& operator=(const Flow&) = delete;
-};
-
-std::mutex g_flows_mu;
-std::unordered_map<SessionId, std::shared_ptr<Flow>> g_flows;
-
-std::shared_ptr<Flow> flow_open(SessionId sid) {
-    auto f = std::make_shared<Flow>();
-    const std::lock_guard lk(g_flows_mu);
-    g_flows[sid] = f;
-    return f;
-}
-void flow_close(SessionId sid, const std::shared_ptr<Flow>& f) {
-    const std::lock_guard lk(g_flows_mu);
-    if (const auto it = g_flows.find(sid); it != g_flows.end() && it->second == f) g_flows.erase(it);
-}
-
-}  // namespace
-
-void pty_fed(SessionId sid) {
-    if (sid == kNoSession) return;
-    const std::lock_guard lk(g_flows_mu);   // held: the pipe can't close under us
-    const auto it = g_flows.find(sid);
-    if (it == g_flows.end()) return;
-    Flow& f = *it->second;
-    f.in_flight.store(false, std::memory_order_release);
-    f.wake.signal();   // already pending: the signal simply collapses
-}
-
 void read_pty(Sink<App::Msg> out, std::stop_token st, int fd, int pid, SessionId sid) {
     // Pipelined: while one chunk is with the UI the reader keeps draining the
     // pty into the next, so the producer never stalls on the (tiny, ~1 KB on
@@ -317,8 +274,7 @@ void read_pty(Sink<App::Msg> out, std::stop_token st, int fd, int pid, SessionId
     // that frame is late the reader piles up an even bigger next one -- a
     // feedback loop that ran a `yes` flood down to 8 fps.
     constexpr std::size_t kSlice = 512u << 10;
-    const auto flow = flow_open(sid);
-    struct Close { SessionId sid; const std::shared_ptr<Flow>& f; ~Close() { flow_close(sid, f); } } closer{sid, flow};
+    auto credit = mayag::CoOwned<OutputCredit>::make();   // this reader's, shared with the UI through each Output
     std::string buf;
     bool alive = true;
     const auto ship = [&] {
@@ -331,16 +287,16 @@ void read_pty(Sink<App::Msg> out, std::stop_token st, int fd, int pid, SessionId
             chunk.assign(buf, 0, n);
             buf.erase(0, n);
         }
-        flow->in_flight.store(true, std::memory_order_release);
-        if (!out.send(App::Output{std::move(chunk), sid})) flow->in_flight.store(false, std::memory_order_release);
+        credit->spend();
+        if (!out.send(App::Output{std::move(chunk), sid, credit})) credit->refund();
     };
     while (!st.stop_requested()) {
-        const bool busy = flow->in_flight.load(std::memory_order_acquire);
+        const bool busy = !credit->free();
         if (!busy && !buf.empty()) { ship(); continue; }
         if (!alive) {
             if (busy) {   // the last output lands before the exit
-                (void)plat::wait_readable(flow->wake, -1, 50);
-                flow->wake.drain();
+                (void)credit->wait(-1, 50);
+                credit->settle();
                 continue;
             }
             int code = -1;
@@ -354,9 +310,9 @@ void read_pty(Sink<App::Msg> out, std::stop_token st, int fd, int pid, SessionId
         const bool room = buf.size() < kCap;
         // 50 ms: stop is always prompt. pty = -1 while back-pressured, so a
         // stalled reader waits only on the credit, never on the pty.
-        const plat::Ready r = plat::wait_readable(flow->wake, room ? pty_handle(fd) : -1, 50);
+        const plat::Ready r = credit->wait(room ? pty_handle(fd) : -1, 50);
         if (r.error) { alive = false; continue; }
-        if (r.woke) flow->wake.drain();
+        if (r.woke) credit->settle();
         if (room && r.data) alive = pty_read(fd, buf, 0);
         // A quiet pty: ask whether the child is gone. On POSIX a dead child
         // breaks the pty (r.data, then EOF above); a ConPTY pipe stays open

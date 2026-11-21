@@ -77,13 +77,11 @@ bool in_corner(const Model& m, mayag::Vec2 p);
 bool tail_wanted(const Model& m);
 /// The pty reader: a background stream for as long as the shell lives.
 /// Coalesces bursts (cat of a big file) into one Output per wakeup, and keeps
-/// ONE in flight: it reads on only once the UI has fed the last chunk
-/// (pty_fed). So a firehose (`yes`) is throttled by the kernel's pty buffer
+/// ONE in flight: it reads on only once the UI has fed the last chunk (the
+/// Output carries an OutputCredit; update gives it back). So a firehose (`yes`) is throttled by the kernel's pty buffer
 /// -- the producer blocks -- instead of piling gigabytes into the mailbox,
 /// starving frames and parking ctrl-C behind seconds of queued output.
 void read_pty(Sink<App::Msg> out, std::stop_token st, int fd, int pid, SessionId sid);
-/// The UI has fed shell `sid`'s last chunk: its reader may send the next.
-void pty_fed(SessionId sid);
 /// How far below its row the grid is drawn (0..1): a scroll glide between rows
 /// plus the glide of a freshly arrived line at the live prompt.
 float draw_frac(const Model& m);

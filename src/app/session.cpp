@@ -193,7 +193,11 @@ void feed_background(Model& m, std::size_t i, const std::string& bytes) {
 }  // namespace
 
 App::Cmd App::update(Model& m, Output o) {
-    struct Credit { SessionId sid; ~Credit() { detail::pty_fed(sid); } } credit{o.sid};   // fed: the reader may send the next
+    // fed (whatever happens below): the reader may send the next chunk
+    struct GiveBack {
+        std::optional<mayag::CoOwned<OutputCredit>>& c;
+        ~GiveBack() { if (c) (*c)->give_back(); }
+    } give_back{o.credit};
     if (o.sid != kNoSession && o.sid != m.tab().sid) {   // a background tab (or a shell already gone)
         if (const auto i = m.tabs.find(o.sid)) feed_background(m, *i, o.bytes);
         return {};
