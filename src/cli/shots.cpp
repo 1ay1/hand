@@ -257,7 +257,7 @@ if (shot.rfind("files", 0) == 0) {   // the file pane beside a shell in this rep
     if (!here.empty() && here[0] != '/') here = "/" + here;
     if (shot == "files-right") rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) { m.cfg.files_left = false; }}});
     rt.send(hand::App::Msg{hand::App::Output{"\x1b]7;file://localhost" + here + "\a\x1b]133;A\a\x1b[1;34m~/src/hand\x1b[0m \x1b[35m\u276F\x1b[0m \x1b]133;B\agit status -s\r\n\x1b]133;C\a"
-        " M src/app/input.cpp\r\n M src/view/window.cpp\r\n?? src/app/pane.cpp\r\n\x1b]133;D;0\a"
+        " M src/app/input_keys.cpp\r\n M src/view/window.cpp\r\n?? src/app/pane.cpp\r\n\x1b]133;D;0\a"
         "\x1b]133;A\a\x1b[1;34m~/src/hand\x1b[0m \x1b[35m\u276F\x1b[0m \x1b]133;B\a"}});
     rt.tick();
     rt.press_key(mayag::Key::e, mayag::Mods{.shift = true, .ctrl = true});

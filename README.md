@@ -1,10 +1,31 @@
 # hand
 
 A terminal. As plain as foot: open it and you get a shell, nothing in the
-way. Tabs, search, hints, copy mode and SSH are there when you reach for them.
+way. Tabs, search, hints, copy mode, a file pane and SSH are there when you
+reach for them.
+
+![hand: the file pane beside a shell](docs/img/files.png)
 
 Built on [toe](external/toe) (the VT engine), [mayag](external/mayag) (the
-GPU UI) and [vibe](external/vibe) (the config format).
+GPU UI) and [vibe](external/vibe) (the config format). Linux (Wayland), macOS
+and Windows.
+
+- **Knows your shell.** Prompts are marked, so a failed command gets a red
+  mark in the gutter. You can jump prompt to prompt, copy a command's whole
+  output, and see a running command's timer in a sticky header.
+- **Asks before it hurts.** A multi-line or risky paste (`sudo`, `rm -rf`,
+  `curl | sh`, control characters) shows every line first, flagged. Closing
+  a tab or the window while something runs asks too. Both are configurable.
+- **SSH without leaving.** A picker and a full host manager read
+  `~/.ssh/config` the way ssh does. They show folders, live tunnels and
+  remote files, and a dropped connection keeps its tab.
+- **Everything is a setting.** `ctrl+,` edits all of them live, from a table
+  that also writes `hand.vibe`.
+
+| | |
+|---|---|
+| ![the paste guard](docs/img/paste.png) | ![settings](docs/img/settings-panel.png) |
+| ![the SSH host manager](docs/img/manager.png) | |
 
 ## Keys
 
@@ -17,7 +38,8 @@ terminal.
 | `ctrl+tab`, `ctrl+pgup/pgdn`, `ctrl+shift+←/→` | previous / next tab |
 | `alt+1` … `alt+9` | go to tab N |
 | `ctrl+shift+pgup/pgdn` | move the tab |
-| `ctrl+shift+s` | SSH hosts |
+| `ctrl+shift+s` / `h` | SSH picker / host manager |
+| `ctrl+shift+e` | the file pane (follows the shell's directory) |
 | `ctrl+shift+f` | search the scrollback |
 | `ctrl+shift+space` | hints: pick a URL / path / hash on screen |
 | `ctrl+shift+m` | copy mode (vim keys through the scrollback) |
@@ -58,5 +80,18 @@ cmake --build build --target hand
 ./build/hand --png out.png --shot tabs    # a screenshot (tabs, settings, hosts, ssh, ...)
 ```
 
-How the code is laid out (layers, the model and message trees, the type
-rules) is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+## How it is built
+
+One Elm-style program. The state is plain typed data, every event is one
+leaf of a closed tree of message types, and `update` is the only place state
+changes. The code is in four layers, each a library that can only include
+the ones below it:
+
+```
+core ◀─ config ◀─┐
+core ◀─ ssh    ◀─┴─ app (update, input, view) ◀─ hand (main, run modes)
+```
+
+`ctest` runs the headless self-test (218 checks, real shells on real ptys)
+and the `layering` lint, which fails on an upward include or an anonymous
+model edit. The details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
