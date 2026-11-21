@@ -27,8 +27,7 @@ App::Sub App::subscribe(const Model& m) {
     // every tab's shell keeps running: one reader per session, keyed by its id
     for (std::size_t i = 0; i < m.tab_count(); ++i) {
         const Session& se = m.at(i);
-        if (se.pty) s.push_back(Sub::stream("pty." + std::to_string(se.sid.get()), read_pty, se.pty->fd(),
-                                            static_cast<int>(se.pty->pid()), se.sid));
+        if (se.pty) s.push_back(Sub::stream("pty." + std::to_string(se.sid.get()), read_pty, se.pty.share(), se.sid));
     }
     if (m.tab_count() > 1) s.push_back(Sub::every(std::chrono::milliseconds(1000), Msg{Clock{}}));   // activity sparklines
     // the host manager's live tunnel status: who listens on each -L / -D port

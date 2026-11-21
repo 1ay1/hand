@@ -26,7 +26,7 @@ void tui_mouse([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& 
     // A real program on a real pty: `hand --cat-v` goes raw and shows
     // every byte it is sent, so the test reads what the app received.
     // Using our own binary keeps this identical on every platform.
-    auto pty = std::make_shared<hand::Pty>();
+    const auto pty = hand::PtyRef::make();
     const bool up = pty->spawn(rt.model().tab().term->cols(), rt.model().tab().term->rows(),
                                hand::self_exe(), {}, {"--cat-v"});
     std::string got;

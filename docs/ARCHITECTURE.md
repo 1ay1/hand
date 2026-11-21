@@ -278,6 +278,6 @@ in `checks/suites.hpp`, add a file, and list it in `selftest.cpp`.
 ## Build and test
 
 ```sh
-cmake -S . -B build && cmake --build build --target hand -j8
+cmake --preset dev && cmake --build --preset dev     # build-rel: --preset rel, build-tsan: --preset tsan
 cd build && ctest --timeout 120      # the self-test and every wall (ctest -L static: walls only)
 ```

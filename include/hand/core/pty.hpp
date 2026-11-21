@@ -50,6 +50,11 @@ class Pty {
 
     [[nodiscard]] int fd() const noexcept { return fd_; }
     [[nodiscard]] pid_t pid() const noexcept { return pid_; }
+    /// The child's exit code if it has exited (and reap it), else -1.
+    /// Called only by the one reader thread that watches this pty. Once it
+    /// returns >= 0 the destructor leaves the pid alone: the OS may already
+    /// have given that number to another process.
+    int reap();
 
     /// Write all of `bytes` (retries on EINTR/EAGAIN, bounded).
     void write(std::string_view bytes) const;
@@ -60,6 +65,7 @@ class Pty {
   private:
     int   fd_ = -1;
     pid_t pid_ = -1;
+    bool  reaped_ = false;   ///< written by reap() (the reader), read only by ~Pty, after every owner let go
 };
 
 /// Block until `fd` has data or `timeout_ms` passes; read what is there.

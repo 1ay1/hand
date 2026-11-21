@@ -31,7 +31,7 @@ namespace hand {
 
 Pty::~Pty() {
     if (fd_ >= 0) ::close(fd_);
-    if (pid_ > 0) {
+    if (pid_ > 0 && !reaped_) {
         ::kill(pid_, SIGHUP);
         (void)::waitpid(pid_, nullptr, WNOHANG);
     }
@@ -125,6 +125,13 @@ bool pty_read(int fd, std::string& out, int timeout_ms) {
 
 /// On POSIX the fd IS the waitable object; nothing to translate.
 std::intptr_t pty_handle(int fd) { return fd; }
+
+int Pty::reap() {
+    if (reaped_) return -1;
+    const int code = pty_reap(pid_);
+    if (code >= 0) reaped_ = true;
+    return code;
+}
 
 int pty_reap(pid_t pid) {
     int status = 0;

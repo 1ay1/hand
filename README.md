@@ -74,7 +74,7 @@ regenerate the catalogue with `tools/gen_schemes.py`.
 ```sh
 git submodule update --init --recursive
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --target hand
+cmake --build build --target hand -j12
 ./build/hand                              # the terminal
 ./build/hand --headless --last-resort     # the self-test (also: ctest)
 ./build/hand --png out.png --shot tabs    # a screenshot (tabs, settings, hosts, ssh, ...)

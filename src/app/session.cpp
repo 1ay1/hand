@@ -110,7 +110,7 @@ App::Session App::spawn_session(Model& m, const std::string& cwd) {
     se.term = std::make_shared<Term>(std::max(m.metrics.fit_cols, 2), std::max(m.metrics.fit_rows, 1), m.palette,
                                      static_cast<int>(m.cfg.scrollback));
     if (m.cfg.demo) return se;
-    se.pty = std::make_shared<Pty>();
+    se.pty = PtyRef::make();
     // `-e CMD`: a bare program runs as is; a command line (arguments, pipes)
     // goes through sh -c, the way every terminal's -e behaves
     const bool cmdline = !m.cfg.shell_cli.empty() && m.cfg.shell_cli.find_first_of(" \t|;&<>$'\"") != std::string::npos;

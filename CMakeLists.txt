@@ -8,8 +8,31 @@ cmake_minimum_required(VERSION 3.24)
 project(hand VERSION 0.1.0 LANGUAGES C CXX
         DESCRIPTION "A terminal you set up by looking at it")
 
+# Build types: Dev (the default) is for the edit-build-test loop. hand's own
+# files compile at -O0 (a header edit rebuilds ~45 of them: optimising each
+# was ~80% of the time), while everything hot stays at -O2: toe, and mayag's
+# code -- compiled ONCE into the PCH's object (see HAND_PCH), which every hand
+# file links to. So the app still runs at speed. Release / RelWithDebInfo
+# are for shipping and the benchmarks (--bench, --flood): build-rel.
+# (CMake caches an EMPTY flags entry for a build type it doesn't know, so an
+# empty value is filled in rather than respected.)
+foreach(lang C CXX)
+    if(NOT CMAKE_${lang}_FLAGS_DEV)
+        set(CMAKE_${lang}_FLAGS_DEV "-O0 -g1 -DNDEBUG" CACHE STRING "${lang} flags for Dev builds" FORCE)
+    endif()
+endforeach()
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "" FORCE)
+    set(CMAKE_BUILD_TYPE Dev CACHE STRING "" FORCE)
+endif()
+# Never recompile what was compiled before, and link fast, when the tools exist.
+find_program(HAND_CCACHE ccache)
+if(HAND_CCACHE AND NOT CMAKE_CXX_COMPILER_LAUNCHER)
+    set(CMAKE_C_COMPILER_LAUNCHER ${HAND_CCACHE})
+    set(CMAKE_CXX_COMPILER_LAUNCHER ${HAND_CCACHE})
+endif()
+find_program(HAND_MOLD mold)
+if(HAND_MOLD AND NOT CMAKE_LINKER_TYPE)
+    set(CMAKE_LINKER_TYPE MOLD)
 endif()
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -39,6 +62,9 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/toe/CMakeLists.txt")
     message(FATAL_ERROR "hand: external/toe is missing. Run: git submodule update --init --recursive")
 endif()
 add_subdirectory(external/toe)
+if(CMAKE_BUILD_TYPE STREQUAL "Dev")
+    target_compile_options(toe PRIVATE -O2)   # the VT parser is the hot path; it is rebuilt rarely
+endif()
 
 # ── vibe: the config format (https://github.com/1ay1/vibe), one C file ────
 if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/vibe/vibe.h")
@@ -87,6 +113,72 @@ file(GLOB HAND_CLI CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/cli/*.cpp $
 add_executable(hand src/main.cpp ${HAND_CLI})   # main + its run modes (src/cli)
 target_link_libraries(hand PRIVATE hand_app)
 target_compile_options(hand PRIVATE ${HAND_WARNINGS})
+
+# ── build speed: one precompiled header ──────────────────────────────────────────────────────────
+# mayag is header-only and big: without this, every app/view/cli file parses
+# and instantiates all of it again (60-120 s each). The PCH holds ONLY what
+# hand doesn't edit -- mayag, toe, the standard library -- so changing a hand
+# header never invalidates it; it rebuilds only when mayag or toe change.
+option(HAND_PCH "Precompile mayag/toe/std for hand's app and cli" ON)
+set(HAND_PCH_HEADERS
+    mayag/mayag.hpp mayag/core/event.hpp
+    mayag/widget/file_pane.hpp mayag/widget/marks.hpp mayag/widget/resize_hud.hpp
+    mayag/widget/scrollback_bar.hpp mayag/widget/settings_panel.hpp mayag/widget/ssh_forward.hpp
+    mayag/widget/ssh.hpp mayag/widget/ssh_manager.hpp mayag/widget/tab_strip.hpp
+    mayag/widget/term_dialog.hpp mayag/widget/term_search.hpp mayag/widget/toast.hpp
+    mayag/widget/terminal_view.hpp mayag/widget/terminal/cursor_fx.hpp mayag/widget/terminal/history.hpp
+    mayag/widget/terminal/overlays.hpp mayag/widget/terminal/remote.hpp mayag/widget/terminal/window.hpp
+    toe/input/keymap.hpp toe/term/update.hpp
+    algorithm array chrono cmath cstdint cstdio cstdlib cstring filesystem
+    map memory optional span string string_view thread unordered_map utility variant vector)
+if(HAND_PCH AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    # clang: the PCH also carries mayag's CODE (-fpch-codegen), compiled and
+    # optimised ONCE into hand_pch_code.o; every hand file links to it instead
+    # of re-optimising its own copy (that was ~80% of a 60-120 s file).
+    set(_hdr ${CMAKE_CURRENT_BINARY_DIR}/hand_pch/hand_pch.hxx)
+    set(_body "")
+    foreach(h ${HAND_PCH_HEADERS})
+        string(APPEND _body "#include <${h}>\n")
+    endforeach()
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/hand_pch)
+    file(CONFIGURE OUTPUT ${_hdr} CONTENT "${_body}")
+    add_library(hand_pch OBJECT ${_hdr})
+    set_source_files_properties(${_hdr} PROPERTIES LANGUAGE CXX)
+    target_link_libraries(hand_pch PRIVATE mayag::mayag toe::toe)
+    target_compile_options(hand_pch PRIVATE -x c++-header -fpch-instantiate-templates -fpch-codegen
+                                            "SHELL:-Xclang -fno-pch-timestamp")
+    string(TOUPPER "${CMAKE_BUILD_TYPE}" _cfg)
+    separate_arguments(_opt UNIX_COMMAND "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${_cfg}}")
+    if(_cfg STREQUAL "DEV")
+        list(APPEND _opt -O2)   # mayag's code, compiled once: always optimised (the last -O wins)
+    endif()
+    set(_pch ${CMAKE_CURRENT_BINARY_DIR}/hand_pch/hand.pch)
+    set(_code ${CMAKE_CURRENT_BINARY_DIR}/hand_pch/hand_pch_code.o)
+    add_custom_command(
+        OUTPUT ${_code}
+        COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_OBJECTS:hand_pch> ${_pch}
+        COMMAND ${CMAKE_CXX_COMPILER_LAUNCHER} ${CMAKE_CXX_COMPILER} ${_opt} -c ${_pch} -o ${_code}
+        DEPENDS hand_pch $<TARGET_OBJECTS:hand_pch>
+        COMMENT "hand: compiling the PCH's shared code once"
+        VERBATIM)
+    add_custom_target(hand_pch_code DEPENDS ${_code})
+    set_source_files_properties(${_code} PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE)
+    foreach(t hand_app hand)
+        add_dependencies(${t} hand_pch_code)
+        target_compile_options(${t} PRIVATE "SHELL:-include-pch $<TARGET_OBJECTS:hand_pch>")
+    endforeach()
+    target_sources(hand PRIVATE ${_code})
+    # ccache caches PCH users only with these
+    if(CMAKE_CXX_COMPILER_LAUNCHER MATCHES "ccache")
+        set_property(TARGET hand_pch hand_app hand PROPERTY CXX_COMPILER_LAUNCHER
+                     ${CMAKE_COMMAND} -E env "CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime" ccache)
+    endif()
+elseif(HAND_PCH)
+    list(TRANSFORM HAND_PCH_HEADERS PREPEND "<")
+    list(TRANSFORM HAND_PCH_HEADERS APPEND ">")
+    target_precompile_headers(hand_app PRIVATE ${HAND_PCH_HEADERS})
+    target_precompile_headers(hand REUSE_FROM hand_app)
+endif()
 
 # ── the OS seam ───────────────────────────────────────────────────────────────────────────
 # The pty is the only part of hand that is not portable C++: forkpty lives in

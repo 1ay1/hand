@@ -102,15 +102,6 @@ std::shared_ptr<typo::FontStack> load_fonts(bool system) {
 }
 
 /// A screen exercising colours, attributes and wide glyphs, for --png/--headless.
-constexpr std::string_view kDemo =
-    "\x1b[1;32m~/src/hand\x1b[0m \x1b[35mmain\x1b[0m \x1b[2m+2\x1b[0m\r\n"
-    "\x1b[1;34m❯\x1b[0m ls --color\r\n"
-    "\x1b[1;34minclude\x1b[0m  \x1b[1;34msrc\x1b[0m  CMakeLists.txt  \x1b[32mbuild.sh\x1b[0m\r\n"
-    "\x1b[1;34m❯\x1b[0m printf colours\r\n"
-    "\x1b[30;40m  \x1b[41m  \x1b[42m  \x1b[43m  \x1b[44m  \x1b[45m  \x1b[46m  \x1b[47m  \x1b[0m\r\n"
-    "\x1b[1mbold\x1b[0m \x1b[3mitalic\x1b[0m \x1b[4munderline\x1b[0m \x1b[4:3;58:5:1mcurly\x1b[0m "
-    "\x1b[9mstrike\x1b[0m \x1b[7mreverse\x1b[0m \x1b[38;2;255;121;198mtruecolor\x1b[0m 漢字 ✓\r\n"
-    "\x1b[1;34m❯\x1b[0m ";
 
 }  // namespace
 
@@ -180,14 +171,8 @@ int main(int argc, char** argv) {
         };
     switch (mode) {
         case Mode::window: return mayag::run<hand::App>(std::move(ac));
-        case Mode::headless:
-        case Mode::png:
-            return mayag::run_headless<hand::App>(std::move(ac), [&](auto& rt) {
-                rt.send(hand::App::Msg{hand::App::Output{std::string{kDemo}}});
-                rt.tick();
-                if (mode == Mode::headless) return hand::cli::selftest(rt, size);
-                return hand::cli::shoot(rt, size, shot, out);
-            });
+        case Mode::headless: return hand::cli::run_scripted(std::move(ac), size, {});
+        case Mode::png: return hand::cli::run_scripted(std::move(ac), size, hand::cli::Shot{shot, out});
     }
     return 0;
 }

@@ -263,7 +263,11 @@ bool tail_wanted(const Model& m) {
 }
 
 /// The pty reader: one background stream per shell (see detail.hpp).
-void read_pty(Sink<App::Msg> out, std::stop_token st, int fd, int pid, SessionId sid) {
+void read_pty(Sink<App::Msg> out, std::stop_token st, mayag::CoOwned<Pty> pty, SessionId sid) {
+    // This reader co-owns the pty: the fd stays open until it returns, even
+    // if the tab is closed under it (the stream is then stopped, and the
+    // last owner out closes the fd).
+    const int fd = pty->fd();
     // Pipelined: while one chunk is with the UI the reader keeps draining the
     // pty into the next, so the producer never stalls on the (tiny, ~1 KB on
     // macOS) pty buffer; only when that next chunk is full (kCap) does it
@@ -301,7 +305,7 @@ void read_pty(Sink<App::Msg> out, std::stop_token st, int fd, int pid, SessionId
             }
             int code = -1;
             for (int i = 0; i < 20 && code < 0; ++i) {   // bounded: ≤ ~200 ms
-                code = pty_reap(static_cast<pid_t>(pid));
+                code = pty->reap();
                 if (code < 0) std::this_thread::sleep_for(std::chrono::milliseconds(10));
             }
             out.send(App::Exited{std::max(code, 0), sid});
@@ -363,7 +367,7 @@ void start_ssh(Model& m, Session& se, const Host& h) {
     se.link.connected_at = m.time;
     se.link.dropped = false;
     if (m.cfg.demo) return;
-    se.pty = std::make_shared<Pty>();
+    se.pty = PtyRef::make();
     const auto argv = ssh_argv(h, m.ssh.book, {.multiplex = m.cfg.ssh_multiplex, .keepalive = m.cfg.ssh_keepalive});
     if (!se.pty->spawn(m.metrics.fit_cols, m.metrics.fit_rows, "ssh", {},
                        std::vector<std::string>{argv.begin() + 1, argv.end()}, {})) {

@@ -18,13 +18,41 @@
 #include <string>
 #include <vector>
 
+// Threads share ONE Pty (CoOwned): the tab writes and resizes it, its reader
+// reads and reaps it. Every member is a syscall on an fd the kernel makes
+// thread-safe (write / ioctl / read / waitpid), fd_ and pid_ are set by
+// spawn() before the pty is shared and never change, and reaped_ is written
+// by the one reader and read only in ~Pty, after every owner let go.
+MAYAG_SYNC(hand::Pty);
+
 namespace hand {
+
+/// A tab's pty, owned JOINTLY by the tab and its reader thread. The fd is
+/// closed (and the child hung up) only when the last of them lets go, so a
+/// tab closed mid-read can never leave the reader on a closed -- or reused --
+/// fd. Empty when the tab has no shell (it ended, or ssh dropped).
+class PtyRef {
+  public:
+    PtyRef() = default;
+    explicit PtyRef(mayag::CoOwned<Pty> p) : p_(std::move(p)) {}
+    /// A pty for a new tab, not yet spawned.
+    [[nodiscard]] static PtyRef make() { return PtyRef{mayag::CoOwned<Pty>::make()}; }
+    [[nodiscard]] Pty* operator->() const noexcept { return &p_->get(); }
+    [[nodiscard]] Pty& operator*() const noexcept { return p_->get(); }
+    explicit operator bool() const noexcept { return p_.has_value(); }
+    void reset() noexcept { p_.reset(); }
+    /// Another owner, for the reader thread.
+    [[nodiscard]] mayag::CoOwned<Pty> share() const { return *p_; }
+
+  private:
+    std::optional<mayag::CoOwned<Pty>> p_;
+};
 
 /// One tab: a shell on a pty, the screen toe keeps for it, and everything
 /// that animates over it. Lives in Tabs; the window never holds one itself.
 struct Session {
     SessionId               sid = kNoSession;     ///< stable id: routes pty output, keys the stream
-    std::shared_ptr<Pty>    pty;
+    PtyRef                  pty;
     std::shared_ptr<Term>   term;
     std::string             title = "hand";       ///< OSC 0/2
     std::string             name;                 ///< a name the user gave the tab ("" = automatic)

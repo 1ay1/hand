@@ -29,6 +29,12 @@ using Runtime = mayag::headless_app<App>;
 /// Stage `shot`, render one frame, write it to `out` (bench / flood print stats).
 [[nodiscard]] int shoot(Runtime& rt, mayag::Vec2 size, const std::string& shot, const std::string& out);
 
+/// A screenshot request: the scene and the file it goes to.
+struct Shot { std::string name; std::string out; };
+/// The scripted modes on a headless runtime showing the demo screen: the
+/// self-test (no shot) or one shot. Returns the exit code.
+[[nodiscard]] int run_scripted(mayag::AppConfig ac, mayag::Vec2 size, std::optional<Shot> shot);
+
 /// Has the cursor's motion (and its particles) come to rest?
 [[nodiscard]] inline bool motion_settled(const App::Model& m) { return motion::tail_settled(m.tab().fx, m.tab().cur_x, m.tab().cur_y); }
 
