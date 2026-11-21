@@ -89,6 +89,7 @@ struct Session {
     float                   sel_edge = 0.0f;      ///< selection drag past an edge scrolls (rows/s, + = up)
     mayag::Vec2             sel_pos{};
     int                     sel_clicks = 0;       ///< 1 plain, 2 word, 3 line
+    mayag::Vec2             sel_down{};           ///< where the press was (terminal coords): a drag must leave it
     float                   tail_t = 0.0f;        ///< the live tail, 0..1 (eased)
     float                   sticky_t = 0.0f;      ///< the sticky command header, 0..1 (eased)
     float                   cur_a = 1.0f;         ///< the cursor's opacity: the blink, faded

@@ -150,7 +150,7 @@ void selection(std::vector<Node>& layers, const Ctx& c, const Model& m, const Te
                                             .lift = tail_h}));
     }
     m.sel_chip = Rect{};
-    if (cfg.sel_toolbar && si.any && !m.selecting && !m.copy && !m.term->alt_screen()) {
+    if (cfg.sel_toolbar && si.any && si.chars > 0 && !m.selecting && !m.copy && !m.term->alt_screen()) {
         const std::string text = si.lines == 1 ? m.term->selection_text() : std::string{};
         const bool openable = !text.empty() && text.find(' ') == std::string::npos &&
                               (text.find("://") != std::string::npos || text.rfind("www.", 0) == 0 || text[0] == '/' || text[0] == '~');

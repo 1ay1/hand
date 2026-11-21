@@ -1119,6 +1119,20 @@ int main(int argc, char** argv) {
                         for (int i = 0; i < 2; ++i) rt.tick();
                         ok(!rt.model().term->has_selection() && rt.model().sel_chip.size.x == 0.0f,
                            "a single click selects nothing and shows no toolbar");
+                        const auto none = [&] { return !rt.model().term->has_selection() && rt.model().sel_chip.size.x == 0.0f; };
+                        ev(mayag::MouseDown{at(30, 5), mayag::MouseButton::left, {}, 1});   // empty space below the prompt
+                        ev(mayag::MouseMove{at(36, 5), {}, {}});
+                        ev(mayag::MouseUp{at(36, 5), mayag::MouseButton::left, {}});
+                        for (int i = 0; i < 2; ++i) rt.tick();
+                        ok(none(), "dragging over blank space selects nothing (no '1L 0ch' toolbar)");
+                        {
+                            const Vec2 a = at(2, 1), b{a.x + 0.6f * cw, a.y + 1.0f};   // a wobble that crosses a cell edge
+                            ev(mayag::MouseDown{a, mayag::MouseButton::left, {}, 1});
+                            ev(mayag::MouseMove{b, {}, {}});
+                            ev(mayag::MouseUp{b, mayag::MouseButton::left, {}});
+                            for (int i = 0; i < 2; ++i) rt.tick();
+                            ok(none(), "a click that wobbles a few pixels selects nothing");
+                        }
                         ev(mayag::MouseDown{at(1, 1), mayag::MouseButton::left, {}, 1});
                         ev(mayag::MouseMove{at(4, 1), {}, {}});
                         ev(mayag::MouseUp{at(4, 1), mayag::MouseButton::left, {}});

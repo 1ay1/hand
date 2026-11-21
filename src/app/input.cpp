@@ -354,6 +354,7 @@ std::optional<App::Msg> App::on(const Model& m, const MouseDown& e_win) {
             mm.term->select_begin(col, row, n, block);   // alt+drag: a rectangle
             mm.selecting = true;
             mm.sel_clicks = block ? 0 : n;
+            mm.sel_down = p;
             mm.sel_pos = p;
             mm.sel_edge = 0.0f;
         }};
@@ -434,12 +435,15 @@ std::optional<App::Msg> App::on(const Model& m, const MouseUp& e_win) {
         return E{[b = std::move(bytes)](Model& mm) { mm.mouse_button = -1; if (mm.pty && !b.empty()) mm.pty->write(b); }};
     }
     if (m.selecting) {
-        // a plain click that never left its cell selects nothing: no highlight, no toolbar, no copy
-        if (m.sel_clicks == 1) {
-            const auto si = m.term->selection_info();
-            if (si.any && si.r0 == si.r1 && si.c0 == si.c1)
-                return E{[](Model& mm) { mm.term->select_clear(); mm.selecting = false; mm.sel_edge = 0.0f; mm.sel_clicks = 0; }};
-        }
+        // a click that selected no text -- it never left its cell, jittered by a
+        // pixel, or landed on blank space -- selects nothing: no highlight, no
+        // toolbar, no copy
+        const auto si = m.term->selection_info();
+        const float dx = e.position.x - m.sel_down.x, dy = e.position.y - m.sel_down.y;
+        const float slop = std::max(6.0f, 0.75f * m.metrics.cell_w);   // hand jitter, not a drag
+        const bool still = dx * dx + dy * dy < slop * slop;
+        if (si.any && (si.chars == 0 || (m.sel_clicks == 1 && (still || (si.r0 == si.r1 && si.c0 == si.c1)))))
+            return E{[](Model& mm) { mm.term->select_clear(); mm.selecting = false; mm.sel_edge = 0.0f; mm.sel_clicks = 0; }};
         if (m.cfg.copy_on_select) return Copy{};
         return E{[](Model& mm) { mm.selecting = false; mm.sel_edge = 0.0f; }};
     }
