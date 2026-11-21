@@ -51,21 +51,41 @@ For example, `ssh::resolve(HostSources)` gets its `store` path from the app
 ### Model: a tree of plain typed data
 
 ```
-Model : Session                     the active tab IS the model's terminal
-├── cfg, palette, metrics, …        window-wide
-├── tabs, active, session_ids       parked sessions, SessionIds hands out ids
+Model                               the window
+├── cfg, palette, metrics, time, …  window-wide
+├── tabs       Tabs                 every Session, in strip order    model/tabs.hpp
+├── session_ids SessionIds          hands out each new tab's id
 ├── strip      StripModel           ┐
-├── minimap    MinimapModel         │ include/hand/app/model/chrome.hpp
+├── minimap    MinimapModel         │ model/chrome.hpp
 ├── settings   SettingsModel        │
 ├── dialog     DialogModel          │
 ├── toast      ToastModel           ┘
-├── ssh        SshModel{sources, book, picker, manager}   model/ssh.hpp
-└── pane       PaneModel                                  model/pane.hpp
-Session                             one tab: pty, term, scroll, selection
+├── ssh        SshModel{sources, book, picker, manager}             model/ssh.hpp
+└── pane       PaneModel                                            model/pane.hpp
+
+Session                             one tab: pty, term, scroll, selection, motion   model/session.hpp
 ├── copy       optional<CopyMode>   ┐ model/modes.hpp: engaged exactly
 ├── hint       optional<HintMode>   │ while the mode is on
-└── remote     optional<Remote>     ┘
+└── remote     optional<Host>       ┘
 ```
+
+The window is not a tab. `m.tab()` is the one in front; `m.at(i)` is any.
+`Tabs` keeps two invariants by construction: it is never empty, and the tab
+in front stays in front while others are inserted, closed or moved around it
+(`insert`, `erase`, `move_active`, `select`, `find(SessionId)`). Handlers say
+what they mean, and the self-test suite `tab_list` checks the invariants.
+
+A handler that works on the front tab binds it once:
+
+```cpp
+App::Cmd App::update(Model& m, ScrollToLine s) {
+    Session& se = m.tab();
+    ...
+}
+```
+
+A handler that may switch, open or close tabs keeps saying `m.tab()`, because
+a reference taken before that would point at the wrong tab or at freed memory.
 
 A feature's state lives in its own struct, in its own header. A mode that may
 be absent is an `optional`, never a `bool` next to its data.

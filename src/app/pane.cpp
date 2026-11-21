@@ -56,11 +56,12 @@ struct Place {
 
 /// Where the active tab's shell is.
 Place place_of(const Model& m) {
+    const Session& se = m.tab();
     Place p;
-    const auto& r = remote_of(m);
-    const std::string osc_host = m.term ? m.term->cwd_host() : std::string{};
-    const std::string osc_dir = m.term ? m.term->cwd() : std::string{};
-    if (r && !m.link.dropped) {
+    const auto& r = remote_of(m.tab());
+    const std::string osc_host = se.term ? se.term->cwd_host() : std::string{};
+    const std::string osc_dir = se.term ? se.term->cwd() : std::string{};
+    if (r && !se.link.dropped) {
         p.where = r->alias;
         p.host = m.ssh.book.find(r->alias) ? *m.ssh.book.find(r->alias) : *r;
         // a remote shell's OSC 7 names its own host; a stale local one does not count
@@ -460,8 +461,8 @@ App::Cmd App::update(Model& m, PaneOp p) {
     };
     // typing into the shell is only safe at its prompt
     const auto at_prompt = [&] {
-        if (!m.pty) return false;
-        if (m.term->alt_screen()) { toast("the shell is busy", "a full-screen program has the terminal", Toast::Kind::info); return false; }
+        if (!m.tab().pty) return false;
+        if (m.tab().term->alt_screen()) { toast("the shell is busy", "a full-screen program has the terminal", Toast::Kind::info); return false; }
         return true;
     };
     for (auto& a : std::exchange(m.pane.ui.out, {})) {
@@ -482,7 +483,7 @@ App::Cmd App::update(Model& m, PaneOp p) {
             }
             case A::Kind::cd:
                 if (!at_prompt()) break;
-                m.pty->write(cd_command(m, a.path) + "\r");
+                m.tab().pty->write(cd_command(m, a.path) + "\r");
                 m.pane.follow = true;   // the shell goes there; the pane goes with it
                 m.pane.followed = a.path;
                 if (m.pane.path != a.path) cmds.push_back(pane_list(m, a.path));
@@ -490,7 +491,7 @@ App::Cmd App::update(Model& m, PaneOp p) {
                 break;
             case A::Kind::paste:
                 if (!at_prompt()) break;
-                m.pty->write(shell_quote(m, a.path) + " ");
+                m.tab().pty->write(shell_quote(m, a.path) + " ");
                 m.pane.ui.focused = false;
                 break;
             case A::Kind::copy_path:

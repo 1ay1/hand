@@ -77,7 +77,7 @@ App::Cmd App::update(Model& m, Answer a) {
     if (yes && asked.remember) remember(m, asked.kind);
     switch (asked.kind) {
         case Ask::Kind::paste: {
-            std::string text = std::exchange(m.pending_paste, {});
+            std::string text = std::exchange(m.tab().pending_paste, {});
             if (!yes) return {};
             if (action == std::to_underlying(PasteAction::one_line)) text = one_line(text);
             return update(m, Pasted{std::move(text), Confirm::given});

@@ -33,17 +33,17 @@ void tabs([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& ok) {
     const auto settle = [&] { for (int i = 0; i < 60; ++i) rt.tick(); };
     settle();
     ok(rt.model().tab_count() == 1 && rt.model().strip_h() == 0.0f, "one tab: no strip, like foot");
-    const int rows1 = rt.model().term->rows();
+    const int rows1 = rt.model().tab().term->rows();
     rt.send(hand::App::Msg{hand::App::Output{std::string{"\x1b[2J\x1b[HTAB-ONE"}}});
     rt.press_key(K::t, Mods{.shift = true, .ctrl = true});
     settle();
-    ok(rt.model().tab_count() == 2 && rt.model().active == 1, "ctrl+shift+t opens a tab and switches to it");
+    ok(rt.model().tab_count() == 2 && rt.model().active() == 1, "ctrl+shift+t opens a tab and switches to it");
     ok(rt.model().strip_h() > 30.0f && rt.node_rect(dsl::node_id("tabs")).has_value(), "the tab strip slides in");
-    ok(rt.model().term->rows() < rows1, "and every grid refits below it");
+    ok(rt.model().tab().term->rows() < rows1, "and every grid refits below it");
     rt.send(hand::App::Msg{hand::App::Output{std::string{"\x1b[2J\x1b[HTAB-TWO"}}});
     const auto top = [&] {   // the whole visible screen, as one string
         std::string s0;
-        const auto g = rt.model().term->snapshot();
+        const auto g = rt.model().tab().term->snapshot();
         for (const auto& l : g.lines) for (const auto& c : l.cells) s0 += c.text;
         return s0;
     };
@@ -51,7 +51,7 @@ void tabs([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& ok) {
     ok(has("TAB-TWO") && !has("TAB-ONE"), "the new tab has its own screen");
     rt.press_key(K::tab, Mods{.ctrl = true});
     settle();
-    ok(rt.model().active == 0 && has("TAB-ONE") && !has("TAB-TWO"), "ctrl+tab switches back, screen intact");
+    ok(rt.model().active() == 0 && has("TAB-ONE") && !has("TAB-TWO"), "ctrl+tab switches back, screen intact");
     // output for a background tab lands there, and marks it
     const hand::SessionId bg = rt.model().tabs[1].sid;
     rt.send(hand::App::Msg{hand::App::Output{std::string{"\r\nbackground!"}, bg}});
@@ -59,15 +59,15 @@ void tabs([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& ok) {
     ok(rt.model().tabs[1].unread && !has("background!"), "background output goes to its tab and marks it unread");
     rt.press_key(K::n2, Mods{.alt = true});
     settle();
-    ok(rt.model().active == 1 && !rt.model().unread, "alt+2 jumps to it, and it is read");
+    ok(rt.model().active() == 1 && !rt.model().tab().unread, "alt+2 jumps to it, and it is read");
     rt.press_key(K::t, Mods{.shift = true, .ctrl = true});
     settle();
     rt.press_key(K::page_up, Mods{.shift = true, .ctrl = true});
     settle();
-    ok(rt.model().tab_count() == 3 && rt.model().active == 1, "ctrl+shift+pgup moves the tab left");
+    ok(rt.model().tab_count() == 3 && rt.model().active() == 1, "ctrl+shift+pgup moves the tab left");
     rt.click(dsl::part_id("tabs", 0));
     settle();
-    ok(rt.model().active == 0, "clicking a tab selects it");
+    ok(rt.model().active() == 0, "clicking a tab selects it");
     ok(rt.model().strip.motion.pill.ready(), "the active pill tracks it");
     {   // the marker: aligned with its tab, and elastic on the way
         using E6 = mayag::Edit<hand::App::Model>;
@@ -141,7 +141,7 @@ void tabs([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& ok) {
     ok(rt.model().tab_count() == 2, "ctrl+shift+w closes the tab");
     rt.send(hand::App::Msg{hand::App::CloseTab{hand::TabIndex{1}}});
     settle();
-    ok(rt.model().tab_count() == 1 && rt.model().strip_h() == 0.0f && rt.model().term->rows() == rows1,
+    ok(rt.model().tab_count() == 1 && rt.model().strip_h() == 0.0f && rt.model().tab().term->rows() == rows1,
        "back to one tab: the strip slides away and the grid gets its rows back");
     {
         // ── no system title bar (the default): the strip IS the title area ──

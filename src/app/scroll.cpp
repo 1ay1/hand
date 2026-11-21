@@ -36,37 +36,40 @@ App::Cmd App::update(Model& m, ScrollTop) {
 }
 
 App::Cmd App::update(Model& m, ScrollToPrompt s) {
-    const auto i = m.term->scroll_info();
+    Session& se = m.tab();
+    const auto i = se.term->scroll_info();
     const float want = static_cast<float>(i.total - i.visible) - static_cast<float>(std::max<std::int64_t>(s.prompt_row - 1, 0));
-    scroll_by(m, std::clamp(want, 0.0f, static_cast<float>(m.term->history())) - m.scroll_goal);
+    scroll_by(m, std::clamp(want, 0.0f, static_cast<float>(se.term->history())) - se.scroll_goal);
     return {};
 }
 
 App::Cmd App::update(Model& m, ScrollToLine s) {
-    const auto i = m.term->scroll_info();
-    scroll_by(m, static_cast<float>(i.total - i.visible - s.line) - m.scroll_goal);
+    const auto i = m.tab().term->scroll_info();
+    scroll_by(m, static_cast<float>(i.total - i.visible - s.line) - m.tab().scroll_goal);
     return {};
 }
 
 App::Cmd App::update(Model& m, JumpPrompt j) {
+    Session& se = m.tab();
     // from where the scroll is HEADING, so quick presses chain prompt to prompt
-    m.term->set_scroll_offset(static_cast<int>(std::lround(m.scroll_goal)));
-    m.scroll_applied = m.term->scroll_offset();
-    (void)m.term->jump_prompt(delta(j.step));
-    const int to = m.term->scroll_offset();
-    m.term->set_scroll_offset(static_cast<int>(std::floor(m.scroll_d)));
-    m.scroll_applied = m.term->scroll_offset();
-    scroll_by(m, static_cast<float>(to) - m.scroll_goal);
+    se.term->set_scroll_offset(static_cast<int>(std::lround(se.scroll_goal)));
+    se.scroll_applied = se.term->scroll_offset();
+    (void)se.term->jump_prompt(delta(j.step));
+    const int to = se.term->scroll_offset();
+    se.term->set_scroll_offset(static_cast<int>(std::floor(se.scroll_d)));
+    se.scroll_applied = se.term->scroll_offset();
+    scroll_by(m, static_cast<float>(to) - se.scroll_goal);
     return {};
 }
 
 App::Cmd App::update(Model& m, ClearScrollback) {
-    (void)m.term->feed("\x1b[H\x1b[2J\x1b[3J");
-    m.scroll_goal = 0.0f;
-    m.scroll_d = 0.0f;
-    m.scroll_applied = 0;
-    m.grid_key = 0;
-    if (m.pty) m.pty->write("\x0c");   // the shell redraws its prompt
+    Session& se = m.tab();
+    (void)se.term->feed("\x1b[H\x1b[2J\x1b[3J");
+    se.scroll_goal = 0.0f;
+    se.scroll_d = 0.0f;
+    se.scroll_applied = 0;
+    se.grid_key = 0;
+    if (se.pty) se.pty->write("\x0c");   // the shell redraws its prompt
     return {};
 }
 

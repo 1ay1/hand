@@ -66,8 +66,8 @@ TermTabInfo tab_info(const Model& m, std::size_t i) {
         ti.host_danger = se.link.dropped || (m.cfg.ssh_prod_guard && remote_env(m, *r) == HostEnv::prod);
         if (se.link.launched) ti.process = "ssh";
     }
-    ti.unread = se.unread && i != m.active;
-    ti.bell = se.bell && i != m.active;
+    ti.unread = se.unread && i != m.active();
+    ti.bell = se.bell && i != m.active();
     ti.activity = se.activity;
     if (last) {
         ti.running = !last->finished;
@@ -88,7 +88,7 @@ Node tabs(const Ctx& c, const Model& m, float height) {
     infos.reserve(m.tab_count());
     for (std::size_t i = 0; i < m.tab_count(); ++i) infos.push_back(tab_info(m, i));
     const Config& cfg = m.cfg;
-    return tab_strip(c, "tabs", infos, static_cast<int>(m.active), &m.strip.motion, m.time,
+    return tab_strip(c, "tabs", infos, static_cast<int>(m.active()), &m.strip.motion, m.time,
                      {.show_numbers = m.strip.show_numbers,
                       .max_tab = cfg.tab_width, .min_tab = std::min(96.0f, cfg.tab_width),
                       .height = height,

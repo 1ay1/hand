@@ -15,65 +15,71 @@ namespace hand {
 // ── the selection ──────────────────────────────────────────────────────────
 
 App::Cmd App::update(Model& m, SelectBegin s) {
+    Session& se = m.tab();
     const bool block = s.shape == SelectShape::block;
-    m.term->select_begin(s.col, s.row, s.clicks, block);   // alt+drag: a rectangle
-    m.selecting = true;
-    m.sel_clicks = block ? 0 : s.clicks;
-    m.sel_down = s.at;
-    m.sel_pos = s.at;
-    m.sel_edge = 0.0f;
+    se.term->select_begin(s.col, s.row, s.clicks, block);   // alt+drag: a rectangle
+    se.selecting = true;
+    se.sel_clicks = block ? 0 : s.clicks;
+    se.sel_down = s.at;
+    se.sel_pos = s.at;
+    se.sel_edge = 0.0f;
     return {};
 }
 
 App::Cmd App::update(Model& m, SelectExtend s) {
-    m.term->select_extend(s.col, s.row);
-    if (s.how == Extend::shift_click) m.selecting = true;
-    m.sel_pos = s.at;
-    m.sel_edge = s.edge;
+    Session& se = m.tab();
+    se.term->select_extend(s.col, s.row);
+    if (s.how == Extend::shift_click) se.selecting = true;
+    se.sel_pos = s.at;
+    se.sel_edge = s.edge;
     return {};
 }
 
 App::Cmd App::update(Model& m, SelectOutput s) {
-    m.term->select_abs(s.first, 0, s.last, m.term->cols() - 1, 1);
-    m.selecting = false;
+    Session& se = m.tab();
+    se.term->select_abs(s.first, 0, s.last, se.term->cols() - 1, 1);
+    se.selecting = false;
     return {};
 }
 
 App::Cmd App::update(Model& m, SelectEnd s) {
     if (s.ending == SelectEnding::discard) {   // a click, not a selection
-        m.term->select_clear();
-        m.sel_clicks = 0;
+        m.tab().term->select_clear();
+        m.tab().sel_clicks = 0;
     } else if (m.cfg.copy_on_select) {
         return update(m, Copy{});
     }
-    m.selecting = false;
-    m.sel_edge = 0.0f;
+    m.tab().selecting = false;
+    m.tab().sel_edge = 0.0f;
     return {};
 }
 
 App::Cmd App::update(Model& m, SelectClear) {
-    m.term->select_clear();
+    m.tab().term->select_clear();
     return {};
 }
 
 // ── mouse reporting ────────────────────────────────────────────────────────
 
 App::Cmd App::update(Model& m, ReportPress r) {
-    m.mouse_button = r.button;
-    if (m.pty) m.pty->write(r.bytes);
+    Session& se = m.tab();
+    se.mouse_button = r.button;
+    if (se.pty) se.pty->write(r.bytes);
     return {};
 }
 
 App::Cmd App::update(Model& m, ReportMotion r) {
-    m.mouse_cell_col = r.col;
-    m.mouse_cell_row = r.row;
-    if (m.pty && !r.bytes.empty()) m.pty->write(r.bytes);
+    Session& se = m.tab();
+    se.mouse_cell_col = r.col;
+    se.mouse_cell_row = r.row;
+    if (se.pty && !r.bytes.empty()) se.pty->write(r.bytes);
     return {};
 }
 
 App::Cmd App::update(Model& m, ReportRelease r) {
-    m.mouse_button = -1;
-    if (m.pty && !r.bytes.empty()) m.pty->write(r.bytes);
+    Session& se = m.tab();
+    se.mouse_button = -1;
+    if (se.pty && !r.bytes.empty()) se.pty->write(r.bytes);
     return {};
 }
 
@@ -82,8 +88,8 @@ App::Cmd App::update(Model& m, ReportRelease r) {
 App::Cmd App::update(Model& m, HoverLink h) {
     m.ctrl_held = h.armed;
     const bool none = h.url.empty();
-    m.hover_url = std::move(h.url);
-    (void)m.term->hover(none ? -1 : h.col, none ? -1 : h.row);
+    m.tab().hover_url = std::move(h.url);
+    (void)m.tab().term->hover(none ? -1 : h.col, none ? -1 : h.row);
     return {};
 }
 
@@ -96,7 +102,7 @@ App::Cmd App::update(Model& m, MinimapHover h) {
 App::Cmd App::update(Model& m, PointerLeft) {
     m.minimap.open = false;
     m.minimap.hover_y = -1.0f;
-    m.hover_url.clear();
+    m.tab().hover_url.clear();
     return {};
 }
 

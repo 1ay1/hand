@@ -27,14 +27,14 @@ void tui_mouse([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& 
     // every byte it is sent, so the test reads what the app received.
     // Using our own binary keeps this identical on every platform.
     auto pty = std::make_shared<hand::Pty>();
-    const bool up = pty->spawn(rt.model().term->cols(), rt.model().term->rows(),
+    const bool up = pty->spawn(rt.model().tab().term->cols(), rt.model().tab().term->rows(),
                                hand::self_exe(), {}, {"--cat-v"});
     std::string got;
     // the app's own pty reader feeds the echo into the terminal:
     // read it back from the screen
     const auto scrape = [&] {
         got.clear();
-        const auto g = rt.model().term->snapshot();
+        const auto g = rt.model().tab().term->snapshot();
         for (const auto& l : g.lines) for (const auto& c : l.cells) got += c.text;
     };
     // Wait for what we EXPECT rather than for a fixed time: a
@@ -52,16 +52,16 @@ void tui_mouse([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& 
     };
     rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[pty](hand::App::Model& mm) {
         mm.dialog.ask.reset(); mm.dialog.t = 0.0f; mm.settings.open = false; mm.ssh.picker.open = false;
-        mm.selecting = false; mm.mouse_button = -1; mm.pty = pty; }}});
+        mm.tab().selecting = false; mm.tab().mouse_button = -1; mm.tab().pty = pty; }}});
     for (int i = 0; i < 30; ++i) rt.tick();   // any closing overlay is gone
     drain_until(2000, "ready");
-    ok(up && rt.model().term->mouse_reporting(), "a TUI turns on any-motion mouse tracking");
+    ok(up && rt.model().tab().term->mouse_reporting(), "a TUI turns on any-motion mouse tracking");
     const float top = rt.model().strip_h(), cw = rt.model().metrics.cell_w, chh = rt.model().metrics.cell_h;
     const float ox = rt.model().metrics.origin_x, oy = rt.model().metrics.origin_y + top;
     const auto at = [&](int c, int r) {
         return mayag::Vec2{ox + (static_cast<float>(c) + 0.5f) * cw, oy + (static_cast<float>(r) + 0.5f) * chh};
     };
-    (void)rt.model().term->feed("\x1b[2J\x1b[H");   // a clean screen: only what the moves send
+    (void)rt.model().tab().term->feed("\x1b[2J\x1b[H");   // a clean screen: only what the moves send
     rt.window().move_to(at(10, 5));
     rt.tick();
     rt.window().move_to(at(10, 5) + mayag::Vec2{1.0f, 1.0f});   // the same cell: not reported again
@@ -72,7 +72,7 @@ void tui_mouse([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& 
     const auto count = [&](std::string_view s) { std::size_t n = 0; for (auto p = got.find(s); p != std::string::npos; p = got.find(s, p + 1)) ++n; return n; };
     ok(count("^[[<35;11;6M") == 1 && count("^[[<35;13;7M") == 1,
        "hovering reports buttonless motion, once per cell (SGR 35)");
-    (void)rt.model().term->feed("\x1b[2J\x1b[H");
+    (void)rt.model().tab().term->feed("\x1b[2J\x1b[H");
     rt.window().press(at(3, 3));
     rt.tick();
     rt.window().move_to(at(5, 3));
@@ -83,9 +83,9 @@ void tui_mouse([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& 
     ok(got.find("^[[<0;4;4M") != std::string::npos && got.find("^[[<32;6;4M") != std::string::npos &&
        got.find("^[[<0;6;4m") != std::string::npos, "press, drag and release reach the program at the cells under the pointer");
     rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& mm) {
-        if (mm.pty) mm.pty->write("\x04");   // cat exits
-        mm.pty.reset(); mm.mouse_cell_col = mm.mouse_cell_row = -1; }}});
-    (void)rt.model().term->feed("\x1b[?1003l\x1b[?1006l\x1b[2J\x1b[H");
+        if (mm.tab().pty) mm.tab().pty->write("\x04");   // cat exits
+        mm.tab().pty.reset(); mm.tab().mouse_cell_col = mm.tab().mouse_cell_row = -1; }}});
+    (void)rt.model().tab().term->feed("\x1b[?1003l\x1b[?1006l\x1b[2J\x1b[H");
     rt.tick();
 }
 

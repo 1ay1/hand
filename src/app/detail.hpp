@@ -98,7 +98,7 @@ FontFamily family_of(const Config& c);
 // mechanics shared by several update files
 /// Run ssh to `h` as `se`'s program (its terminal keeps whatever it shows).
 void start_ssh(Model& m, Session& se, const Host& h);
-/// Park the active session in its slot, bring slot `i` into the Model.
+/// Bring tab `i` to the front.
 void activate(Model& m, std::size_t i);
 /// Bytes to the active pty (snaps the view live, wakes the cursor).
 std::optional<App::Msg> send(std::string bytes);

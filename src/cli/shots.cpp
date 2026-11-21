@@ -76,7 +76,7 @@ if (shot == "bench") {
                     what, total, view / N, cascade / N, layout / N, paint / N, render / N);
     };
     std::printf("hand frame pipeline (%dx%d, %d cols x %d rows)\n", static_cast<int>(size.x), static_cast<int>(size.y),
-                rt.model().term->cols(), rt.model().term->rows());
+                rt.model().tab().term->cols(), rt.model().tab().term->rows());
     run("typing (a char/frame)", [&](int i) { rt.send(hand::App::Msg{hand::App::Output{std::string(1, static_cast<char>('a' + i % 26))}}); });
     run("streaming (a line/frame)", [&](int i) { rt.send(hand::App::Msg{hand::App::Output{"line " + std::to_string(i) + " \x1b[33mwarning\x1b[0m: something\r\n"}}); });
     run("scrolling history", [&](int i) { rt.window().scroll(Vec2{400.0f, 300.0f}, Vec2{0.0f, (i / 30) % 2 ? -48.0f : 48.0f}); });
@@ -102,7 +102,7 @@ if (shot == "bench") {
         }
         const double total = std::chrono::duration<double, std::milli>(clk::now() - t0).count();
         std::printf("  %-26s %6.3f ms/MB   (feed %.3f, worst frame %.2f ms, %.0f MB/s, history %d)\n", "yes (1 MB/frame)",
-                    total / N, feed / N, worst, N * 1000.0 / total, rt.model().term->history());
+                    total / N, feed / N, worst, N * 1000.0 / total, rt.model().tab().term->history());
     }
     return 0;
 }
@@ -110,7 +110,7 @@ if (shot == "flood") {   // a real shell running a firehose: frames keep coming,
     using clk = std::chrono::steady_clock;
     const auto rss_mb = [] { return static_cast<double>(hand::plat::peak_rss()) / (1024.0 * 1024.0); };
     const auto t0 = clk::now();
-    double worst = 0; int frames = 0; std::uint64_t b0 = rt.model().bytes;
+    double worst = 0; int frames = 0; std::uint64_t b0 = rt.model().tab().bytes;
     const double dur = std::getenv("HAND_FLOOD_S") ? std::atof(std::getenv("HAND_FLOOD_S")) : 4.0;
     while (clk::now() - t0 < std::chrono::duration<double>(dur)) {
         const auto a = clk::now();
@@ -120,20 +120,20 @@ if (shot == "flood") {   // a real shell running a firehose: frames keep coming,
         ++frames;
     }
     const double secs = std::chrono::duration<double>(clk::now() - t0).count();
-    const double mbps = static_cast<double>(rt.model().bytes - b0) / (1024.0 * 1024.0) / secs;
+    const double mbps = static_cast<double>(rt.model().tab().bytes - b0) / (1024.0 * 1024.0) / secs;
     rt.press_key(mayag::Key::c, mayag::Mods{.ctrl = true});
     const auto c0 = clk::now();
-    std::uint64_t last = rt.model().bytes; auto quiet_since = clk::now();
+    std::uint64_t last = rt.model().tab().bytes; auto quiet_since = clk::now();
     while (clk::now() - c0 < std::chrono::seconds(5) && clk::now() - quiet_since < std::chrono::milliseconds(300)) {
         rt.settle([](const auto&) { return false; }, std::chrono::milliseconds(16));   // one vsync of real time
         rt.tick();
-        if (rt.model().bytes != last) { last = rt.model().bytes; quiet_since = clk::now(); }
+        if (rt.model().tab().bytes != last) { last = rt.model().tab().bytes; quiet_since = clk::now(); }
     }
     const double stop_ms = std::chrono::duration<double, std::milli>(quiet_since - c0).count();
-    if (rt.model().pty) {
-        const int pid = static_cast<int>(rt.model().pty->pid());
+    if (rt.model().tab().pty) {
+        const int pid = static_cast<int>(rt.model().tab().pty->pid());
         std::printf("flood: child %d %s, fg pgrp %d, history %d, offset %d\n", pid, hand::pty_reap(pid) < 0 ? "ALIVE" : "gone",
-                    static_cast<int>(hand::pty_foreground(rt.model().pty->fd())), rt.model().term->history(), rt.model().term->scroll_offset());
+                    static_cast<int>(hand::pty_foreground(rt.model().tab().pty->fd())), rt.model().tab().term->history(), rt.model().tab().term->scroll_offset());
     }
     std::printf("flood: %d frames in %.1fs (%.0f fps), worst frame %.1f ms, %.0f MB/s through toe, peak rss %.0f MB, ctrl-C quiet after %.0f ms\n",
                 frames, secs, frames / secs, worst, mbps, rss_mb(), stop_ms);
@@ -162,7 +162,7 @@ if (shot == "cool" || shot == "hints") {
     rt.tick();
     if (shot == "hints") rt.press_key(mayag::Key::space, mayag::Mods{.shift = true, .ctrl = true});
     else rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) {
-        m.cur_known = true; m.cur_x = 3.0f; m.cur_y = 3.0f; }}});   // the comet, mid-flight
+        m.tab().cur_known = true; m.tab().cur_x = 3.0f; m.tab().cur_y = 3.0f; }}});   // the comet, mid-flight
 }
 if (shot == "scrollback") {
     std::string s = "\x1b[2J\x1b[H";
@@ -178,8 +178,8 @@ if (shot == "scrollback") {
     rt.tick();
     rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) {
         hand::App::scroll_by(m, 40.0f);
-        m.scroll_d = 39.5f; m.scroll_applied = 39; m.term->set_scroll_offset(39);   // caught mid-glide
-        m.new_below = 0; m.sticky_t = 1.0f; m.clock = 3; }}});
+        m.tab().scroll_d = 39.5f; m.tab().scroll_applied = 39; m.tab().term->set_scroll_offset(39);   // caught mid-glide
+        m.tab().new_below = 0; m.tab().sticky_t = 1.0f; m.clock = 3; }}});
 }
 if (shot == "minimap") {
     std::string s;
@@ -206,10 +206,10 @@ if (shot == "minimap") {
     rt.send(hand::App::Msg{hand::App::Output{std::move(s)}});
     rt.tick();
     rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) {
-        (void)m.term->search("FAILED");
-        m.term->set_scroll_offset(120); m.scroll_d = m.scroll_goal = 120.0f; m.scroll_applied = 120;
+        (void)m.tab().term->search("FAILED");
+        m.tab().term->set_scroll_offset(120); m.tab().scroll_d = m.tab().scroll_goal = 120.0f; m.tab().scroll_applied = 120;
         m.minimap.open = true; m.minimap.width = 96.0f;
-        m.tail_t = 1.0f; m.new_below = 3; }}});
+        m.tab().tail_t = 1.0f; m.tab().new_below = 3; }}});
     if (std::getenv("HAND_PEEK"))
         rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) {
             m.minimap.hover_y = std::strtof(std::getenv("HAND_PEEK"), nullptr); m.minimap.peek_t = 1.0f; }}});
@@ -234,22 +234,22 @@ if (shot.rfind("fx-", 0) == 0) {
     const bool comet = shot == "fx-comet";
     rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[k, smear, comet](hand::App::Model& m) {
         m.cfg.cursor_fx = static_cast<hand::CursorFx>(k);
-        if (comet) { m.cfg.cursor_anim = hand::CursorAnim::glide; m.cfg.cursor_trail = 4.0f; m.cur_known = true;
-                     const auto cc = m.term->cursor(); m.cur_x = static_cast<float>(cc.col) + 1.5f; m.cur_y = static_cast<float>(cc.row);
-                     m.fx.tx = 38.0f; m.fx.ty = 1.0f; m.focused = true; return; }
-        if (smear) { m.cfg.cursor_anim = hand::CursorAnim::smear; m.cur_known = true; m.fx.tx = 34.0f; m.fx.ty = 2.0f; m.focused = true; return; }
+        if (comet) { m.cfg.cursor_anim = hand::CursorAnim::glide; m.cfg.cursor_trail = 4.0f; m.tab().cur_known = true;
+                     const auto cc = m.tab().term->cursor(); m.tab().cur_x = static_cast<float>(cc.col) + 1.5f; m.tab().cur_y = static_cast<float>(cc.row);
+                     m.tab().fx.tx = 38.0f; m.tab().fx.ty = 1.0f; m.focused = true; return; }
+        if (smear) { m.cfg.cursor_anim = hand::CursorAnim::smear; m.tab().cur_known = true; m.tab().fx.tx = 34.0f; m.tab().fx.ty = 2.0f; m.focused = true; return; }
         const float cw = m.metrics.cell_w, ch = m.metrics.cell_h;
-        const auto cur = m.term->cursor();
+        const auto cur = m.tab().term->cursor();
         const float cx = m.metrics.origin_x + (static_cast<float>(cur.col) + 0.5f) * cw;
         const float cy = m.metrics.origin_y + (static_cast<float>(cur.row) + 0.5f) * ch;
-        hand::motion::emit(m.fx, m.cfg.cursor_fx, cx, cy, cw, 0.0f, cw, ch, true, m.palette);
-        hand::motion::emit(m.fx, m.cfg.cursor_fx, cx, cy, cw, 0.0f, cw, ch, true, m.palette);
+        hand::motion::emit(m.tab().fx, m.cfg.cursor_fx, cx, cy, cw, 0.0f, cw, ch, true, m.palette);
+        hand::motion::emit(m.tab().fx, m.cfg.cursor_fx, cx, cy, cw, 0.0f, cw, ch, true, m.palette);
         if (k == 6)   // torpedo: the puffs it leaves along a flight from the right
             for (int i = 0; i < 14; ++i) {
-                hand::motion::travel(m.fx, m.cfg.cursor_fx, cx + static_cast<float>(i) * cw * 1.6f, cy, ch, m.palette);
-                hand::motion::step(m.fx, 0.018f);
+                hand::motion::travel(m.tab().fx, m.cfg.cursor_fx, cx + static_cast<float>(i) * cw * 1.6f, cy, ch, m.palette);
+                hand::motion::step(m.tab().fx, 0.018f);
             }
-        hand::motion::step(m.fx, k == 7 ? 0.28f : 0.12f); }}});
+        hand::motion::step(m.tab().fx, k == 7 ? 0.28f : 0.12f); }}});
 }
 if (shot.rfind("files", 0) == 0) {   // the file pane beside a shell in this repo
     std::error_code ec;
@@ -399,7 +399,7 @@ if (shot == "hosts" || shot == "ssh" || shot == "ssh-drop" || shot.rfind("manage
             rt.tick();
         }
         if (shot == "ssh-drop")
-            rt.send(hand::App::Msg{E7{[](hand::App::Model& m) { (void)hand::App::update(m, hand::App::Exited{255, m.sid}); m.link.dropped_at = m.time - 10.0; }}});
+            rt.send(hand::App::Msg{E7{[](hand::App::Model& m) { (void)hand::App::update(m, hand::App::Exited{255, m.tab().sid}); m.tab().link.dropped_at = m.time - 10.0; }}});
         rt.send(hand::App::Msg{E7{[](hand::App::Model& m) { m.strip.t = 1.0f; m.strip.switch_t = 1.0f; hand::App::fit(m); }}});
     }
     for (int i = 0; i < 8; ++i) rt.tick();
@@ -413,14 +413,14 @@ if (shot == "select" || shot == "copymode" || shot == "paste" || shot == "quit")
     rt.tick();
     const std::string which = shot;
     rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[which](hand::App::Model& m) {
-        const std::int64_t r0 = m.term->view_to_abs(0);
-        if (which == "select") m.term->select_abs(r0 + 2, 20, r0 + 2, 43, 0);
+        const std::int64_t r0 = m.tab().term->view_to_abs(0);
+        if (which == "select") m.tab().term->select_abs(r0 + 2, 20, r0 + 2, 43, 0);
         if (which == "copymode") {
-            m.copy = hand::CopyMode{.row = r0 + 3, .col = 6, .visual = hand::CopyMode::Visual::block, .anchor_row = r0 + 1, .anchor_col = 0};
-            m.term->select_abs(r0 + 1, 0, r0 + 3, 6, 2);
+            m.tab().copy = hand::CopyMode{.row = r0 + 3, .col = 6, .visual = hand::CopyMode::Visual::block, .anchor_row = r0 + 1, .anchor_col = 0};
+            m.tab().term->select_abs(r0 + 1, 0, r0 + 3, 6, 2);
         }
         if (which == "paste") {
-            m.pending_paste = "sudo pacman -Syu\nrm -rf build\ncmake --build build\n";
+            m.tab().pending_paste = "sudo pacman -Syu\nrm -rf build\ncmake --build build\n";
             m.dialog.ask = hand::Ask{.kind = hand::Ask::Kind::paste, .focus = 2}; m.dialog.t = 1.0f;
         }
         if (which == "quit") { m.dialog.ask = hand::Ask{.kind = hand::Ask::Kind::quit, .focus = 1}; m.dialog.t = 1.0f; }

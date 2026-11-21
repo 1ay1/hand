@@ -35,6 +35,7 @@ void resize_fish(Runtime& rt, mayag::Vec2 size, Check& ok);   ///< resize never 
 void wide_squeeze(Runtime& rt, mayag::Vec2 size, Check& ok);   ///< wide output squeezed thin and back: no gap above the prompt
 void wrap_spaces(Runtime& rt, mayag::Vec2 size, Check& ok);   ///< a real space at a wrap point survives a rewrap
 void selection(Runtime& rt, mayag::Vec2 size, Check& ok);   ///< selection, copy mode, paste and its guard
+void tab_list(Runtime& rt, mayag::Vec2 size, Check& ok);   ///< Tabs keeps its invariants
 void tabs(Runtime& rt, mayag::Vec2 size, Check& ok);   ///< tabs: open, switch, move, drag, close, background output
 void tui_mouse(Runtime& rt, mayag::Vec2 size, Check& ok);   ///< the mouse in a TUI: hover (1003) and drags (1002)
 void mac(Runtime& rt, mayag::Vec2 size, Check& ok);   ///< the Mac: command shortcuts, the input method

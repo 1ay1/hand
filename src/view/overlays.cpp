@@ -29,9 +29,10 @@ namespace {
 
 /// The paste guard: what is about to be pasted, risky lines flagged.
 TermDialogSpec paste_dialog(const Ctx& c, const Model& m) {
+    const Session& se = m.tab();
     using T = DialogAction::Tone;
     TermDialogSpec d;
-    std::string body = m.pending_paste;
+    std::string body = se.pending_paste;
     while (!body.empty() && (body.back() == '\n' || body.back() == '\r')) body.pop_back();
     const auto lines = split_lines(body);
     int flagged = 0;
@@ -41,15 +42,15 @@ TermDialogSpec paste_dialog(const Ctx& c, const Model& m) {
         if (i < 8) d.preview.push_back({lines[i], r.flag, r.note});
     }
     d.preview_more = std::max(static_cast<int>(lines.size()) - 8, 0);
-    const std::string proc = fg_process(m);
+    const std::string proc = fg_process(m.tab());
     d.tag = flagged ? "CAREFUL" : "PASTE";
     d.tone = flagged ? c.theme.danger : c.theme.warning;
     d.title = "Paste " + std::to_string(lines.size()) + (lines.size() == 1 ? " line" : " lines") +
               (proc.empty() ? std::string{"?"} : " into " + proc + "?");
     d.body = flagged ? std::to_string(flagged) + (flagged == 1 ? " line looks" : " lines look") + " dangerous \u2014 read before it runs."
-           : m.term->bracketed() ? proc + " will hold it for editing; nothing runs until you press enter."
+           : se.term->bracketed() ? proc + " will hold it for editing; nothing runs until you press enter."
                                  : "This program did not ask for bracketed paste: each line runs as it lands.";
-    d.meta = std::to_string(lines.size()) + "L \u00B7 " + std::to_string(m.pending_paste.size()) + " bytes";
+    d.meta = std::to_string(lines.size()) + "L \u00B7 " + std::to_string(se.pending_paste.size()) + " bytes";
     d.actions = {{"cancel", "esc", T::normal}, {"one line", "\u21E7\u23CE", T::normal},
                  {"paste", "\u23CE", flagged ? T::danger : T::primary}};
     d.remember = m.cfg.paste_confirm == PasteConfirm::multiline ? "only ask for risky pastes" : "";
@@ -119,16 +120,17 @@ void settings_overlay(const Ctx& c, const Model& m) {
 }  // namespace
 
 void overlays(const Ctx& c, const Model& m) {
+    const Session& se = m.tab();
     settings_overlay(c, m);
-    if (m.search_open)
-        term_search(c, "search", node_id("term"), m.search_query, false, false,
-                    static_cast<int>(m.term->search_current()) - 1, static_cast<int>(m.term->search_count()));
+    if (se.search_open)
+        term_search(c, "search", node_id("term"), se.search_query, false, false,
+                    static_cast<int>(se.term->search_current()) - 1, static_cast<int>(se.term->search_count()));
     if (m.time - m.resized_at < 0.8)
-        resize_hud(c, "hud", m.term->cols(), m.term->rows(),
+        resize_hud(c, "hud", se.term->cols(), se.term->rows(),
                    std::to_string(static_cast<int>(m.size.x)) + "\u00D7" + std::to_string(static_cast<int>(m.size.y)) + "px");
     if (m.toast.card && m.time - m.toast.at < 3.0 && !m.settings.open)
         toasts(c, "toasts", {*m.toast.card}, m.size);
-    if (m.hint) hint_bar(c, "hint.tip", {.count = m.hint->hints.size(), .typed = m.hint->typed, .font_size = m.font_size, .y = m.size.y - 40.0f});
+    if (se.hint) hint_bar(c, "hint.tip", {.count = se.hint->hints.size(), .typed = se.hint->typed, .font_size = m.font_size, .y = m.size.y - 40.0f});
     if (m.ssh.picker.open) {
         const auto hosts = picker_hosts(m);
         ssh_hosts(c, "hosts", m.ssh.picker.query, hosts, rank_hosts(hosts, m.ssh.picker.query.text, unix_now()), m.ssh.picker.sel,

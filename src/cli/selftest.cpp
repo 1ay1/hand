@@ -15,16 +15,16 @@ int selftest(Runtime& rt, Vec2 size) {
     checks::Check ok;
     {   // the demo screen, as main left it
         const auto& m = rt.model();
-        ok(m.term->cols() > 20 && m.term->rows() > 5, "the grid fits the window");
-        const auto g = m.term->snapshot();
+        ok(m.tab().term->cols() > 20 && m.tab().term->rows() > 5, "the grid fits the window");
+        const auto g = m.tab().term->snapshot();
         ok(g.lines[0].cells[0].text == "~" && !g.lines[0].cells[0].default_fg, "toe parsed colour output");
         ok(g.cursor_row == 6, "the cursor follows the output");
         rt.window().resize(Vec2{size.x / 2.0f, size.y / 2.0f});
         rt.tick();
-        ok(rt.model().term->cols() < g.cols, "a resize reflows the grid");
+        ok(rt.model().tab().term->cols() < g.cols, "a resize reflows the grid");
     }
     // order matters: later suites start from the state earlier ones leave
-    static constexpr std::array<checks::Suite, 15> suites{
+    static constexpr std::array<checks::Suite, 16> suites{
         checks::pty,
         checks::settings_panel,
         checks::every_setting,
@@ -35,6 +35,7 @@ int selftest(Runtime& rt, Vec2 size) {
         checks::wide_squeeze,
         checks::wrap_spaces,
         checks::selection,
+        checks::tab_list,
         checks::tabs,
         checks::tui_mouse,
         checks::mac,

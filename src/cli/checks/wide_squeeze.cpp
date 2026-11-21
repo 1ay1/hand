@@ -36,27 +36,41 @@ void wide_squeeze([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Chec
                     if (!fx.reply.empty()) pty.write(fx.reply);
                 }
             };
-            pump(1200);
+            // the 14 output lines above the cursor, and the rows between the last and the prompt
+            struct Shape { int lines = 0, gap = 99; };
+            const auto shape = [&] {
+                const auto sg = t.snapshot();
+                Shape sh;
+                int last = -1;
+                for (int r = 0; r < t.cursor().row; ++r) {
+                    std::string l;
+                    for (const auto& c : sg.lines[static_cast<std::size_t>(r)].cells) l += c.text;
+                    if (l.find("line ") != std::string::npos) { ++sh.lines; last = r; }
+                }
+                sh.gap = t.cursor().row - last - 1;
+                return sh;
+            };
+            // wait for what we expect, not for a fixed time: fish redraws when it
+            // gets to it, and a loaded machine must not turn that into a failure
+            const auto pump_until = [&](auto&& done, int max_ms) {
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(max_ms);
+                while (!done() && std::chrono::steady_clock::now() < deadline) pump(100);
+            };
+            const auto settled = [&] { const Shape sh = shape(); return sh.lines == 14 && sh.gap <= 2; };
+            pump_until([&] { return !t.commands().empty(); }, 4000);   // fish is up: its first prompt is marked
             pty.write("clear; for i in (seq 14); printf '      line %02d %s\\n' $i (string repeat -n 70 x); end\r");
-            pump(900);
+            pump_until(settled, 4000);
             for (int k = 0; k < 3; ++k) {
                 for (int c = 100; c >= 28; c -= 3) { t.resize(c, 30); pty.resize(c, 30); }
                 pump(50);
                 for (int c = 28; c <= 100; c += 3) { t.resize(c, 30); pty.resize(c, 30); }
                 pump(50);
             }
-            pump(800);
-            const auto sg = t.snapshot();
-            int last = -1, lines = 0;
-            for (int r = 0; r < t.cursor().row; ++r) {
-                std::string l;
-                for (const auto& c : sg.lines[static_cast<std::size_t>(r)].cells) l += c.text;
-                if (l.find("line ") != std::string::npos) { ++lines; last = r; }
-            }
+            pump_until(settled, 4000);   // a gap that never closes is the bug; one fish has not redrawn yet is not
+            const Shape sh = shape();
             // the prompt may be two lines (info + ❯): at most one row between
-            const int gap = t.cursor().row - last - 1;
-            std::printf("    thin+wide: %d output lines, %d rows to the prompt\n", lines, gap);
-            ok(lines == 14 && gap <= 2, "squeezed thin and back: no gap opens above the prompt");
+            std::printf("    thin+wide: %d output lines, %d rows to the prompt\n", sh.lines, sh.gap);
+            ok(sh.lines == 14 && sh.gap <= 2, "squeezed thin and back: no gap opens above the prompt");
             pty.write("exit\r");
             pump(200);
         }

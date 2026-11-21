@@ -93,17 +93,17 @@ void ssh([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& ok) {
     const std::size_t tabs0 = rt.model().tab_count();
     rt.press_key(K::enter);
     for (int i = 0; i < 10; ++i) rt.tick();
-    ok(!rt.model().ssh.picker.open && rt.model().tab_count() == tabs0 + 1 && rt.model().remote && rt.model().remote->alias == "gpu-box",
+    ok(!rt.model().ssh.picker.open && rt.model().tab_count() == tabs0 + 1 && rt.model().tab().remote && rt.model().tab().remote->alias == "gpu-box",
        "enter connects in a new tab, beside this one");
     // ssh fails (255): the tab stays, with its scrollback, and offers to reconnect
-    rt.send(hand::App::Msg{hand::App::Exited{255, rt.model().sid}});
+    rt.send(hand::App::Msg{hand::App::Exited{255, rt.model().tab().sid}});
     rt.tick();
-    ok(rt.model().tab_count() == tabs0 + 1 && rt.model().link.dropped && rt.node_rect(dsl::node_id("ssh.reconnect")).has_value(),
+    ok(rt.model().tab_count() == tabs0 + 1 && rt.model().tab().link.dropped && rt.node_rect(dsl::node_id("ssh.reconnect")).has_value(),
        "a dropped connection keeps the tab and offers to reconnect");
     rt.press_key(K::enter);
     rt.tick();
-    ok(!rt.model().link.dropped, "enter reconnects");
-    rt.send(hand::App::Msg{hand::App::Exited{0, rt.model().sid}});
+    ok(!rt.model().tab().link.dropped, "enter reconnects");
+    rt.send(hand::App::Msg{hand::App::Exited{0, rt.model().tab().sid}});
     for (int i = 0; i < 10; ++i) rt.tick();
     ok(rt.model().tab_count() == tabs0, "a clean logout closes the tab");
     // a typed destination nobody listed
@@ -167,9 +167,9 @@ void ssh([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& ok) {
         const std::size_t t0 = rt.model().tab_count();
         rt.press_key(K::enter);
         for (int i = 0; i < 10; ++i) rt.tick();
-        ok(!rt.model().ssh.manager.open && rt.model().tab_count() == t0 + 1 && rt.model().remote && rt.model().remote->alias == "gpu-box",
+        ok(!rt.model().ssh.manager.open && rt.model().tab_count() == t0 + 1 && rt.model().tab().remote && rt.model().tab().remote->alias == "gpu-box",
            "filter + enter connects to the host in a new tab");
-        rt.send(hand::App::Msg{hand::App::Exited{0, rt.model().sid}});
+        rt.send(hand::App::Msg{hand::App::Exited{0, rt.model().tab().sid}});
         for (int i = 0; i < 10; ++i) rt.tick();
         // ── folders, import, files, tunnels ────────────────────────────────────
         rt.press_key(K::h, Mods{.shift = true, .ctrl = true});
@@ -202,7 +202,7 @@ void ssh([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& ok) {
            "a host in Work/CI connects with Work's user, port and jump");
         // tunnel status from a port scan
         rt.send(hand::App::Msg{hand::App::TunnelScan{{5432, 8080}, {"ssh", "postgres"}, true}});
-        rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& mm) { mm.remote = mm.ssh.book.hosts.back(); }}});
+        rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& mm) { mm.tab().remote = mm.ssh.book.hosts.back(); }}});
         rt.tick();
         {
             const auto hs = hand::detail::picker_hosts(rt.model());
@@ -212,7 +212,7 @@ void ssh([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& ok) {
                    last.tunnel_note[1].find("postgres") != std::string::npos,
                "tunnels: ssh's port is up, a port taken by another program says by whom");
         }
-        rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& mm) { mm.remote.reset(); }}});
+        rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& mm) { mm.tab().remote.reset(); }}});
         // import: new sessions only, into their folder
         const std::size_t nb = rt.model().ssh.book.hosts.size();
         rt.press_key(K::i);

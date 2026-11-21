@@ -146,9 +146,10 @@ std::vector<int> picker_rank(const Model& m) {
 /// alternate screen: vim, htop, cmatrix) owns the whole window and gets none.
 /// The command whose output is under the top of the view, when the sticky header applies.
 std::optional<Term::Command> sticky_of(const Model& m) {
-    if (!m.term || !m.cfg.shell_marks || m.term->alt_screen()) return std::nullopt;
-    if (!(m.scroll_d > 0.01f || m.term->scroll_offset() > 0)) return std::nullopt;
-    return m.term->command_at_top();
+    const Session& se = m.tab();
+    if (!se.term || !m.cfg.shell_marks || se.term->alt_screen()) return std::nullopt;
+    if (!(se.scroll_d > 0.01f || se.term->scroll_offset() > 0)) return std::nullopt;
+    return se.term->command_at_top();
 }
 
 std::int64_t wall_ms() {
@@ -236,7 +237,7 @@ std::string busy_of(const Session& se, std::string* elapsed) {
     return what;
 }
 
-bool minimap_on(const Model& m) { return m.cfg.minimap && m.term && !m.term->alt_screen(); }
+bool minimap_on(const Model& m) { return m.cfg.minimap && m.tab().term && !m.tab().term->alt_screen(); }
 
 float minimap_w(const Model& m) { return minimap_on(m) ? std::max(m.minimap.width, kMinimapRest) : 0.0f; }
 
@@ -257,9 +258,10 @@ bool in_corner(const Model& m, Vec2 p) {
 
 /// The live tail shows while you read history and the live prompt is off screen.
 bool tail_wanted(const Model& m) {
-    if (!m.term || m.cfg.live_tail < 1.0f || m.term->alt_screen()) return false;
-    const auto cur = m.term->cursor();
-    return m.term->scroll_offset() > 0 && cur.row + m.term->scroll_offset() >= m.term->rows();
+    const Session& se = m.tab();
+    if (!se.term || m.cfg.live_tail < 1.0f || se.term->alt_screen()) return false;
+    const auto cur = se.term->cursor();
+    return se.term->scroll_offset() > 0 && cur.row + se.term->scroll_offset() >= se.term->rows();
 }
 
 /// The pty reader: one background stream per shell (see detail.hpp).
@@ -369,15 +371,16 @@ void read_pty(Sink<App::Msg> out, std::stop_token st, int fd, int pid, SessionId
 /// How far below its row the grid is drawn (0..1): a scroll glide between rows
 /// plus the glide of a freshly arrived line at the live prompt.
 float draw_frac(const Model& m) {
-    const float scroll = m.cfg.smooth_scroll ? m.scroll_d - static_cast<float>(m.scroll_applied) : 0.0f;
-    return std::clamp(scroll + m.out_shift, 0.0f, 0.999f);
+    const Session& se = m.tab();
+    const float scroll = m.cfg.smooth_scroll ? se.scroll_d - static_cast<float>(se.scroll_applied) : 0.0f;
+    return std::clamp(scroll + se.out_shift, 0.0f, 0.999f);
 }
 
 int view_row(const Model& m, float y) {
     const float frac = draw_frac(m);
     const float r = (y - m.metrics.origin_y) / std::max(m.metrics.cell_h, 1.0f) - (frac > 0.001f ? frac : 0.0f);
     const int lo = frac > 0.001f ? -1 : 0;
-    return std::clamp(static_cast<int>(std::floor(r)), lo, std::max(m.term ? m.term->rows() - 1 : 0, 0));
+    return std::clamp(static_cast<int>(std::floor(r)), lo, std::max(m.tab().term ? m.tab().term->rows() - 1 : 0, 0));
 }
 
 /// Selecting into the top/bottom margin scrolls; the further out, the faster.
@@ -413,20 +416,17 @@ void start_ssh(Model& m, Session& se, const Host& h) {
     }
 }
 
-/// Park the active session in its slot, bring slot `i` into the Model.
+/// Bring tab `i` to the front: it is read, and its cursor appears where it is.
 void activate(Model& m, std::size_t i) {
-    if (i == m.active || i >= m.tab_count()) return;
-    m.tabs[m.active] = std::move(static_cast<Session&>(m));
-    static_cast<Session&>(m) = std::move(m.tabs[i]);
-    m.tabs[i] = Session{};
-    m.active = i;
-    m.unread = m.bell = false;
-    m.grid_key = 0;
-    m.cur_known = false;              // the cursor appears where it is, no flight across tabs
-    m.fx.ps.clear();
+    if (i == m.active() || i >= m.tab_count()) return;
+    m.tabs.select(i);
+    m.tab().unread = m.tab().bell = false;
+    m.tab().grid_key = 0;
+    m.tab().cur_known = false;              // the cursor appears where it is, no flight across tabs
+    m.tab().fx.ps.clear();
     m.minimap.hover_y = -1.0f;
     m.cursor_on = true;
-    m.cur_a = 1.0f;
+    m.tab().cur_a = 1.0f;
 }
 
 std::optional<App::Msg> send(std::string bytes) {

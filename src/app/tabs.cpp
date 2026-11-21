@@ -22,16 +22,15 @@ using namespace mayag::dsl;
 using namespace hand::detail;
 
 App::Cmd App::update(Model& m, NewTab) {
-    const std::string cwd = m.term ? m.term->cwd() : std::string{};   // the new tab opens where you are
+    const std::string cwd = m.tab().term ? m.tab().term->cwd() : std::string{};   // the new tab opens where you are
     const bool first_split = m.tab_count() == 1 && !m.cfg.strip_always();
-    m.tabs.push_back(spawn_session(m, cwd));
-    const std::size_t i = m.tabs.size() - 1;
+    const std::size_t i = m.tabs.push_back(spawn_session(m, cwd));
     m.strip.switch_dir = 1;
     activate(m, i);
     m.strip.switch_t = m.cfg.motion ? 0.0f : 1.0f;
     if (first_split && !m.cfg.motion) m.strip.t = 1.0f;
     fit(m);
-    return SetTitle{m.title};
+    return SetTitle{m.tab().title};
 }
 
 App::Cmd App::update(Model& m, CloseTab c) {
@@ -48,42 +47,38 @@ App::Cmd App::update(Model& m, CloseTab c) {
         if (!m.cfg.demo) (void)config_save(m.cfg, config_path());
         return Cmd::quit();
     }
-    if (i == m.active) {
+    if (i == m.active()) {
         const std::size_t to = i + 1 < m.tab_count() ? i + 1 : i - 1;   // the neighbour on the right, else left
         m.strip.switch_dir = to > i ? 1 : -1;
         activate(m, to);
         m.strip.switch_t = m.cfg.motion ? 0.0f : 1.0f;
     }
     // the closing session's pty dies with its Session (SIGHUP to the shell)
-    m.tabs.erase(m.tabs.begin() + static_cast<long>(i));
-    if (m.active > i) --m.active;
+    m.tabs.erase(i);   // the active tab stays in front
     if (m.tab_count() == 1 && !m.cfg.strip_always() && !m.cfg.motion) m.strip.t = 0.0f;
     fit(m);
-    return SetTitle{m.title};
+    return SetTitle{m.tab().title};
 }
 
 App::Cmd App::update(Model& m, SelectTab st) {
     const std::size_t i = st.tab.get();
-    if (i >= m.tab_count() || i == m.active) return {};
-    m.strip.switch_dir = i > m.active ? 1 : -1;
+    if (i >= m.tab_count() || i == m.active()) return {};
+    m.strip.switch_dir = i > m.active() ? 1 : -1;
     activate(m, i);
     m.strip.switch_t = m.cfg.motion ? 0.0f : 1.0f;
     std::vector<Cmd> cmds;
-    cmds.push_back(SetTitle{m.title});
+    cmds.push_back(SetTitle{m.tab().title});
     cmds.push_back(pane_sync(m));
     return Cmd::batch(std::move(cmds));
 }
 
 App::Cmd App::update(Model& m, StepTab st) {
     if (m.tab_count() < 2) return {};
-    return update(m, SelectTab{TabIndex{wrap(m.active, st.step, m.tab_count())}});
+    return update(m, SelectTab{TabIndex{wrap(m.active(), st.step, m.tab_count())}});
 }
 
 App::Cmd App::update(Model& m, MoveTab mv) {
-    const long to = static_cast<long>(m.active) + delta(mv.step);
-    if (to < 0 || to >= static_cast<long>(m.tab_count())) return {};
-    std::swap(m.tabs[m.active], m.tabs[static_cast<std::size_t>(to)]);   // the placeholder moves with it
-    m.active = static_cast<std::size_t>(to);
+    (void)m.tabs.move_active(mv.step);   // no-op at either end
     return {};
 }
 
@@ -93,7 +88,7 @@ App::Cmd App::update(Model& m, MoveTab mv) {
 
 App::Cmd App::update(Model& m, TabPress p) {
     (void)update(m, SelectTab{p.tab});   // instantly, like a browser
-    m.strip.drag_tab = static_cast<int>(m.active);
+    m.strip.drag_tab = static_cast<int>(m.active());
     m.strip.drag_dx = 0.0f;
     return {};
 }
@@ -103,14 +98,14 @@ App::Cmd App::update(Model& m, TabDrag d) {
     m.strip.drag_dx += d.dx;
     // past half a tab: swap with the neighbour (the pill slides after it)
     const float tab_w = std::clamp(m.win.x / static_cast<float>(m.tab_count()), 96.0f, 236.0f);
-    if (m.strip.drag_dx > tab_w * 0.5f && m.active + 1 < m.tab_count()) {
+    if (m.strip.drag_dx > tab_w * 0.5f && m.active() + 1 < m.tab_count()) {
         (void)update(m, MoveTab{Step::forward});
         m.strip.drag_dx -= tab_w;
-    } else if (m.strip.drag_dx < -tab_w * 0.5f && m.active > 0) {
+    } else if (m.strip.drag_dx < -tab_w * 0.5f && m.active() > 0) {
         (void)update(m, MoveTab{Step::backward});
         m.strip.drag_dx += tab_w;
     }
-    m.strip.drag_tab = static_cast<int>(m.active);
+    m.strip.drag_tab = static_cast<int>(m.active());
     return {};
 }
 

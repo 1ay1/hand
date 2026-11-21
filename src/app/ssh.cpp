@@ -80,11 +80,11 @@ App::Cmd App::update(Model& m, HostsKey k) {
         if (!ed || !*ed) ed = std::getenv("EDITOR");
         const std::string editor = ed && *ed ? ed : "vi";
         (void)update(m, NewTab{});
-        if (m.pty) {
+        if (m.tab().pty) {
             std::string path = m.ssh.sources.ssh_config;
             std::string q = "'";
             for (char ch : path) q += ch == '\'' ? std::string{"'\\''"} : std::string(1, ch);
-            m.pty->write(editor + " " + q + "'\r");
+            m.tab().pty->write(editor + " " + q + "'\r");
         }
         return {};
     }
@@ -109,14 +109,13 @@ App::Cmd App::update(Model& m, ConnectHost c) {
         if (x.alias == c.host.alias) { ++x.uses; x.last = unix_now(); }
     // here: type it at this tab's prompt (scrollback and cwd stay); only when
     // the tab is a quiet local shell -- never into a running program
-    if (c.where == Where::this_tab && m.pty && !m.link.launched && busy_of(m, nullptr).empty() && !remote_of(m)) {
-        m.pty->write(m.term->encode_paste(ssh_command(c.host)) + "\r");
+    if (c.where == Where::this_tab && m.tab().pty && !m.tab().link.launched && busy_of(m.tab(), nullptr).empty() && !remote_of(m.tab())) {
+        m.tab().pty->write(m.tab().term->encode_paste(ssh_command(c.host)) + "\r");
         return {};
     }
     const bool first_split = m.tab_count() == 1 && !m.cfg.strip_always();
     // beside the current tab, not at the end: it belongs to what you were doing
-    const std::size_t at = m.active + 1;
-    m.tabs.insert(m.tabs.begin() + static_cast<long>(at), spawn_ssh(m, c.host));
+    const std::size_t at = m.tabs.insert(m.active() + 1, spawn_ssh(m, c.host));
     m.strip.switch_dir = 1;
     activate(m, at);
     m.strip.switch_t = m.cfg.motion ? 0.0f : 1.0f;
@@ -156,9 +155,9 @@ App::Cmd App::update(Model& m, ToggleManager) {
     // start on the host this tab talks to, else the best-ranked one
     const auto hosts = picker_hosts(m);
     m.ssh.manager.ui.sel = -1;
-    if (m.remote)
+    if (m.tab().remote)
         for (std::size_t i = 0; i < m.ssh.book.hosts.size(); ++i)
-            if (m.ssh.book.hosts[i].alias == m.remote->alias) m.ssh.manager.ui.sel = static_cast<int>(i);
+            if (m.ssh.book.hosts[i].alias == m.tab().remote->alias) m.ssh.manager.ui.sel = static_cast<int>(i);
     if (m.ssh.manager.ui.sel < 0) {
         const auto r = rank_hosts(hosts, "", unix_now());
         m.ssh.manager.ui.sel = r.empty() ? 0 : r.front();
@@ -410,11 +409,11 @@ App::Cmd App::update(Model& m, TunnelScan s) {
 }
 
 App::Cmd App::update(Model& m, Reconnect) {
-    if (!m.link.dropped || !m.remote) return {};
-    (void)m.term->feed("\r\n\x1b[2m\u21C4 reconnecting to " + m.remote->alias + "\u2026\x1b[0m\r\n");
-    m.sid = m.session_ids.next();   // a new reader stream for the new pty
-    start_ssh(m, m, *m.remote);
-    m.grid_key = 0;
+    if (!m.tab().link.dropped || !m.tab().remote) return {};
+    (void)m.tab().term->feed("\r\n\x1b[2m\u21C4 reconnecting to " + m.tab().remote->alias + "\u2026\x1b[0m\r\n");
+    m.tab().sid = m.session_ids.next();   // a new reader stream for the new pty
+    start_ssh(m, m.tab(), *m.tab().remote);
+    m.tab().grid_key = 0;
     settle_scroll(m);
     return {};
 }

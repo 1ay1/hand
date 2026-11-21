@@ -44,7 +44,7 @@ void visual_settings([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, C
     rt.send(hand::App::Msg{hand::App::Output{std::string{"\a"}}});
     const auto flash = px_at(bx, by);
     ok(flash[0] + flash[1] + flash[2] > lit[0] + lit[1] + lit[2], "bell.visual flashes the screen on BEL");
-    rt.send(hand::App::Msg{E{[](hand::App::Model& m) { m.cfg.visual_bell = false; m.bell_at = -1.0; }}});
+    rt.send(hand::App::Msg{E{[](hand::App::Model& m) { m.cfg.visual_bell = false; m.tab().bell_at = -1.0; }}});
     rt.send(hand::App::Msg{hand::App::Output{std::string{"\a"}}});
     const auto quiet = px_at(bx, by);
     ok(quiet == lit, "and stays dark with it off");

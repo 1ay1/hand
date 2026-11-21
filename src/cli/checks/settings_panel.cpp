@@ -29,32 +29,32 @@ void settings_panel([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Ch
         "\x1b[2J\x1b[Hsee https://example.com/docs ok\r\n"
         "\x1b]8;;https://toe.dev\x1b\\osc8 link\x1b]8;;\x1b\\ and needle, needle\r\n"}}});
     rt.tick();
-    ok(rt.model().term->link_at(8, 0) == "https://example.com/docs", "a bare URL is detected under the pointer");
-    ok(rt.model().term->link_at(1, 1) == "https://toe.dev", "an OSC 8 hyperlink resolves to its target");
-    ok(rt.model().term->link_at(0, 0).empty(), "plain text is not a link");
+    ok(rt.model().tab().term->link_at(8, 0) == "https://example.com/docs", "a bare URL is detected under the pointer");
+    ok(rt.model().tab().term->link_at(1, 1) == "https://toe.dev", "an OSC 8 hyperlink resolves to its target");
+    ok(rt.model().tab().term->link_at(0, 0).empty(), "plain text is not a link");
     rt.press_key(K::f, Mods{.shift = true, .ctrl = true});
-    ok(rt.model().search_open, "ctrl+shift+f opens search");
+    ok(rt.model().tab().search_open, "ctrl+shift+f opens search");
     rt.type("needle");
-    ok(rt.model().term->search_count() == 2, "typing finds every match in the scrollback");
+    ok(rt.model().tab().term->search_count() == 2, "typing finds every match in the scrollback");
     rt.tick();
-    ok(rt.model().grid && rt.model().grid->matches.size() == 2 && rt.model().grid->current_match >= 0,
+    ok(rt.model().tab().grid && rt.model().tab().grid->matches.size() == 2 && rt.model().tab().grid->current_match >= 0,
        "matches are highlighted, the current one marked");
-    const auto cur = rt.model().term->search_current();
+    const auto cur = rt.model().tab().term->search_current();
     rt.press_key(K::enter);
-    ok(rt.model().term->search_current() != cur, "enter steps to the next match");
+    ok(rt.model().tab().term->search_current() != cur, "enter steps to the next match");
     rt.press_key(K::escape);
-    ok(!rt.model().search_open && rt.model().term->search_count() == 0, "esc closes and clears it");
+    ok(!rt.model().tab().search_open && rt.model().tab().term->search_count() == 0, "esc closes and clears it");
     rt.press_key(K::comma, Mods{.ctrl = true});
     ok(rt.model().settings.open, "ctrl+, opens settings");
     ok(rt.node_rect(dsl::node_id("settings.rows")).has_value(), "the mayag settings_panel is on screen");
     rt.type("j");   // vi keys: font.family -> font.size
     ok(rt.model().settings.ui.selected == 1, "j selects the next setting");
     const float before = rt.model().font_size;
-    const int cols = rt.model().term->cols();
+    const int cols = rt.model().tab().term->cols();
     rt.press_key(K::right, Mods{.shift = true});
     ok(rt.model().cfg.font_size == before + 5.0f && rt.model().font_size == before + 5.0f,
        "shift+right steps font.size ×10, live");
-    ok(rt.model().term->cols() < cols, "and the grid refits to the bigger cells");
+    ok(rt.model().tab().term->cols() < cols, "and the grid refits to the bigger cells");
     rt.type("r");
     ok(rt.model().cfg.font_size == hand::Config{}.font_size, "r resets it");
     rt.type("/");
@@ -97,9 +97,9 @@ void settings_panel([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Ch
         ok(rt.model().settings.t == 0.0f, "...and is gone");
         rt.send(hand::App::Msg{hand::App::Blink{}});
         rt.tick();
-        const float mid = rt.model().cur_a;
+        const float mid = rt.model().tab().cur_a;
         for (int i = 0; i < 30; ++i) rt.tick();
-        ok(mid > 0.0f && mid < 1.0f && (rt.model().cur_a == 0.0f || rt.model().cur_a == 1.0f), "the cursor blink fades, not snaps");
+        ok(mid > 0.0f && mid < 1.0f && (rt.model().tab().cur_a == 0.0f || rt.model().tab().cur_a == 1.0f), "the cursor blink fades, not snaps");
         rt.window().drive_frames(false);
     }
     {

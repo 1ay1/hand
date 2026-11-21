@@ -30,6 +30,6 @@ using Runtime = mayag::headless_app<App>;
 [[nodiscard]] int shoot(Runtime& rt, mayag::Vec2 size, const std::string& shot, const std::string& out);
 
 /// Has the cursor's motion (and its particles) come to rest?
-[[nodiscard]] inline bool motion_settled(const App::Model& m) { return motion::tail_settled(m.fx, m.cur_x, m.cur_y); }
+[[nodiscard]] inline bool motion_settled(const App::Model& m) { return motion::tail_settled(m.tab().fx, m.tab().cur_x, m.tab().cur_y); }
 
 }  // namespace hand::cli

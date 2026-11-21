@@ -39,7 +39,7 @@ void every_setting([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Che
     ok(mm.metrics.cell_h == std::round(mm.font_size * mm.cfg.line_height), "font.line_height sets the row height");
     ok(mm.metrics.origin_x == mm.cfg.padding + (mm.cfg.shell_marks ? 10.0f : 0.0f) && mm.cfg.padding != d.padding, "window.padding moves the grid");
     ok(mm.palette.bg != hand::palette_of(d).bg, "colors.scheme recolours the terminal");
-    ok(mm.grid && mm.grid->cursor_shape != dsl::TermCursorShape::block, "cursor.style reaches the cursor");
+    ok(mm.tab().grid && mm.tab().grid->cursor_shape != dsl::TermCursorShape::block, "cursor.style reaches the cursor");
     ok(!mm.cfg.cursor_blink && !mm.cfg.visual_bell && mm.cfg.copy_on_select && !mm.cfg.links_need_ctrl,
        "the toggles flip");
     // reset all: back to every default

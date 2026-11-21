@@ -28,29 +28,30 @@ namespace {
 
 /// The grid to draw, cached until the screen (or what decorates it) changes.
 const TermGrid& snapshot(const Model& m, bool above) {
+    const Session& se = m.tab();
     const Config& cfg = m.cfg;
-    const bool app_shape = m.term->app_cursor_shape();
-    std::uint64_t key = (m.term->epoch() * 8 + (app_shape ? 7 : static_cast<std::uint64_t>(cfg.cursor))) * 2 + (above ? 1 : 0);
-    if (m.hint) key ^= std::hash<std::string>{}(m.hint->typed) * 31 + 0x9E37;
+    const bool app_shape = se.term->app_cursor_shape();
+    std::uint64_t key = (se.term->epoch() * 8 + (app_shape ? 7 : static_cast<std::uint64_t>(cfg.cursor))) * 2 + (above ? 1 : 0);
+    if (se.hint) key ^= std::hash<std::string>{}(se.hint->typed) * 31 + 0x9E37;
     if (!m.preedit.empty()) key ^= std::hash<std::string>{}(m.preedit) * 131 + 0x51ED;
-    if (!m.grid || m.grid_key != key) {
-        auto g = m.term->snapshot(above);
+    if (!se.grid || se.grid_key != key) {
+        auto g = se.term->snapshot(above);
         if (!app_shape)
             g.cursor_shape = cfg.cursor == CursorShape::beam ? TermCursorShape::beam
                            : cfg.cursor == CursorShape::underline ? TermCursorShape::underscore : TermCursorShape::block;
-        if (m.hint) {
-            for (std::size_t i = 0; i < m.hint->hints.size(); ++i) {
-                const auto& h = m.hint->hints[i];
-                g.hints.push_back({TermSpan{h.row, h.col, h.len}, m.hint->labels[i]});
+        if (se.hint) {
+            for (std::size_t i = 0; i < se.hint->hints.size(); ++i) {
+                const auto& h = se.hint->hints[i];
+                g.hints.push_back({TermSpan{h.row, h.col, h.len}, se.hint->labels[i]});
                 g.matches.push_back({h.row, h.col, h.len});   // light up what is pickable
             }
-            g.hint_typed = m.hint->typed;
+            g.hint_typed = se.hint->typed;
         }
         g.preedit = m.preedit;
-        m.grid = std::make_shared<const TermGrid>(std::move(g));
-        m.grid_key = key;
+        se.grid = std::make_shared<const TermGrid>(std::move(g));
+        se.grid_key = key;
     }
-    return *m.grid;
+    return *se.grid;
 }
 
 TermTheme term_theme(const Model& m) {
@@ -64,27 +65,29 @@ TermTheme term_theme(const Model& m) {
 
 /// The cursor's blink as an opacity: hard (on/off), fade, or a slow breath.
 float cursor_alpha(const Model& m) {
+    const Session& se = m.tab();
     const Config& cfg = m.cfg;
-    if (cfg.blink_style == BlinkStyle::fade) return m.cur_a;
-    if (cfg.blink_style == BlinkStyle::breathe && cfg.cursor_blink && m.focused && m.time - m.active_at > 0.6) {
+    if (cfg.blink_style == BlinkStyle::fade) return se.cur_a;
+    if (cfg.blink_style == BlinkStyle::breathe && cfg.cursor_blink && m.focused && m.time - se.active_at > 0.6) {
         const double period = 2.0 * static_cast<double>(cfg.blink_ms) / 1000.0 / static_cast<double>(cfg.motion_speed);
-        return 0.62f + 0.38f * static_cast<float>(std::cos(6.2831853 * (m.time - m.active_at - 0.6) / period));
+        return 0.62f + 0.38f * static_cast<float>(std::cos(6.2831853 * (m.time - se.active_at - 0.6) / period));
     }
     return 1.0f;
 }
 
 TermViewOptions term_options(const Model& m, float frac, bool above) {
+    const Session& se = m.tab();
     const Config& cfg = m.cfg;
-    const float bell = m.bell_at >= 0.0 && cfg.visual_bell ? static_cast<float>(std::max(0.0, 1.0 - (m.time - m.bell_at) / 0.2)) : 0.0f;
+    const float bell = se.bell_at >= 0.0 && cfg.visual_bell ? static_cast<float>(std::max(0.0, 1.0 - (m.time - se.bell_at) / 0.2)) : 0.0f;
     TermViewOptions o{.font_size = m.font_size, .line_height = cfg.line_height, .padding = cfg.padding,
                       .focused = m.focused,
                       .cursor_on = cfg.blink_style != BlinkStyle::hard ? true : (m.cursor_on || !m.focused || !cfg.cursor_blink),
                       .dim_unfocused = m.focused ? 0.0f : cfg.dim_unfocused, .bell = bell, .marks = cfg.shell_marks,
                       .opacity = 0.0f, .family = family_of(cfg)};   // the window clear is the paper
-    if (cfg.cursor_anim != CursorAnim::none && cfg.cursor_anim != CursorAnim::smear && m.cur_known) {
-        const auto cur = m.term->cursor();
-        o.cursor_dx = m.cur_x - static_cast<float>(cur.col);
-        o.cursor_dy = m.cur_y - static_cast<float>(cur.row);
+    if (cfg.cursor_anim != CursorAnim::none && cfg.cursor_anim != CursorAnim::smear && se.cur_known) {
+        const auto cur = se.term->cursor();
+        o.cursor_dx = se.cur_x - static_cast<float>(cur.col);
+        o.cursor_dy = se.cur_y - static_cast<float>(cur.row);
         o.cursor_trail = false;   // the trail is cursor_fx's, drawn over it
     }
     o.cursor_glow = cfg.cursor_glow ? 1.0f : 0.0f;
@@ -112,49 +115,51 @@ void push_all(std::vector<Node>& to, std::vector<Node>&& from) {
 // ── branches ─────────────────────────────────────────────────────────────
 
 void cursor_motion(std::vector<Node>& layers, const Model& m) {
+    const Session& se = m.tab();
     const Config& cfg = m.cfg;
-    if (cfg.cursor_anim != CursorAnim::none && cfg.cursor_trail > 0.0f && m.cur_known && m.focused &&
-        m.term->scroll_offset() == 0 && m.term->cursor().visible) {
-        const auto cur = m.term->cursor();
+    if (cfg.cursor_anim != CursorAnim::none && cfg.cursor_trail > 0.0f && se.cur_known && m.focused &&
+        se.term->scroll_offset() == 0 && se.term->cursor().visible) {
+        const auto cur = se.term->cursor();
         const float cw = m.metrics.cell_w, ch = m.metrics.cell_h, ox = m.metrics.origin_x, oy = m.metrics.origin_y;
-        const float tailx = ox + m.fx.tx * cw, taily = oy + m.fx.ty * ch;
+        const float tailx = ox + se.fx.tx * cw, taily = oy + se.fx.ty * ch;
         push_all(layers, cfg.cursor_anim == CursorAnim::smear
                              ? motion::smear(tailx, taily, ox + static_cast<float>(cur.col) * cw, oy + static_cast<float>(cur.row) * ch, cw, ch, m.palette.cursor)
-                             : motion::comet(ox + m.cur_x * cw, oy + m.cur_y * ch, tailx, taily, cw, ch, m.palette.cursor,
+                             : motion::comet(ox + se.cur_x * cw, oy + se.cur_y * ch, tailx, taily, cw, ch, m.palette.cursor,
                                              0.55f + 0.15f * cfg.cursor_trail));
     }
-    push_all(layers, motion::draw(m.fx));
+    push_all(layers, motion::draw(se.fx));
 }
 
 void remote(std::vector<Node>& layers, const Ctx& c, const Model& m, const TermBox& b) {
-    const auto& r = remote_of(m);
+    const auto& r = remote_of(m.tab());
     if (!r) return;
-    if (m.link.dropped) {
+    if (m.tab().link.dropped) {
         layers.push_back(connection_lost(c, "ssh", b, {.alias = r->alias, .command = ssh_command(*r),
-                                                       .gone = m.time - m.link.dropped_at, .motion = m.cfg.motion}));
+                                                       .gone = m.time - m.tab().link.dropped_at, .motion = m.cfg.motion}));
     } else if (m.cfg.ssh_prod_guard && remote_env(m, *r) == HostEnv::prod) {
         push_all(layers, remote_guard(c, "ssh.prod", b, {.who = (r->user.empty() ? "" : r->user + "@") + r->alias}));
     }
 }
 
 void selection(std::vector<Node>& layers, const Ctx& c, const Model& m, const TermBox& b, bool above, float tail_h) {
+    const Session& se = m.tab();
     const Config& cfg = m.cfg;
-    if (cfg.sel_flash && m.time - m.copy_flash_at < 0.45 && m.grid)
-        push_all(layers, copy_flash(c, b, m.grid->selection, 1.0f - static_cast<float>((m.time - m.copy_flash_at) / 0.45)));
-    const std::int64_t top_abs = m.term->view_to_abs(0);
+    if (cfg.sel_flash && m.time - se.copy_flash_at < 0.45 && se.grid)
+        push_all(layers, copy_flash(c, b, se.grid->selection, 1.0f - static_cast<float>((m.time - se.copy_flash_at) / 0.45)));
+    const std::int64_t top_abs = se.term->view_to_abs(0);
     const auto row_of = [&](std::int64_t abs) { return static_cast<float>(abs - top_abs) + (above ? 1.0f : 0.0f); };
-    const auto si = m.term->selection_info();
-    if (m.copy) {
-        push_all(layers, copy_cursor(c, b, {.row = row_of(m.copy->row), .col = m.copy->col, .line = static_cast<int>(m.copy->row),
-                                            .visual = static_cast<int>(m.copy->visual), .sel_lines = si.lines, .sel_chars = static_cast<int>(si.chars),
+    const auto si = se.term->selection_info();
+    if (se.copy) {
+        push_all(layers, copy_cursor(c, b, {.row = row_of(se.copy->row), .col = se.copy->col, .line = static_cast<int>(se.copy->row),
+                                            .visual = static_cast<int>(se.copy->visual), .sel_lines = si.lines, .sel_chars = static_cast<int>(si.chars),
                                             .lift = tail_h}));
     }
     m.sel_chip = Rect{};
-    if (cfg.sel_toolbar && si.any && si.chars > 0 && !m.selecting && !m.copy && !m.term->alt_screen()) {
-        const std::string text = si.lines == 1 ? m.term->selection_text() : std::string{};
+    if (cfg.sel_toolbar && si.any && si.chars > 0 && !se.selecting && !se.copy && !se.term->alt_screen()) {
+        const std::string text = si.lines == 1 ? se.term->selection_text() : std::string{};
         const bool openable = !text.empty() && text.find(' ') == std::string::npos &&
                               (text.find("://") != std::string::npos || text.rfind("www.", 0) == 0 || text[0] == '/' || text[0] == '~');
-        const auto end_line = m.term->line(si.r1);
+        const auto end_line = se.term->line(si.r1);
         int used = static_cast<int>(end_line.size());
         while (used > 0 && (end_line[static_cast<std::size_t>(used - 1)] == U' ' || end_line[static_cast<std::size_t>(used - 1)] == U'\0')) --used;
         Rect placed;
@@ -169,40 +174,41 @@ void selection(std::vector<Node>& layers, const Ctx& c, const Model& m, const Te
 /// Reading history: the live rows pinned below, the command's header on top,
 /// a chip saying where you are. Returns the tail's height (things sit above it).
 float history(std::vector<Node>& layers, const Ctx& c, const Model& m, const TermBox& b, const TermViewOptions& o) {
+    const Session& se = m.tab();
     const Config& cfg = m.cfg;
     float tail_h = 0.0f;
-    if (m.tail_t > 0.0f) {
+    if (se.tail_t > 0.0f) {
         const int n = std::max(static_cast<int>(cfg.live_tail), 1);
-        const TermGrid tg = m.term->grid_at(m.term->cursor_abs() - n + 1, n);
-        auto tail = live_tail(c, "tail", b, {.grid = &tg, .theme = term_theme(m), .view = o, .rows = n, .ease = m.tail_t,
-                                            .fresh = m.new_below}, &tail_h);
+        const TermGrid tg = se.term->grid_at(se.term->cursor_abs() - n + 1, n);
+        auto tail = live_tail(c, "tail", b, {.grid = &tg, .theme = term_theme(m), .view = o, .rows = n, .ease = se.tail_t,
+                                            .fresh = se.new_below}, &tail_h);
         if (!tail.empty())
             tail.front() = (node(std::move(tail.front())) | on_click([] { return App::Msg{App::ScrollLive{}}; })).build();
         push_all(layers, std::move(tail));
     }
-    const bool back = m.scroll_d > 0.01f || m.term->scroll_offset() > 0;
-    if (back && m.sticky_t > 0.0f)
+    const bool back = se.scroll_d > 0.01f || se.term->scroll_offset() > 0;
+    if (back && se.sticky_t > 0.0f)
         if (const auto cmd = sticky_of(m)) {
-            const auto info = m.term->scroll_info();
+            const auto info = se.term->scroll_info();
             const std::int64_t out0 = cmd->output_row >= 0 ? cmd->output_row : cmd->prompt_row + 1;
             const std::int64_t out1 = cmd->finished && cmd->end_row > out0 ? cmd->end_row : static_cast<std::int64_t>(info.total);
             const std::int64_t span = std::max<std::int64_t>(out1 - out0, 1);
             const std::string time = !cmd->finished ? (cmd->start_ms > 0 ? pretty_ms(std::max<std::int64_t>(wall_ms() - cmd->start_ms, 0)) : std::string{})
                                                     : (cmd->duration_ms > 0 ? pretty_ms(cmd->duration_ms) : std::string{});
             layers.push_back((node(sticky_command(c, "sticky", b,
-                                                  {.line = m.term->command_text(*cmd), .cwd = short_path(cmd->cwd), .state = state_of(*cmd),
+                                                  {.line = se.term->command_text(*cmd), .cwd = short_path(cmd->cwd), .state = state_of(*cmd),
                                                    .exit_code = cmd->exit_code, .time = time,
                                                    .at = std::clamp<std::int64_t>(info.first - out0 + 1, 1, span), .span = span,
-                                                   .now = m.time, .ease = m.sticky_t, .marks = cfg.shell_marks}))
+                                                   .now = m.time, .ease = se.sticky_t, .marks = cfg.shell_marks}))
                               | on_click([prompt = cmd->prompt_row] {
                                     return App::Msg{App::ScrollToPrompt{prompt}};   // fly to its prompt
                                 })).build());
         }
-    if (back && !m.term->alt_screen()) {
-        const auto info = m.term->scroll_info();
+    if (back && !se.term->alt_screen()) {
+        const auto info = se.term->scroll_info();
         const int pct = info.total > info.visible ? static_cast<int>(100.0 * info.first / (info.total - info.visible)) : 100;
-        layers.push_back((node(history_chip(c, "tolive", b, {.rows_up = static_cast<int>(std::lround(m.scroll_d)), .percent = pct,
-                                                            .fresh = m.new_below, .lift = tail_h}))
+        layers.push_back((node(history_chip(c, "tolive", b, {.rows_up = static_cast<int>(std::lround(se.scroll_d)), .percent = pct,
+                                                            .fresh = se.new_below, .lift = tail_h}))
                           | on_click([] { return App::Msg{App::ScrollLive{}}; })).build());
     }
     return tail_h;
@@ -211,17 +217,18 @@ float history(std::vector<Node>& layers, const Ctx& c, const Model& m, const Ter
 /// The minimap: the whole scrollback as a strip -- prompts, failures, search
 /// hits -- and, hovering it, a peek at what is there.
 void minimap(std::vector<Node>& layers, const Ctx& c, const Model& m, const TermBox& b, const TermViewOptions& o) {
+    const Session& se = m.tab();
     if (!minimap_on(m)) return;
-    const auto info = m.term->scroll_info();
+    const auto info = se.term->scroll_info();
     ScrollbackInfo sb{.total = info.total, .first = info.first, .visible = info.visible};
-    const auto cmds = m.term->commands();
+    const auto cmds = se.term->commands();
     for (const auto& cmd : cmds)
         if (cmd.prompt_row >= 0 && cmd.ran)
             sb.marks.push_back({static_cast<int>(cmd.prompt_row),
                                 cmd.finished && cmd.exit_code != 0 ? ScrollbackMark::Kind::error : ScrollbackMark::Kind::prompt});
-    const auto rows = m.term->search_rows();
+    const auto rows = se.term->search_rows();
     for (std::size_t i = 0; i < rows.size(); ++i)
-        sb.marks.push_back({static_cast<int>(rows[i]), i + 1 == m.term->search_current() ? ScrollbackMark::Kind::current_match
+        sb.marks.push_back({static_cast<int>(rows[i]), i + 1 == se.term->search_current() ? ScrollbackMark::Kind::current_match
                                                                                          : ScrollbackMark::Kind::match});
     for (const auto& cmd : cmds) {   // command spans: a status stripe
         if (!cmd.ran || cmd.prompt_row < 0) continue;
@@ -237,8 +244,8 @@ void minimap(std::vector<Node>& layers, const Ctx& c, const Model& m, const Term
     sb.line_px = 2.0f;
     const float used = std::min(hgt, scrollback_scale(sb, hgt) * static_cast<float>(std::max(info.total, 1)));
     sb.buckets = scrollback_buckets(info.total, used, 2.0f);
-    sb.runs = m.term->minimap(sb.buckets);
-    sb.runs_version = m.term->minimap_version();
+    sb.runs = se.term->minimap(sb.buckets);
+    sb.runs_version = se.term->minimap_version();
     layers.push_back((node(scrollback_dock(c, "minimap", sb, m.size))
                       | on_slide([sb, hgt](Vec2 at) -> App::Msg {
                             const int line = scrollback_line_at(sb, at.y, hgt);
@@ -256,12 +263,12 @@ void minimap(std::vector<Node>& layers, const Ctx& c, const Model& m, const Term
     }
     constexpr int kRows = 7;
     const std::int64_t first = std::clamp<std::int64_t>(line - kRows / 2, 0, std::max<std::int64_t>(info.total - kRows, 0));
-    const int pcols = std::min(m.term->cols(), 72);
-    PeekProps pp{.grid = m.term->grid_at(first, kRows, pcols), .theme = term_theme(m), .view = o, .rows = kRows, .cols = pcols,
+    const int pcols = std::min(se.term->cols(), 72);
+    PeekProps pp{.grid = se.term->grid_at(first, kRows, pcols), .theme = term_theme(m), .view = o, .rows = kRows, .cols = pcols,
                  .line = line, .total = info.total, .hover_y = m.minimap.hover_y, .ease = m.minimap.peek_t};
     pp.grid.selection.push_back({static_cast<int>(line - first), 0, pcols});   // the hovered line, highlighted
     if (at && at->ran) {
-        pp.command = m.term->command_text(*at);
+        pp.command = se.term->command_text(*at);
         pp.state = state_of(*at);
         pp.exit_code = at->exit_code;
         pp.duration_ms = at->duration_ms;
@@ -272,16 +279,17 @@ void minimap(std::vector<Node>& layers, const Ctx& c, const Model& m, const Term
 }  // namespace
 
 Node terminal(const Ctx& c, const Model& m) {
+    const Session& se = m.tab();
     const float frac = draw_frac(m);
     const bool above = frac > 0.001f;
     const TermGrid& grid = snapshot(m, above);
     const TermViewOptions o = term_options(m, frac, above);
     const TermBox b = box_of(m, o);
-    const auto shape = !m.hover_url.empty() ? mayag::CursorShape::pointer
-                     : m.term->mouse_reporting() ? mayag::CursorShape::arrow : mayag::CursorShape::text;
+    const auto shape = !se.hover_url.empty() ? mayag::CursorShape::pointer
+                     : se.term->mouse_reporting() ? mayag::CursorShape::arrow : mayag::CursorShape::text;
     Node grid_node = (node(terminal_view(c, "term", grid, term_theme(m), o)) | size(m.size.x, m.size.y) | cursor(shape)).build();
     std::vector<Node> layers;
-    layers.push_back(m.cfg.bell_shake && m.bell_at >= 0.0 ? bell_shake(std::move(grid_node), static_cast<float>(m.time - m.bell_at))
+    layers.push_back(m.cfg.bell_shake && se.bell_at >= 0.0 ? bell_shake(std::move(grid_node), static_cast<float>(m.time - se.bell_at))
                                                           : std::move(grid_node));
     if (!m.settings.open) remote(layers, c, m, b);
     cursor_motion(layers, m);
