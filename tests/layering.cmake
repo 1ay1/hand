@@ -5,6 +5,7 @@
 # A layer may include itself, the layers below it, and the libraries beneath
 # hand (mayag, toe, vibe, the standard library). It may never include a layer
 # above it -- and nothing in hand ever names jaal (mayag's implementation).
+# The app layer also names every change: no mayag::Edit in src/app, src/view.
 #
 #   layer    may include hand/...
 #   core     core
@@ -53,6 +54,17 @@ foreach(f ${files})
             message(SEND_ERROR "layering: ${f} (${layer}) reaches into ${CMAKE_MATCH_1}/: ${l}")
             math(EXPR bad "${bad}+1")
         endif()
+    endforeach()
+endforeach()
+
+# the app names every change it makes: no anonymous model edits (mayag::Edit)
+# in src/app or src/view -- those are for the self-test and scripted shots
+file(GLOB_RECURSE app_files ${ROOT}/src/app/* ${ROOT}/src/view/*)
+foreach(f ${app_files})
+    file(STRINGS ${f} edits REGEX "Edit<|(^|[^A-Za-z0-9_])E\\{\\[")
+    foreach(l ${edits})
+        message(SEND_ERROR "layering: ${f}: an anonymous model edit (name it as a message): ${l}")
+        math(EXPR bad "${bad}+1")
     endforeach()
 endforeach()
 if(bad GREATER 0)

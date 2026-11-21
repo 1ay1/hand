@@ -56,11 +56,7 @@ std::optional<App::Msg> App::on(const Model& m, const KeyEvent& k_in) {
     if (k_in.mods.super && !k_in.mods.ctrl && !k_in.mods.alt && !m.settings.open && !m.ssh.picker.open && !m.dialog.ask) {
         // ⌘K: clear screen and history (Terminal.app, iTerm), and the shell redraws its prompt
         if (k_in.key == Key::k)
-            return E{[](Model& mm) {
-                (void)mm.term->feed("\x1b[H\x1b[2J\x1b[3J");
-                mm.scroll_goal = 0.0f; mm.scroll_d = 0.0f; mm.scroll_applied = 0; mm.grid_key = 0;
-                if (mm.pty) mm.pty->write("\x0c");
-            }};
+            return ClearScrollback{};
         if (k_in.key == Key::g && !m.search_open) return std::nullopt;   // nothing to step through
         if (k_in.key >= Key::n1 && k_in.key <= Key::n9 && m.tab_count() < 2) return std::nullopt;
     }
@@ -78,7 +74,7 @@ std::optional<App::Msg> App::on(const Model& m, const KeyEvent& k_in) {
     if (m.ssh.manager.open) {   // the host manager has the keyboard
         if (k.key == Key::ctrl || k.key == Key::shift || k.key == Key::alt || k.key == Key::super) return std::nullopt;
         if (auto op = ssh_manager_key(m.ssh.manager.ui, picker_hosts(m), unix_now(), k.key, md, &m.ssh.manager.files)) return Manager{std::move(*op)};
-        return E{[](Model&) {}};   // never to the shell underneath
+        return Swallow{};   // never to the shell underneath
     }
     if (m.ssh.picker.open) {   // the host picker has the keyboard
         if (k.key == Key::ctrl || k.key == Key::shift || k.key == Key::alt || k.key == Key::super) return std::nullopt;
@@ -90,28 +86,20 @@ std::optional<App::Msg> App::on(const Model& m, const KeyEvent& k_in) {
         if (k.key == Key::ctrl || k.key == Key::shift || k.key == Key::alt || k.key == Key::super) return std::nullopt;
         if (!md.ctrl && !md.super)
             if (auto op = file_pane_key(m.pane.ui, pane_props(m), k.key, md)) return PaneOp{std::move(*op)};
-        if (!md.ctrl && !md.super) return E{[](Model&) {}};   // plain keys never reach the shell
+        if (!md.ctrl && !md.super) return Swallow{};   // plain keys never reach the shell
     }
     if (m.dialog.ask.has_value()) {   // the dialog has the keyboard
         const bool paste = m.dialog.ask->kind == Ask::Kind::paste;
-        const std::size_t n = paste ? 3 : 2;
         if (k.key == Key::escape) return Answer::dismiss();
         if (k.key == Key::enter) return Answer::choose(paste && md.shift ? 1 : m.dialog.ask->focus);   // shift+enter: one line
         if (k.key == Key::tab || k.key == Key::right || k.key == Key::left) {
-            const Step s = (k.key == Key::left || (k.key == Key::tab && md.shift)) ? Step::backward : Step::forward;
-            return E{[s, n](Model& mm) { if (mm.dialog.ask) mm.dialog.ask->focus = wrap(mm.dialog.ask->focus, s, n); }};
+            return DialogFocus{(k.key == Key::left || (k.key == Key::tab && md.shift)) ? Step::backward : Step::forward};
         }
         if (k.key == Key::space) return RememberToggle{};
-        return E{[](Model&) {}};
+        return Swallow{};
     }
     if (cs && k.key == Key::m)   // copy mode: vim keys through the scrollback
-        return E{[](Model& mm) {
-            mm.grid_key = 0;
-            if (mm.copy) { mm.copy.reset(); mm.term->select_clear(); return; }
-            // from the selection's end, else from the live cursor
-            const auto si = mm.term->selection_info();
-            mm.copy = si.any ? CopyMode{.row = si.r1, .col = si.c1} : CopyMode{.row = mm.term->cursor_abs(), .col = mm.term->cursor().col};
-        }};
+        return ToggleCopyMode{};
     if (m.copy) {
         if (k.key == Key::ctrl || k.key == Key::shift || k.key == Key::alt) return std::nullopt;
         if (md.ctrl && (k.key == Key::v || k.key == Key::u || k.key == Key::d)) return CopyKey{k.key, md, {}};
@@ -119,19 +107,19 @@ std::optional<App::Msg> App::on(const Model& m, const KeyEvent& k_in) {
             case Key::escape: case Key::enter: case Key::left: case Key::right: case Key::up: case Key::down:
             case Key::home: case Key::end: case Key::page_up: case Key::page_down:
                 return CopyKey{k.key, md, {}};
-            default: return E{[](Model&) {}};   // nothing reaches the shell in copy mode
+            default: return Swallow{};   // nothing reaches the shell in copy mode
         }
     }
-    if (k.key == Key::ctrl && !m.ctrl_held) return E{[](Model& mm) { mm.ctrl_held = true; }};
+    if (k.key == Key::ctrl && !m.ctrl_held) return ModifierDown{Modifier::ctrl};
     // ── tabs: kitty/foot-style chords, plus the browser ones ──────────────
-    if (k.key == Key::alt && m.tab_count() > 1 && !m.strip.show_numbers) return E{[](Model& mm) { mm.strip.show_numbers = true; mm.strip.numbers_at = mm.time; }};
+    if (k.key == Key::alt && m.tab_count() > 1 && !m.strip.show_numbers) return ModifierDown{Modifier::alt};
     if (cs && k.key == Key::t) return NewTab{};
     if (cs && k.key == Key::s) return OpenHosts{};
     if (cs && k.key == Key::w) return CloseTab{TabIndex{m.active}};
     if (m.link.dropped) {   // a dropped ssh tab: enter reconnects, esc / q closes, nothing reaches a pty
         if (k.key == Key::enter || k.key == Key::r) return Reconnect{};
         if (k.key == Key::escape || k.key == Key::q) return CloseTab{TabIndex{m.active}, Confirm::given};
-        return E{[](Model&) {}};
+        return Swallow{};
     }
     if (md.ctrl && k.key == Key::tab) return StepTab{md.shift ? Step::backward : Step::forward};
     if (cs && (k.key == Key::page_down || k.key == Key::page_up)) return MoveTab{k.key == Key::page_down ? Step::forward : Step::backward};
@@ -143,37 +131,15 @@ std::optional<App::Msg> App::on(const Model& m, const KeyEvent& k_in) {
     }
     if (m.hint) {
         if (k.key == Key::escape || (cs && k.key == Key::space))
-            return E{[](Model& mm) { mm.hint.reset(); mm.grid_key = 0; }};
+            return CloseHints{};
         if (k.key == Key::backspace)
-            return E{[](Model& mm) { if (mm.hint && !mm.hint->typed.empty()) mm.hint->typed.pop_back(); mm.grid_key = 0; }};
+            return HintBackspace{};
         return std::nullopt;   // letters arrive as text
     }
     if (cs && k.key == Key::space)
-        return E{[](Model& mm) {
-            HintMode h{.hints = mm.term->hints()};
-            // home row first, then the rest; two letters once those run out
-            static constexpr std::string_view keys = "asdfjklghqwertyuiopzxcvbnm";
-            const std::size_t n = h.hints.size();
-            for (std::size_t i = 0; i < n; ++i)
-                h.labels.push_back(n <= keys.size() ? std::string(1, keys[i])
-                                                    : std::string{keys[i / keys.size() % keys.size()], keys[i % keys.size()]});
-            mm.grid_key = 0;
-            if (!h.hints.empty()) mm.hint = std::move(h);
-            else { mm.toast.card = Toast{.title = "nothing to pick", .body = "no links, paths, hashes or IPs on screen"}; mm.toast.at = mm.time; }
-        }};
-    if (cs && (k.key == Key::z || k.key == Key::x)) {   // foot's prompt-prev / prompt-next
-        const int d = k.key == Key::z ? -1 : 1;
-        return E{[d](Model& mm) {
-            // from where the scroll is HEADING, so quick presses chain prompt to prompt
-            mm.term->set_scroll_offset(static_cast<int>(std::lround(mm.scroll_goal)));
-            mm.scroll_applied = mm.term->scroll_offset();
-            (void)mm.term->jump_prompt(d);
-            const int to = mm.term->scroll_offset();
-            mm.term->set_scroll_offset(static_cast<int>(std::floor(mm.scroll_d)));
-            mm.scroll_applied = mm.term->scroll_offset();
-            scroll_by(mm, static_cast<float>(to) - mm.scroll_goal);
-        }};
-    }
+        return OpenHints{};
+    if (cs && (k.key == Key::z || k.key == Key::x))   // foot's prompt-prev / prompt-next
+        return JumpPrompt{k.key == Key::z ? Step::backward : Step::forward};
     if (cs && k.key == Key::g) return CopyOutput{};
     if (cs && k.key == Key::f) return SearchToggle{};
     if (m.search_open) {
@@ -181,31 +147,22 @@ std::optional<App::Msg> App::on(const Model& m, const KeyEvent& k_in) {
         if (k.key == Key::enter || k.key == Key::f3) return SearchStep{md.shift ? Step::backward : Step::forward};
         if (k.key == Key::up) return SearchStep{Step::backward};
         if (k.key == Key::down) return SearchStep{Step::forward};
-        return E{[k](Model& mm) {
-            if (mm.search_query.handle_key(k.key, k.mods)) (void)mm.term->search(mm.search_query.text);
-        }};
+        return SearchKey{k.key, k.mods};
     }
     // foot's bindings
     if (cs && k.key == Key::c) return Copy{};
     if ((cs && k.key == Key::v) || (md.shift && !md.ctrl && k.key == Key::insert)) return PasteReq{};
-    if (md.ctrl && !md.alt && !md.shift && (k.key == Key::equal || k.key == Key::minus || k.key == Key::n0)) {
-        const float d = k.key == Key::equal ? 1.0f : k.key == Key::minus ? -1.0f : 0.0f;
-        return E{[d](Model& mm) {
-            mm.font_size = d == 0.0f ? mm.cfg.font_size : std::clamp(mm.font_size + d, 6.0f, 48.0f);
-            fit(mm);
-        }};
-    }
+    if (md.ctrl && !md.alt && !md.shift && (k.key == Key::equal || k.key == Key::minus || k.key == Key::n0))
+        return FontZoom{k.key == Key::equal ? Zoom::in : k.key == Key::minus ? Zoom::out : Zoom::reset};
     if (md.shift && !md.ctrl && (k.key == Key::page_up || k.key == Key::page_down) && !m.term->alt_screen()) {
-        const float d = static_cast<float>((k.key == Key::page_up ? 1 : -1) * std::max(m.term->rows() - 2, 1));
-        return E{[d](Model& mm) { scroll_by(mm, d); }};
+        return ScrollBy{static_cast<float>((k.key == Key::page_up ? 1 : -1) * std::max(m.term->rows() - 2, 1))};
     }
     if (cs && (k.key == Key::up || k.key == Key::down) && !m.term->alt_screen()) {
-        const float d = k.key == Key::up ? 1.0f : -1.0f;
-        return E{[d](Model& mm) { scroll_by(mm, d); }};
+        return ScrollBy{k.key == Key::up ? 1.0f : -1.0f};
     }
     if (md.shift && !md.ctrl && (k.key == Key::home || k.key == Key::end) && !m.term->alt_screen()) {
-        const bool top = k.key == Key::home;
-        return E{[top](Model& mm) { scroll_by(mm, top ? 1e9f : -1e9f); }};
+        if (k.key == Key::home) return ScrollTop{};
+        return ScrollLive{};
     }
     return send(m.term->encode_key(k.key, md));
 }
@@ -214,28 +171,28 @@ std::optional<App::Msg> App::on(const Model& m, const ComposeEvent& c) {
     // the input method is composing (こん…, ´ before its e): shown at the
     // cursor, sent to the shell only when committed (a TextEvent)
     if (m.settings.open || m.ssh.picker.open || c.text == m.preedit) return std::nullopt;
-    return E{[t = c.text](Model& mm) { mm.preedit = t; }};
+    return Compose{c.text};
 }
 
 std::optional<App::Msg> App::on(const Model& m, const ComposeEndEvent&) {
     if (m.preedit.empty()) return std::nullopt;
-    return E{[](Model& mm) { mm.preedit.clear(); }};
+    return ComposeEnd{};
 }
 
 std::optional<App::Msg> App::on(const Model& m, const TextEvent& t) {
     if (m.ssh.manager.open) {
         if (auto op = ssh_manager_text(m.ssh.manager.ui, picker_hosts(m), unix_now(), t.text)) return Manager{std::move(*op)};
-        return E{[](Model&) {}};
+        return Swallow{};
     }
     if (m.ssh.picker.open)
-        return E{[s = t.text](Model& mm) { mm.ssh.picker.query.insert(s); mm.ssh.picker.sel = 0; }};
-    if (m.dialog.ask.has_value()) return E{[](Model&) {}};
+        return PickerText{t.text};
+    if (m.dialog.ask.has_value()) return Swallow{};
     if (m.pane.open && m.pane.ui.focused) {   // the pane reads keys; text only while filtering
         if (auto op = file_pane_text(m.pane.ui, t.text)) return PaneOp{std::move(*op)};
-        return E{[](Model&) {}};
+        return Swallow{};
     }
-    if (m.link.dropped) return E{[](Model&) {}};
-    if (m.dialog.ask.has_value()) return E{[](Model&) {}};
+    if (m.link.dropped) return Swallow{};
+    if (m.dialog.ask.has_value()) return Swallow{};
     if (m.copy && !m.settings.open) return CopyKey{Key::unknown, {}, t.text};
     if (m.hint) {
         std::string typed = m.hint->typed;
@@ -246,14 +203,14 @@ std::optional<App::Msg> App::on(const Model& m, const TextEvent& t) {
         }
         for (std::size_t i = 0; i < m.hint->labels.size(); ++i)
             if (m.hint->labels[i] == typed) return HintPick{i, upper ? HintUse::insert : HintUse::act};
-        return E{[typed](Model& mm) { if (mm.hint) mm.hint->typed = typed; mm.grid_key = 0; }};
+        return HintTyped{std::move(typed)};
     }
     if (m.settings.open) {
         if (auto op = settings_panel_text(m.settings.ui, setting_specs(m.cfg), t.text)) return Panel{std::move(*op)};
         return std::nullopt;
     }
     if (m.search_open)
-        return E{[s = t.text](Model& mm) { mm.search_query.insert(s); (void)mm.term->search(mm.search_query.text); }};
+        return SearchText{t.text};
     return send(m.term->encode_text(t.text, {}));
 }
 
@@ -281,26 +238,15 @@ std::optional<App::Msg> App::on(const Model& m, const ScrollEvent& s_win) {
         return send(out);
     }
     const float rows = s.delta.y / ch * m.cfg.scroll_lines;   // fractional: trackpads scroll by the pixel
-    return E{[rows](Model& mm) { scroll_by(mm, rows); }};
+    return ScrollBy{rows};
 }
 
 std::optional<App::Msg> App::on(const Model&, const ResizeEvent& r) {
-    return E{[s = r.size](Model& mm) {
-        const int c0 = mm.term ? mm.term->cols() : 0, r0 = mm.term ? mm.term->rows() : 0;
-        mm.win = s;
-        fit(mm);
-        if (mm.sized_once && mm.term && (mm.term->cols() != c0 || mm.term->rows() != r0)) mm.resized_at = mm.time;
-        mm.sized_once = true;
-    }};
+    return Resized{r.size};
 }
 
 std::optional<App::Msg> App::on(const Model& m, const FocusEvent& f) {
-    return E{[on = f.focused, rep = m.term->encode_focus(f.focused)](Model& mm) {
-        mm.focused = on;
-        mm.cursor_on = true;
-        mm.cur_a = 1.0f;
-        if (!rep.empty() && mm.pty) mm.pty->write(rep);
-    }};
+    return Focused{f.focused, m.term->encode_focus(f.focused)};
 }
 
 std::optional<App::Msg> App::on(const Model& m, const MouseDown& e_win) {
@@ -311,7 +257,7 @@ std::optional<App::Msg> App::on(const Model& m, const MouseDown& e_win) {
     if (m.settings.open || m.ssh.manager.open) return std::nullopt;
     if (in_pane(m, e_win.position.x)) return std::nullopt;   // the file pane's
     if (m.pane.open && m.pane.ui.focused)   // a click on the terminal takes the keyboard back
-        return E{[](Model& mm) { mm.pane.ui.focused = false; }};
+        return PaneBlur{};
     if (minimap_on(m) && e.position.x > m.size.x - std::max(m.minimap.width, kMinimapRest)) return std::nullopt;   // the minimap's
     const int col = cell_of(e.position.x, m.metrics.origin_x, m.metrics.cell_w, m.term->cols());
     const int row = cell_of(e.position.y, m.metrics.origin_y, m.metrics.cell_h, m.term->rows());
@@ -319,7 +265,7 @@ std::optional<App::Msg> App::on(const Model& m, const MouseDown& e_win) {
     if (btn < 0) return std::nullopt;
     if (m.term->mouse_reporting() && !e.mods.shift) {
         auto bytes = m.term->encode_mouse(btn, col, row, true, false, e.mods);
-        return E{[btn, b = std::move(bytes)](Model& mm) { mm.mouse_button = btn; if (mm.pty) mm.pty->write(b); }};
+        return ReportPress{btn, std::move(bytes)};
     }
     if (btn == 1) return PasteReq{};   // middle click pastes, as everywhere on Linux
     if (btn == 0 && e.click_count == 1 && (e.mods.ctrl || !m.cfg.links_need_ctrl)) {
@@ -331,10 +277,7 @@ std::optional<App::Msg> App::on(const Model& m, const MouseDown& e_win) {
         if (m.sel_chip.size.x > 0.0f && m.sel_chip.contains(e.position)) return std::nullopt;
         // shift+click: extend what is selected to here
         if (e.mods.shift && m.term->has_selection() && e.click_count == 1)
-            return E{[col, vr, p = e.position](Model& mm) {
-                mm.term->select_extend(col, vr);
-                mm.selecting = true; mm.sel_pos = p; mm.sel_edge = 0.0f;
-            }};
+            return SelectExtend{col, vr, e.position, 0.0f, Extend::shift_click};
         // a click in the gutter on a prompt, or a fourth click: the whole command's output
         const bool gutter = m.cfg.shell_marks && e.position.x < m.metrics.origin_x;
         if (gutter || e.click_count >= 4) {
@@ -344,21 +287,12 @@ std::optional<App::Msg> App::on(const Model& m, const MouseDown& e_win) {
                 const std::int64_t end = c.finished && c.end_row > c.prompt_row ? c.end_row : m.term->total_rows();
                 const bool hit = gutter ? abs == c.prompt_row : abs >= c.prompt_row && abs < end;
                 if (!hit || c.output_row < 0 || end - 1 < c.output_row) continue;
-                return E{[o0 = c.output_row, o1 = end - 1](Model& mm) {
-                    mm.term->select_abs(o0, 0, o1, mm.term->cols() - 1, 1);
-                    mm.selecting = false;
-                }};
+                return SelectOutput{c.output_row, end - 1};
             }
             if (gutter) return std::nullopt;
         }
-        return E{[col, row = vr, n = e.click_count, p = e.position, block = e.mods.alt](Model& mm) {
-            mm.term->select_begin(col, row, n, block);   // alt+drag: a rectangle
-            mm.selecting = true;
-            mm.sel_clicks = block ? 0 : n;
-            mm.sel_down = p;
-            mm.sel_pos = p;
-            mm.sel_edge = 0.0f;
-        }};
+        return SelectBegin{col, vr, e.click_count, e.position,
+                           e.mods.alt ? SelectShape::block : SelectShape::linear};   // alt+drag: a rectangle
     }
     return std::nullopt;
 }
@@ -372,17 +306,17 @@ std::optional<App::Msg> App::on(const Model& m, const MouseMove& e_win) {
     if (in_pane(m, e_win.position.x) && m.mouse_button < 0 && !m.selecting) {   // the file pane's
         // the pointer left the terminal: the scrollback map and its peek fold away
         if (m.minimap.open || m.minimap.hover_y >= 0.0f || !m.hover_url.empty())
-            return E{[](Model& mm) { mm.minimap.open = false; mm.minimap.hover_y = -1.0f; mm.hover_url.clear(); }};
+            return PointerLeft{};
         return std::nullopt;
     }
     if (!minimap_on(m) && (m.minimap.open || m.minimap.hover_y >= 0.0f))
-        return E{[](Model& mm) { mm.minimap.open = false; mm.minimap.hover_y = -1.0f; }};
+        return MinimapHover{false, std::nullopt};
     if (minimap_on(m) && m.mouse_button < 0 && !m.selecting) {
         const bool adjacent = !in_corner(m, e_win.position)   // the buttons beside it are theirs
                            && e.position.x > m.size.x - (m.minimap.open ? kMinimapOpen + 8.0f : kMinimapRest + 4.0f);
         const bool over = adjacent && e.position.x > m.size.x - std::max(m.minimap.width, kMinimapRest);
         const float y = over ? e.position.y : -1.0f;
-        if (adjacent != m.minimap.open || y != m.minimap.hover_y) return E{[adjacent, y](Model& mm) { mm.minimap.open = adjacent; mm.minimap.hover_y = y; }};
+        if (adjacent != m.minimap.open || y != m.minimap.hover_y) return MinimapHover{adjacent, y >= 0.0f ? std::optional<float>{y} : std::nullopt};
         if (adjacent) return std::nullopt;
     }
     // The app wants the mouse: motion is the app's, reported once per CELL
@@ -396,10 +330,7 @@ std::optional<App::Msg> App::on(const Model& m, const MouseMove& e_win) {
         if (m.mouse_button >= 0 || (m.term->mouse_any_motion() && inside)) {
             if (col == m.mouse_cell_col && row == m.mouse_cell_row) return std::nullopt;
             auto bytes = m.term->encode_mouse(m.mouse_button >= 0 ? m.mouse_button : 3, col, row, true, true, e.mods);
-            return E{[b = std::move(bytes), col, row](Model& mm) {
-                mm.mouse_cell_col = col; mm.mouse_cell_row = row;
-                if (mm.pty && !b.empty()) mm.pty->write(b);
-            }};
+            return ReportMotion{col, row, std::move(bytes)};
         }
     }
     if (!m.selecting && m.mouse_button < 0) {
@@ -409,19 +340,11 @@ std::optional<App::Msg> App::on(const Model& m, const MouseMove& e_win) {
         const int row = cell_of(e.position.y, m.metrics.origin_y, m.metrics.cell_h, m.term->rows());
         std::string url = armed ? m.term->link_at(col, row) : std::string{};
         if (url == m.hover_url && armed == m.ctrl_held) return std::nullopt;
-        return E{[col, row, armed, u = std::move(url)](Model& mm) {
-            mm.ctrl_held = armed;
-            mm.hover_url = u;
-            (void)mm.term->hover(u.empty() ? -1 : col, u.empty() ? -1 : row);
-        }};
+        return HoverLink{col, row, armed, std::move(url)};
     }
     const int col = cell_of(e.position.x + m.metrics.cell_w * 0.5f, m.metrics.origin_x, m.metrics.cell_w, m.term->cols() + 1);
     if (m.mouse_button >= 0) return std::nullopt;   // a held button with reporting off (shift): nothing to send
-    return E{[col, row = view_row(m, e.position.y), p = e.position, speed = m.term->alt_screen() ? 0.0f : edge_speed(m, e.position.y)](Model& mm) {
-        mm.term->select_extend(col, row);
-        mm.sel_pos = p;
-        mm.sel_edge = speed;
-    }};
+    return SelectExtend{col, view_row(m, e.position.y), e.position, m.term->alt_screen() ? 0.0f : edge_speed(m, e.position.y)};
 }
 
 std::optional<App::Msg> App::on(const Model& m, const MouseUp& e_win) {
@@ -433,7 +356,7 @@ std::optional<App::Msg> App::on(const Model& m, const MouseUp& e_win) {
         const int col = cell_of(e.position.x, m.metrics.origin_x, m.metrics.cell_w, m.term->cols());
         const int row = cell_of(e.position.y, m.metrics.origin_y, m.metrics.cell_h, m.term->rows());
         auto bytes = m.term->encode_mouse(m.mouse_button, col, row, false, false, e.mods);
-        return E{[b = std::move(bytes)](Model& mm) { mm.mouse_button = -1; if (mm.pty && !b.empty()) mm.pty->write(b); }};
+        return ReportRelease{std::move(bytes)};
     }
     if (m.selecting) {
         // a click that selected no text -- it never left its cell, jittered by a
@@ -444,16 +367,15 @@ std::optional<App::Msg> App::on(const Model& m, const MouseUp& e_win) {
         const float slop = std::max(6.0f, 0.75f * m.metrics.cell_w);   // hand jitter, not a drag
         const bool still = dx * dx + dy * dy < slop * slop;
         if (si.any && (si.chars == 0 || (m.sel_clicks == 1 && (still || (si.r0 == si.r1 && si.c0 == si.c1)))))
-            return E{[](Model& mm) { mm.term->select_clear(); mm.selecting = false; mm.sel_edge = 0.0f; mm.sel_clicks = 0; }};
-        if (m.cfg.copy_on_select) return Copy{};
-        return E{[](Model& mm) { mm.selecting = false; mm.sel_edge = 0.0f; }};
+            return SelectEnd{SelectEnding::discard};
+        return SelectEnd{SelectEnding::keep};
     }
     return std::nullopt;
 }
 
 /// Overlay dismissals arrive as Left on the overlay's id.
 std::optional<App::Msg> App::on(const Model& m, const Left& l) {
-    if (m.ssh.picker.open && l.node == part_id("hosts", part_menu)) return E{[](Model& mm) { mm.ssh.picker.open = false; }};
+    if (m.ssh.picker.open && l.node == part_id("hosts", part_menu)) return PickerClose{};
     if (m.settings.open)
         if (auto op = settings_panel_left(m.settings.ui, "settings", l.node)) return Panel{std::move(*op)};
     return std::nullopt;
@@ -467,29 +389,18 @@ std::optional<App::Msg> App::on(const Model& m, const Pressed& p) {
         return WindowAct{p.count >= 2 ? WindowAction::Kind::toggle_maximize : WindowAction::Kind::move};
     for (std::size_t i = 0; i < m.tab_count(); ++i)
         if (p.node == part_id("tabs", i) && p.button == MouseButton::left)
-            return E{[i](Model& mm) {
-                (void)update(mm, SelectTab{TabIndex{i}});
-                mm.strip.drag_tab = static_cast<int>(mm.active);
-                mm.strip.drag_dx = 0.0f;
-            }};
+            return TabPress{TabIndex{i}};
     return std::nullopt;
 }
 
 std::optional<App::Msg> App::on(const Model& m, const Dragged& d) {
     if (m.strip.drag_tab < 0) return std::nullopt;
-    return E{[dx = d.delta.x](Model& mm) {
-        mm.strip.drag_dx += dx;
-        // past half a tab: swap with the neighbour (the pill slides after it)
-        const float tab_w = std::clamp(mm.win.x / static_cast<float>(mm.tab_count()), 96.0f, 236.0f);
-        if (mm.strip.drag_dx > tab_w * 0.5f && mm.active + 1 < mm.tab_count()) { (void)update(mm, MoveTab{Step::forward}); mm.strip.drag_dx -= tab_w; }
-        else if (mm.strip.drag_dx < -tab_w * 0.5f && mm.active > 0) { (void)update(mm, MoveTab{Step::backward}); mm.strip.drag_dx += tab_w; }
-        mm.strip.drag_tab = static_cast<int>(mm.active);
-    }};
+    return TabDrag{d.delta.x};
 }
 
 std::optional<App::Msg> App::on(const Model& m, const Released&) {
     if (m.strip.drag_tab < 0) return std::nullopt;
-    return E{[](Model& mm) { mm.strip.drag_tab = -1; mm.strip.drag_dx = 0.0f; }};
+    return TabRelease{};
 }
 
 /// The tab strip's buttons, and the search bar's (mayag term_search parts).
@@ -522,7 +433,7 @@ std::optional<App::Msg> App::on(const Model& m, const Clicked& c) {
     if (c.node == node_id("sel.copy")) return Copy{};
     if (c.node == node_id("sel.find")) return SearchToggle{};
     if (c.node == node_id("sel.open")) return OpenUrl{m.term->selection_text()};
-    if (c.node == node_id("sel.clear")) return E{[](Model& mm) { mm.term->select_clear(); }};
+    if (c.node == node_id("sel.clear")) return SelectClear{};
     if (!m.search_open) return std::nullopt;
     if (c.node == part_id("search", 5)) return SearchStep{Step::backward};
     if (c.node == part_id("search", 6)) return SearchStep{Step::forward};

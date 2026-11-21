@@ -5,13 +5,18 @@
 //        ├─ TabMsg       NewTab CloseTab SelectTab StepTab MoveTab
 //        ├─ ClockMsg     Blink Tick Clock                       time passed
 //        ├─ TextMsg      Copy PasteReq Pasted CopyOutput CopyKey OpenUrl HintPick
-//        ├─ SearchMsg    SearchToggle SearchStep
-//        ├─ DialogMsg    Answer RememberToggle                  the question
+//        ├─ SearchMsg    SearchToggle SearchStep SearchKey SearchText
+//        ├─ ScrollMsg    ScrollBy ScrollLive ScrollTop ScrollToPrompt ScrollToLine JumpPrompt ClearScrollback
+//        ├─ SelectMsg    SelectBegin SelectExtend SelectOutput SelectEnd SelectClear
+//        ├─ PointerMsg   ReportPress ReportMotion ReportRelease HoverLink MinimapHover PointerLeft
+//        ├─ KeyboardMsg  Typed Swallow ModifierDown FontZoom Compose ComposeEnd Focused Resized
+//        ├─ ModeMsg      ToggleCopyMode OpenHints CloseHints HintBackspace HintTyped PickerText PickerClose PaneBlur
+//        ├─ DialogMsg    Answer RememberToggle DialogFocus      the question
 //        ├─ WindowMsg    RequestQuit WindowAct Panel ToggleSettings
 //        ├─ SshMsg       OpenHosts HostsKey ConnectHost ConnectTyped Reconnect
 //        ├─ ManagerMsg   ToggleManager Manager FilesListed FilesDone UploadPicked TunnelProbe TunnelScan
 //        ├─ PaneMsg      TogglePane PaneOp PaneListed PaneResize PaneWatch PanePreview
-//        └─ Edit         a direct model edit (input gestures with no domain of their own)
+//        └─ Edit         a direct model edit (self-test and shots only)
 //
 // Each leaf names an intent and carries typed data -- ids are SessionId /
 // TabIndex, directions are Step, "already asked" is Confirm, never a bare int
@@ -43,7 +48,10 @@ struct CloseTab { TabIndex tab; Confirm confirm = Confirm::asking; };
 struct SelectTab { TabIndex tab; };
 struct StepTab { Step step; };                                     ///< focus the neighbour
 struct MoveTab { Step step; };                                     ///< reorder the active tab
-using TabMsg = std::variant<NewTab, CloseTab, SelectTab, StepTab, MoveTab>;
+struct TabPress { TabIndex tab; };                                 ///< pressed on the strip: select it, start a drag
+struct TabDrag { float dx = 0.0f; };                               ///< the pressed tab dragged by dx px
+struct TabRelease {};                                              ///< the drag ends
+using TabMsg = std::variant<NewTab, CloseTab, SelectTab, StepTab, MoveTab, TabPress, TabDrag, TabRelease>;
 
 // ── clocks ─────────────────────────────────────────────────────────────────
 struct Blink {};
@@ -66,7 +74,70 @@ using TextMsg = std::variant<Copy, PasteReq, Pasted, CopyOutput, CopyKey, OpenUr
 // ── search ─────────────────────────────────────────────────────────────────
 struct SearchToggle {};                                            ///< open (seeded with the selection) / close
 struct SearchStep { Step step; };                                  ///< previous / next match
-using SearchMsg = std::variant<SearchToggle, SearchStep>;
+struct SearchKey { mayag::Key key; mayag::Mods mods; };            ///< editing the query
+struct SearchText { std::string text; };                           ///< typed into the query
+using SearchMsg = std::variant<SearchToggle, SearchStep, SearchKey, SearchText>;
+
+// ── the scrollback ─────────────────────────────────────────────────────────
+/// Where a jump lands.
+struct ScrollBy { float rows = 0.0f; };                            ///< + = into history (fractional: trackpads)
+struct ScrollLive {};                                              ///< back to the live screen
+struct ScrollTop {};                                               ///< the oldest line kept
+struct ScrollToPrompt { std::int64_t prompt_row = 0; };            ///< a command's prompt at the top
+struct ScrollToLine { std::int64_t line = 0; };                    ///< a history line (0 = oldest) at the top
+struct JumpPrompt { Step step; };                                  ///< the previous / next prompt
+struct ClearScrollback {};                                         ///< screen and history; the shell redraws
+using ScrollMsg = std::variant<ScrollBy, ScrollLive, ScrollTop, ScrollToPrompt, ScrollToLine, JumpPrompt, ClearScrollback>;
+
+// ── the selection (the mouse, with reporting off) ──────────────────────────
+/// What a press selects: from a cell (clicks: 1 chars, 2 a word, 3 a line).
+enum class SelectShape : std::uint8_t { linear, block };
+/// How a selection ends: kept (and maybe copied), or dropped as a mere click.
+enum class SelectEnding : std::uint8_t { keep, discard };
+struct SelectBegin { int col = 0, row = 0, clicks = 1; mayag::Vec2 at; SelectShape shape = SelectShape::linear; };
+/// Extend the selection to a cell. `shift_click` starts a drag from the old
+/// selection; otherwise it is a drag in progress (edge: rows/s past an edge).
+enum class Extend : std::uint8_t { drag, shift_click };
+struct SelectExtend { int col = 0, row = 0; mayag::Vec2 at; float edge = 0.0f; Extend how = Extend::drag; };
+struct SelectOutput { std::int64_t first = 0, last = 0; };          ///< a command's whole output, as lines
+struct SelectEnd { SelectEnding ending = SelectEnding::keep; };
+struct SelectClear {};
+using SelectMsg = std::variant<SelectBegin, SelectExtend, SelectOutput, SelectEnd, SelectClear>;
+
+// ── the pointer: reported to the app, hovering, the minimap ────────────────
+/// A press / motion / release already encoded for the pty (xterm mouse
+/// reporting). `button` is the xterm button code the press holds.
+struct ReportPress { int button = 0; std::string bytes; };
+struct ReportMotion { int col = 0, row = 0; std::string bytes; };
+struct ReportRelease { std::string bytes; };
+struct HoverLink { int col = 0, row = 0; bool armed = false; std::string url; };   ///< url empty: none under the pointer
+struct MinimapHover { bool open = false; std::optional<float> y; };             ///< y: the pointer over it
+struct PointerLeft {};                                             ///< left the terminal: hovers end
+using PointerMsg = std::variant<ReportPress, ReportMotion, ReportRelease, HoverLink, MinimapHover, PointerLeft>;
+
+// ── the keyboard: bytes to the shell, held modifiers, composition, focus ───
+enum class Modifier : std::uint8_t { ctrl, alt };
+enum class Zoom : std::uint8_t { in, out, reset };
+struct Typed { std::string bytes; };                               ///< to the active pty (snaps the view live)
+struct Swallow {};                                                 ///< taken, nothing to do (never reaches the shell)
+struct ModifierDown { Modifier mod; };
+struct FontZoom { Zoom zoom; };
+struct Compose { std::string preedit; };                           ///< the input method's text so far
+struct ComposeEnd {};
+struct Focused { bool focused = false; std::string report; };      ///< report: the focus event for the app (mode 1004)
+struct Resized { mayag::Vec2 size; };
+using KeyboardMsg = std::variant<Typed, Swallow, ModifierDown, FontZoom, Compose, ComposeEnd, Focused, Resized>;
+
+// ── modes over the terminal: copy mode, hints, and who has the keyboard ────
+struct ToggleCopyMode {};                                          ///< ctrl+shift+m
+struct OpenHints {};                                               ///< ctrl+shift+space
+struct CloseHints {};
+struct HintBackspace {};
+struct HintTyped { std::string typed; };                           ///< the label so far (no match yet)
+struct PickerText { std::string text; };                           ///< typed into the host picker
+struct PickerClose {};
+struct PaneBlur {};                                                ///< the terminal takes the keyboard back
+using ModeMsg = std::variant<ToggleCopyMode, OpenHints, CloseHints, HintBackspace, HintTyped, PickerText, PickerClose, PaneBlur>;
 
 // ── the dialog ─────────────────────────────────────────────────────────────
 /// An answer to the open question. A choice is an index into the dialog's
@@ -79,7 +150,8 @@ struct Answer {
     [[nodiscard]] static Answer choose(std::size_t i) { return {Choose{i}}; }
 };
 struct RememberToggle {};                                          ///< the "don't ask again" box
-using DialogMsg = std::variant<Answer, RememberToggle>;
+struct DialogFocus { Step step; };                                 ///< tab / arrows between the actions
+using DialogMsg = std::variant<Answer, RememberToggle, DialogFocus>;
 
 // ── the window and its settings ────────────────────────────────────────────
 struct RequestQuit {};                                             ///< the window's close button
@@ -123,9 +195,12 @@ struct PanePreview { std::string path; std::optional<mayag::dsl::FilePreview> pr
 using PaneMsg = std::variant<TogglePane, PaneOp, PaneListed, PaneResize, PaneWatch, PanePreview>;
 
 // ── the root ───────────────────────────────────────────────────────────────
+/// A direct model edit. For the self-test and scripted shots only: the app
+/// itself names every change (tests/layering.cmake rejects E{...} in src/app
+/// and src/view).
 using Edit = mayag::Edit<Model>;
-using AnyBase = std::variant<ShellMsg, TabMsg, ClockMsg, TextMsg, SearchMsg, DialogMsg, WindowMsg, SshMsg, ManagerMsg,
-                             PaneMsg, Edit>;
+using AnyBase = std::variant<ShellMsg, TabMsg, ClockMsg, TextMsg, SearchMsg, ScrollMsg, SelectMsg, PointerMsg, KeyboardMsg,
+                             ModeMsg, DialogMsg, WindowMsg, SshMsg, ManagerMsg, PaneMsg, Edit>;
 /// The message. Derived (not an alias) so it is one nominal type in errors and
 /// forward declarations. A leaf converts straight in -- `Any m = NewTab{}` --
 /// because std::variant's converting constructor finds the one domain that

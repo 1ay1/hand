@@ -61,6 +61,13 @@ App::Cmd App::update(Model& m, RememberToggle) {
     return {};
 }
 
+App::Cmd App::update(Model& m, DialogFocus f) {
+    if (!m.dialog.ask) return {};
+    const std::size_t n = m.dialog.ask->kind == Ask::Kind::paste ? 3 : 2;   // the actions it offers
+    m.dialog.ask->focus = wrap(m.dialog.ask->focus, f.step, n);
+    return {};
+}
+
 App::Cmd App::update(Model& m, Answer a) {
     if (!m.dialog.ask) return {};
     const Ask asked = *std::exchange(m.dialog.ask, std::nullopt);

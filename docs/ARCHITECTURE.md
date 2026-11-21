@@ -73,10 +73,28 @@ be absent is an `optional`, never a `bool` next to its data.
 ### Msg: a closed tree of sums
 
 ```
-Msg ─┬─ ShellMsg   ─┬─ TabMsg   ─┬─ ClockMsg ─┬─ TextMsg  ─┬─ SearchMsg
-     ├─ DialogMsg  ─┼─ WindowMsg ┼─ SshMsg   ─┼─ ManagerMsg ┴─ PaneMsg
-     └─ Edit (a direct model edit from an input gesture)
+Msg ─┬─ ShellMsg    Output Exited
+     ├─ TabMsg      NewTab CloseTab SelectTab StepTab MoveTab TabPress TabDrag TabRelease
+     ├─ ClockMsg    Blink Tick Clock
+     ├─ TextMsg     Copy PasteReq Pasted CopyOutput CopyKey OpenUrl HintPick
+     ├─ SearchMsg   SearchToggle SearchStep SearchKey SearchText
+     ├─ ScrollMsg   ScrollBy ScrollLive ScrollTop ScrollToPrompt ScrollToLine JumpPrompt ClearScrollback
+     ├─ SelectMsg   SelectBegin SelectExtend SelectOutput SelectEnd SelectClear
+     ├─ PointerMsg  ReportPress ReportMotion ReportRelease HoverLink MinimapHover PointerLeft
+     ├─ KeyboardMsg Typed Swallow ModifierDown FontZoom Compose ComposeEnd Focused Resized
+     ├─ ModeMsg     ToggleCopyMode OpenHints CloseHints HintBackspace HintTyped PickerText PickerClose PaneBlur
+     ├─ DialogMsg   Answer RememberToggle DialogFocus
+     ├─ WindowMsg   RequestQuit WindowAct Panel ToggleSettings
+     ├─ SshMsg      OpenHosts HostsKey ConnectHost ConnectTyped Reconnect
+     ├─ ManagerMsg  ToggleManager Manager FilesListed FilesDone UploadPicked TunnelProbe TunnelScan
+     ├─ PaneMsg     TogglePane PaneOp PaneListed PaneResize PaneWatch PanePreview
+     └─ Edit        a direct model edit -- the self-test and shots only
 ```
+
+Input handlers (`src/app/input.cpp`) are pure: they read the model, decide
+which message a key, click or drag is, encode any bytes, and return it. Every
+change to the model is a named message with its own `update`. The `layering`
+test rejects an anonymous `mayag::Edit` anywhere in `src/app` or `src/view`.
 
 `include/hand/app/msg.hpp` defines each domain as a `std::variant` of leaf
 structs, and `msg::Any` as a struct deriving from the variant of domains.
@@ -93,6 +111,10 @@ domain's file.
 | ShellMsg, ClockMsg | `src/app/session.cpp` |
 | TabMsg     | `src/app/tabs.cpp`      |
 | TextMsg, SearchMsg | `src/app/clipboard.cpp` |
+| ScrollMsg  | `src/app/scroll.cpp`    |
+| SelectMsg, PointerMsg | `src/app/pointer.cpp` |
+| KeyboardMsg | `src/app/keyboard.cpp` |
+| ModeMsg    | `src/app/modes.cpp`     |
 | DialogMsg, RequestQuit | `src/app/dialog.cpp` |
 | Panel, ToggleSettings | `src/app/settings.cpp` |
 | SshMsg, ManagerMsg | `src/app/ssh.cpp` |
@@ -137,15 +159,17 @@ Messages follow the same rules:
    `optional` for modes. No `bool` beside the data it guards.
 4. **No magic values in messages.** Ids are `Strong`, directions are `Step`,
    choices are enums, and alternatives are variants.
-5. **Effects are returned.** `update` mutates the model and returns a `Cmd`:
+5. **Changes are named.** Input decides; `update` changes. No anonymous model
+   edits in the app or view (enforced by `layering`).
+6. **Effects are returned.** `update` mutates the model and returns a `Cmd`:
    clipboard, title, window actions, tasks. Threads exist only as mayag
    streams and tasks (`Sub::stream`, `Task`).
-6. **The UI is mayag.** View code composes widgets with theme tokens. A new
+7. **The UI is mayag.** View code composes widgets with theme tokens. A new
    visual is a mayag widget.
-7. **Every behaviour has a check.** `hand --headless` (ctest `app_headless`)
+8. **Every behaviour has a check.** `hand --headless` (ctest `app_headless`)
    drives the app like a user. Add an `ok(...)` for every fix. Screens are
    reproducible with `hand --png out.png --shot NAME`.
-8. **Zero warnings.** hand builds with `-Wall -Wextra -Wshadow -Wconversion`,
+9. **Zero warnings.** hand builds with `-Wall -Wextra -Wshadow -Wconversion`,
    and a new warning is a bug.
 
 ## Run modes (`src/cli/`)

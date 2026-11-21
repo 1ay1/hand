@@ -177,7 +177,7 @@ float history(std::vector<Node>& layers, const Ctx& c, const Model& m, const Ter
         auto tail = live_tail(c, "tail", b, {.grid = &tg, .theme = term_theme(m), .view = o, .rows = n, .ease = m.tail_t,
                                             .fresh = m.new_below}, &tail_h);
         if (!tail.empty())
-            tail.front() = (node(std::move(tail.front())) | on_click([] { return App::Msg{E{[](Model& mm) { App::scroll_by(mm, -1e9f); }}}; })).build();
+            tail.front() = (node(std::move(tail.front())) | on_click([] { return App::Msg{App::ScrollLive{}}; })).build();
         push_all(layers, std::move(tail));
     }
     const bool back = m.scroll_d > 0.01f || m.term->scroll_offset() > 0;
@@ -195,11 +195,7 @@ float history(std::vector<Node>& layers, const Ctx& c, const Model& m, const Ter
                                                    .at = std::clamp<std::int64_t>(info.first - out0 + 1, 1, span), .span = span,
                                                    .now = m.time, .ease = m.sticky_t, .marks = cfg.shell_marks}))
                               | on_click([prompt = cmd->prompt_row] {
-                                    return App::Msg{E{[prompt](Model& mm) {   // fly to its prompt
-                                        const auto i = mm.term->scroll_info();
-                                        const float want = static_cast<float>(i.total - i.visible) - static_cast<float>(std::max<std::int64_t>(prompt - 1, 0));
-                                        App::scroll_by(mm, std::clamp(want, 0.0f, static_cast<float>(mm.term->history())) - mm.scroll_goal);
-                                    }}};
+                                    return App::Msg{App::ScrollToPrompt{prompt}};   // fly to its prompt
                                 })).build());
         }
     if (back && !m.term->alt_screen()) {
@@ -207,7 +203,7 @@ float history(std::vector<Node>& layers, const Ctx& c, const Model& m, const Ter
         const int pct = info.total > info.visible ? static_cast<int>(100.0 * info.first / (info.total - info.visible)) : 100;
         layers.push_back((node(history_chip(c, "tolive", b, {.rows_up = static_cast<int>(std::lround(m.scroll_d)), .percent = pct,
                                                             .fresh = m.new_below, .lift = tail_h}))
-                          | on_click([] { return App::Msg{E{[](Model& mm) { App::scroll_by(mm, -1e9f); }}}; })).build());
+                          | on_click([] { return App::Msg{App::ScrollLive{}}; })).build());
     }
     return tail_h;
 }
@@ -246,10 +242,7 @@ void minimap(std::vector<Node>& layers, const Ctx& c, const Model& m, const Term
     layers.push_back((node(scrollback_dock(c, "minimap", sb, m.size))
                       | on_slide([sb, hgt](Vec2 at) -> App::Msg {
                             const int line = scrollback_line_at(sb, at.y, hgt);
-                            return E{[line](Model& mm) {
-                                const auto i = mm.term->scroll_info();
-                                App::scroll_by(mm, static_cast<float>(i.total - i.visible - line) - mm.scroll_goal);
-                            }};
+                            return App::ScrollToLine{line};
                         })).build());
 
     if (m.minimap.peek_t <= 0.0f || m.minimap.hover_y < 0.0f || info.total <= 0) return;

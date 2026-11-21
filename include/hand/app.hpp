@@ -38,6 +38,24 @@ struct App {
     using CopyOutput = msg::CopyOutput; using CopyKey = msg::CopyKey;       using OpenUrl = msg::OpenUrl;
     using HintPick = msg::HintPick;     using HintUse = msg::HintUse;
     using SearchToggle = msg::SearchToggle; using SearchStep = msg::SearchStep;
+    using SearchKey = msg::SearchKey;   using SearchText = msg::SearchText;
+    using ScrollBy = msg::ScrollBy;     using ScrollLive = msg::ScrollLive; using ScrollTop = msg::ScrollTop;
+    using ScrollToPrompt = msg::ScrollToPrompt; using ScrollToLine = msg::ScrollToLine;
+    using JumpPrompt = msg::JumpPrompt; using ClearScrollback = msg::ClearScrollback;
+    using SelectBegin = msg::SelectBegin; using SelectExtend = msg::SelectExtend; using SelectOutput = msg::SelectOutput;
+    using SelectEnd = msg::SelectEnd;   using SelectClear = msg::SelectClear;
+    using SelectShape = msg::SelectShape; using SelectEnding = msg::SelectEnding; using Extend = msg::Extend;
+    using ReportPress = msg::ReportPress; using ReportMotion = msg::ReportMotion; using ReportRelease = msg::ReportRelease;
+    using HoverLink = msg::HoverLink;   using MinimapHover = msg::MinimapHover; using PointerLeft = msg::PointerLeft;
+    using Typed = msg::Typed;           using Swallow = msg::Swallow;       using ModifierDown = msg::ModifierDown;
+    using FontZoom = msg::FontZoom;     using Compose = msg::Compose;       using ComposeEnd = msg::ComposeEnd;
+    using Focused = msg::Focused;       using Resized = msg::Resized;
+    using Modifier = msg::Modifier;     using Zoom = msg::Zoom;
+    using ToggleCopyMode = msg::ToggleCopyMode; using OpenHints = msg::OpenHints; using CloseHints = msg::CloseHints;
+    using HintBackspace = msg::HintBackspace; using HintTyped = msg::HintTyped;
+    using PickerText = msg::PickerText; using PickerClose = msg::PickerClose; using PaneBlur = msg::PaneBlur;
+    using TabPress = msg::TabPress;     using TabDrag = msg::TabDrag;       using TabRelease = msg::TabRelease;
+    using DialogFocus = msg::DialogFocus;
     using Answer = msg::Answer;         using RememberToggle = msg::RememberToggle;
     using RequestQuit = msg::RequestQuit; using WindowAct = msg::WindowAct;
     using Panel = msg::Panel;           using ToggleSettings = msg::ToggleSettings;
@@ -67,6 +85,7 @@ struct App {
     // DialogMsg (src/app/dialog.cpp)
     static Cmd update(Model& m, Answer a);
     static Cmd update(Model& m, RememberToggle);
+    static Cmd update(Model& m, DialogFocus f);
     // WindowMsg (src/app/dialog.cpp, src/app/settings.cpp)
     static Cmd update(Model& m, RequestQuit);
     static Cmd update(Model&, WindowAct w) { return mayag::WindowAction{.kind = w.kind}; }
@@ -78,6 +97,9 @@ struct App {
     static Cmd update(Model& m, SelectTab s);
     static Cmd update(Model& m, StepTab s);
     static Cmd update(Model& m, MoveTab s);
+    static Cmd update(Model& m, TabPress p);
+    static Cmd update(Model& m, TabDrag d);
+    static Cmd update(Model& m, TabRelease);
     // TextMsg, SearchMsg (src/app/clipboard.cpp)
     static Cmd update(Model& m, Copy);
     static Cmd update(Model& m, PasteReq);
@@ -88,6 +110,46 @@ struct App {
     static Cmd update(Model& m, HintPick h);
     static Cmd update(Model& m, SearchToggle);
     static Cmd update(Model& m, SearchStep s);
+    static Cmd update(Model& m, SearchKey k);
+    static Cmd update(Model& m, SearchText t);
+    // ScrollMsg (src/app/scroll.cpp)
+    static Cmd update(Model& m, ScrollBy s);
+    static Cmd update(Model& m, ScrollLive);
+    static Cmd update(Model& m, ScrollTop);
+    static Cmd update(Model& m, ScrollToPrompt s);
+    static Cmd update(Model& m, ScrollToLine s);
+    static Cmd update(Model& m, JumpPrompt j);
+    static Cmd update(Model& m, ClearScrollback);
+    // SelectMsg, PointerMsg (src/app/pointer.cpp)
+    static Cmd update(Model& m, SelectBegin s);
+    static Cmd update(Model& m, SelectExtend s);
+    static Cmd update(Model& m, SelectOutput s);
+    static Cmd update(Model& m, SelectEnd s);
+    static Cmd update(Model& m, SelectClear);
+    static Cmd update(Model& m, ReportPress r);
+    static Cmd update(Model& m, ReportMotion r);
+    static Cmd update(Model& m, ReportRelease r);
+    static Cmd update(Model& m, HoverLink h);
+    static Cmd update(Model& m, MinimapHover h);
+    static Cmd update(Model& m, PointerLeft);
+    // KeyboardMsg (src/app/keyboard.cpp)
+    static Cmd update(Model& m, Typed t);
+    static Cmd update(Model&, Swallow) { return {}; }
+    static Cmd update(Model& m, ModifierDown d);
+    static Cmd update(Model& m, FontZoom z);
+    static Cmd update(Model& m, Compose c);
+    static Cmd update(Model& m, ComposeEnd);
+    static Cmd update(Model& m, Focused f);
+    static Cmd update(Model& m, Resized r);
+    // ModeMsg (src/app/modes.cpp)
+    static Cmd update(Model& m, ToggleCopyMode);
+    static Cmd update(Model& m, OpenHints);
+    static Cmd update(Model& m, CloseHints);
+    static Cmd update(Model& m, HintBackspace);
+    static Cmd update(Model& m, HintTyped h);
+    static Cmd update(Model& m, PickerText t);
+    static Cmd update(Model& m, PickerClose);
+    static Cmd update(Model& m, PaneBlur);
     // SshMsg, ManagerMsg (src/app/ssh.cpp)
     static Cmd update(Model& m, OpenHosts);
     static Cmd update(Model& m, HostsKey k);
@@ -110,7 +172,7 @@ struct App {
     static Cmd update(Model& m, PanePreview);
     /// The pane follows the active tab's directory: list it if it moved.
     static Cmd pane_sync(Model& m);
-    // Edit: a direct model edit from an input gesture
+    // Edit: a direct model edit (the self-test and scripted shots only)
     static Cmd update(Model& m, msg::Edit e) { e(m); settle_scroll(m); return {}; }
 
     // src/app/input.cpp: window input -> messages

@@ -431,21 +431,7 @@ void activate(Model& m, std::size_t i) {
 
 std::optional<App::Msg> send(std::string bytes) {
     if (bytes.empty()) return std::nullopt;
-    return E{[b = std::move(bytes)](Model& mm) {
-        mm.fx.typed_at = mm.active_at = mm.time;   // the motion effects follow keystrokes, pty or not
-        if (b.find('\r') != std::string::npos) mm.fx.enter_at = mm.time;
-        if (!mm.pty) return;
-        mm.term->select_clear();
-        mm.term->scroll_to_bottom();   // typing snaps back to the live screen
-        mm.scroll_d = mm.scroll_goal = 0.0f;
-        mm.scroll_applied = 0;
-        mm.new_below = 0;
-        mm.cursor_on = true;
-        mm.cur_a = 1.0f;
-        mm.fx.typed_at = mm.active_at = mm.time;
-        if (b.find('\r') != std::string::npos) mm.fx.enter_at = mm.time;
-        mm.pty->write(b);
-    }};
+    return App::Typed{std::move(bytes)};
 }
 
 

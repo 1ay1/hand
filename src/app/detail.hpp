@@ -17,7 +17,6 @@ namespace hand::detail {
 using mayag::Sink;
 using mayag::FontFamily;
 using mayag::dsl::SshHost;
-using E = mayag::Edit<Model>;
 
 inline constexpr float kMinimapRest = 14.0f, kMinimapOpen = 96.0f;
 

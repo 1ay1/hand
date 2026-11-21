@@ -166,6 +166,17 @@ App::Cmd App::update(Model& m, SearchToggle) {
     return {};
 }
 
+App::Cmd App::update(Model& m, SearchKey k) {
+    if (m.search_query.handle_key(k.key, k.mods)) (void)m.term->search(m.search_query.text);
+    return {};
+}
+
+App::Cmd App::update(Model& m, SearchText t) {
+    m.search_query.insert(t.text);
+    (void)m.term->search(m.search_query.text);
+    return {};
+}
+
 App::Cmd App::update(Model& m, SearchStep s) {
     if (s.step == Step::forward) m.term->search_next(); else m.term->search_prev();
     settle_scroll(m);   // fly to the match
