@@ -12,6 +12,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cmath>
+#include <filesystem>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -22,6 +23,11 @@
 #include <unordered_map>
 
 namespace hand::detail {
+
+HostSources host_sources(const Config& c) {
+    return HostSources{.store = (std::filesystem::path{config_path()}.parent_path() / "hosts.vibe").string(),
+                       .read_known = c.ssh_known_hosts};
+}
 
 using namespace mayag;
 using namespace mayag::dsl;

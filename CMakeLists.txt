@@ -48,37 +48,60 @@ add_library(vibe STATIC external/vibe/vibe.c)
 target_include_directories(vibe PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/external/vibe)
 set_target_properties(vibe PROPERTIES C_STANDARD 11)
 
-# ── the app, by layer (each a folder; the UI is only ever mayag widgets) ────
-#   core/    the terminal itself: toe (term), the pty, shell integration
-#   config/  the settings table, hand.vibe, the 913-scheme catalogue
-#   ssh/     hosts: ~/.ssh/config, known_hosts, hosts.vibe, the ssh argv
-#   app/     the program: update and input, one file per concern
-#   view/    the widget tree: model -> mayag widget props, composed
-#   main.cpp fonts, config, modes (window / --png / --headless)
-file(GLOB HAND_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/core/*.cpp ${CMAKE_CURRENT_SOURCE_DIR}/src/config/*.cpp
-     ${CMAKE_CURRENT_SOURCE_DIR}/src/ssh/*.cpp ${CMAKE_CURRENT_SOURCE_DIR}/src/app/*.cpp ${CMAKE_CURRENT_SOURCE_DIR}/src/view/*.cpp)
-add_executable(hand src/main.cpp ${HAND_SOURCES})
-target_include_directories(hand PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(hand PRIVATE mayag::mayag toe::toe vibe)
+# ── the app, by layer ── each a library that links only the layers below it ──
+#
+#   hand_core    src/core     the terminal itself: toe (term), the pty, procs,
+#                             shell integration, the OS seam, vocabulary types
+#   hand_config  src/config   the settings table, hand.vibe, the scheme catalogue
+#   hand_ssh     src/ssh      hosts: ~/.ssh/config, known_hosts, hosts.vibe, sftp
+#   hand_app     src/app      the program: update + input, one file per domain
+#                src/view     the widget tree (App::view), mayag widgets only
+#   hand         src/main.cpp fonts, config, modes (window / --png / --headless)
+#
+#   core ◀─ config ◀─┐
+#   core ◀─ ssh    ◀─┴─ app ◀─ hand          (and every layer may use mayag/toe)
+#
+# The headers share one include/ root, so the link graph alone cannot stop
+# `#include <hand/app/...>` in core; tests/layering.cmake checks every
+# include against this table and fails the build's test run on a violation.
+function(hand_layer name)
+    cmake_parse_arguments(L "" "" "DIRS;LINK" ${ARGN})
+    set(srcs)
+    foreach(d ${L_DIRS})
+        file(GLOB s CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/${d}/*.cpp)
+        list(APPEND srcs ${s})
+    endforeach()
+    add_library(${name} STATIC ${srcs})
+    target_include_directories(${name} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(${name} PUBLIC ${L_LINK})
+    target_compile_options(${name} PRIVATE ${HAND_WARNINGS})
+endfunction()
+
+hand_layer(hand_core   DIRS core   LINK mayag::mayag toe::toe)
+hand_layer(hand_config DIRS config LINK hand_core vibe)
+hand_layer(hand_ssh    DIRS ssh    LINK hand_core vibe)
+hand_layer(hand_app    DIRS app view LINK hand_config hand_ssh)
+
+add_executable(hand src/main.cpp)
+target_link_libraries(hand PRIVATE hand_app)
 target_compile_options(hand PRIVATE ${HAND_WARNINGS})
 
-# ── the OS seam ──────────────────────────────────────────────────────────
+# ── the OS seam ───────────────────────────────────────────────────────────────────────────
 # The pty is the only part of hand that is not portable C++: forkpty lives in
 # libutil on glibc, and on Windows it is ConPTY (kernel32) plus shlwapi for
-# the host-glob fallback. src/core/platform_{posix,win}.cpp are guarded
-# internally, so the glob above can stay dumb.
+# the host-glob fallback. It all belongs to hand_core, and travels up from it.
 if(WIN32)
-    target_link_libraries(hand PRIVATE shlwapi)
+    target_link_libraries(hand_core PUBLIC shlwapi)
     # ConPTY needs Windows 10 1809 (the API that makes a real terminal
     # possible at all); say so rather than inheriting MinGW's older default.
     # NOGDI is deliberately NOT set: mayag's Win32 backend blits through GDI.
-    target_compile_definitions(hand PRIVATE _WIN32_WINNT=0x0A00 WINVER=0x0A00
-                                            WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_compile_definitions(hand_core PUBLIC _WIN32_WINNT=0x0A00 WINVER=0x0A00
+                                                WIN32_LEAN_AND_MEAN NOMINMAX)
     # (A fully static MinGW link was measured: +15 ms to first text, as the
     # bigger image pages in cold, while the shared runtime DLLs are already
     # resident. So the runtime stays dynamic.)
 elseif(NOT APPLE)
-    target_link_libraries(hand PRIVATE util)   # glibc forkpty
+    target_link_libraries(hand_core PUBLIC util)   # glibc forkpty
 endif()
 # Release ships no symbols: an 8.9 MB unstripped hand.exe took 11 ms longer
 # to launch than the stripped 5.1 MB one (on-access scanning reads the whole

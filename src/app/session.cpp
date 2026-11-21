@@ -147,7 +147,7 @@ App::Cmd App::init(Model& m) {
     fit(m);
     // the host book: prod detection on tabs needs it before the picker ever opens
     if (!m.cfg.demo) {
-        m.ssh.sources = resolve(HostSources{.read_known = m.cfg.ssh_known_hosts});
+        m.ssh.sources = resolve(detail::host_sources(m.cfg));
         m.ssh.book = hosts_load(m.ssh.sources);
     }
     startup::mark("hand: init: host book");

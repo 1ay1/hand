@@ -1,7 +1,6 @@
 // hand::hosts — ~/.ssh/config, known_hosts and hosts.vibe.
 
 #include <hand/ssh/hosts.hpp>
-#include <hand/config/config.hpp>
 #include <hand/core/proc.hpp>
 
 #include <vibe.h>
@@ -230,7 +229,6 @@ const Host* HostBook::find(std::string_view alias) const {
 HostSources resolve(HostSources s) {
     if (s.ssh_config.empty()) s.ssh_config = home() + "/.ssh/config";
     if (s.known_hosts.empty()) s.known_hosts = home() + "/.ssh/known_hosts";
-    if (s.store.empty()) s.store = (fs::path{config_path()}.parent_path() / "hosts.vibe").string();
     return s;
 }
 

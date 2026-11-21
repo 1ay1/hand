@@ -27,7 +27,7 @@ App::Cmd App::update(Model& m, OpenHosts) {
     if (m.ssh.picker.open) { m.ssh.picker.open = false; return {}; }
     if (m.dialog.ask.has_value() || m.settings.open) return {};
     // read the files fresh: ~/.ssh/config may have changed since launch
-    m.ssh.sources = resolve(HostSources{.read_known = m.cfg.ssh_known_hosts});
+    m.ssh.sources = resolve(detail::host_sources(m.cfg));
     if (!m.cfg.demo) m.ssh.book = hosts_load(m.ssh.sources);
     m.ssh.picker.open = true;
     m.ssh.picker.query = {};
@@ -139,7 +139,7 @@ App::Cmd App::update(Model& m, ToggleManager) {
     m.settings.open = false;
     m.ssh.picker.open = false;
     // the files may have changed since launch (or since the picker read them)
-    m.ssh.sources = resolve(HostSources{.read_known = m.cfg.ssh_known_hosts});
+    m.ssh.sources = resolve(detail::host_sources(m.cfg));
     if (!m.cfg.demo) {
         m.ssh.book = hosts_load(m.ssh.sources);
         m.ssh.manager.imports = import_sources();   // PuTTY's registry and MobaXterm.ini: a few ms

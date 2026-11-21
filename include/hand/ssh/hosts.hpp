@@ -65,7 +65,7 @@ enum Inherit : std::uint8_t { inherit_user = 1, inherit_jump = 2, inherit_identi
 struct HostSources {
     std::string ssh_config;       ///< "" = ~/.ssh/config
     std::string known_hosts;      ///< "" = ~/.ssh/known_hosts
-    std::string store;            ///< "" = hosts.vibe beside hand.vibe
+    std::string store;            ///< hosts.vibe (the app puts it beside hand.vibe)
     bool        read_known = true;
 };
 

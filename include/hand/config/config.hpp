@@ -6,6 +6,8 @@
 // settings panel (mayag settings_panel), reads and writes ~/.config/hand/
 // hand.vibe, and validates input. Adding a setting is adding a row.
 
+#include <hand/core/palette.hpp>
+
 #include <mayag/widget/settings_panel.hpp>
 #include <mayag/widget/tab_strip.hpp>
 #include <mayag/widget/terminal/cursor_fx.hpp>
@@ -15,14 +17,6 @@
 #include <vector>
 
 namespace hand {
-
-/// The 16 ANSI colours plus default ink/paper/cursor/selection, as 0xRRGGBB.
-struct Palette {
-    std::uint32_t fg = 0xABB2BF, bg = 0x282C34, cursor = 0x74ADE8, selection = 0x3E4451;
-    std::uint32_t ansi[16] = {0x282C34, 0xE06C75, 0x98C379, 0xE5C07B, 0x61AFEF, 0xC678DD, 0x56B6C2, 0xABB2BF,
-                              0x5C6370, 0xE06C75, 0x98C379, 0xE5C07B, 0x61AFEF, 0xC678DD, 0x56B6C2, 0xFFFFFF};
-    bool light = false;
-};
 
 // What the widgets already name, hand uses as is: one type per idea.
 using CursorAnim = mayag::dsl::CursorMotion;

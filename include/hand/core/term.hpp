@@ -8,7 +8,7 @@
 // This file only translates between toe's types and mayag's widget types.
 // Kept out of the app header so editing the view never recompiles toe glue.
 
-#include <hand/config/config.hpp>
+#include <hand/core/palette.hpp>
 
 #include <mayag/core/event.hpp>
 #include <mayag/widget/scrollback_bar.hpp>

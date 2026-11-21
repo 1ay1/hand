@@ -23,6 +23,8 @@ inline constexpr float kMinimapRest = 14.0f, kMinimapOpen = 96.0f;
 
 struct Risk { bool flag = false; std::string note; };
 
+/// Where hosts come from: ~/.ssh, and hosts.vibe beside hand.vibe.
+HostSources host_sources(const Config& c);
 /// Seconds on the wall clock (unix), for "3h ago".
 std::int64_t unix_now();
 /// Milliseconds on the wall clock, for command timings.
