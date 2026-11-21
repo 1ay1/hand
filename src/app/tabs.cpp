@@ -26,10 +26,10 @@ App::Cmd App::update(Model& m, NewTab) {
     const bool first_split = m.tab_count() == 1 && !m.cfg.strip_always();
     m.tabs.push_back(spawn_session(m, cwd));
     const std::size_t i = m.tabs.size() - 1;
-    m.switch_dir = 1;
+    m.strip.switch_dir = 1;
     activate(m, i);
-    m.switch_t = m.cfg.motion ? 0.0f : 1.0f;
-    if (first_split && !m.cfg.motion) m.strip_t = 1.0f;
+    m.strip.switch_t = m.cfg.motion ? 0.0f : 1.0f;
+    if (first_split && !m.cfg.motion) m.strip.t = 1.0f;
     fit(m);
     return SetTitle{m.title};
 }
@@ -37,10 +37,10 @@ App::Cmd App::update(Model& m, NewTab) {
 App::Cmd App::update(Model& m, CloseTab c) {
     const std::size_t i = c.tab.get();
     if (i >= m.tab_count()) return {};
-    if (c.confirm == Confirm::asking && m.cfg.close_confirm != CloseConfirm::never && !m.ask) {
+    if (c.confirm == Confirm::asking && m.cfg.close_confirm != CloseConfirm::never && !m.dialog.ask) {
         const bool busy = !busy_of(m.at(i), nullptr).empty();
         if (busy || m.cfg.close_confirm == CloseConfirm::always) {
-            m.ask = Ask{.kind = m.tab_count() == 1 ? Ask::Kind::quit : Ask::Kind::close_tab, .tab = c.tab, .focus = 1};
+            m.dialog.ask = Ask{.kind = m.tab_count() == 1 ? Ask::Kind::quit : Ask::Kind::close_tab, .tab = c.tab, .focus = 1};
             return {};
         }
     }
@@ -50,14 +50,14 @@ App::Cmd App::update(Model& m, CloseTab c) {
     }
     if (i == m.active) {
         const std::size_t to = i + 1 < m.tab_count() ? i + 1 : i - 1;   // the neighbour on the right, else left
-        m.switch_dir = to > i ? 1 : -1;
+        m.strip.switch_dir = to > i ? 1 : -1;
         activate(m, to);
-        m.switch_t = m.cfg.motion ? 0.0f : 1.0f;
+        m.strip.switch_t = m.cfg.motion ? 0.0f : 1.0f;
     }
     // the closing session's pty dies with its Session (SIGHUP to the shell)
     m.tabs.erase(m.tabs.begin() + static_cast<long>(i));
     if (m.active > i) --m.active;
-    if (m.tab_count() == 1 && !m.cfg.strip_always() && !m.cfg.motion) m.strip_t = 0.0f;
+    if (m.tab_count() == 1 && !m.cfg.strip_always() && !m.cfg.motion) m.strip.t = 0.0f;
     fit(m);
     return SetTitle{m.title};
 }
@@ -65,9 +65,9 @@ App::Cmd App::update(Model& m, CloseTab c) {
 App::Cmd App::update(Model& m, SelectTab st) {
     const std::size_t i = st.tab.get();
     if (i >= m.tab_count() || i == m.active) return {};
-    m.switch_dir = i > m.active ? 1 : -1;
+    m.strip.switch_dir = i > m.active ? 1 : -1;
     activate(m, i);
-    m.switch_t = m.cfg.motion ? 0.0f : 1.0f;
+    m.strip.switch_t = m.cfg.motion ? 0.0f : 1.0f;
     std::vector<Cmd> cmds;
     cmds.push_back(SetTitle{m.title});
     cmds.push_back(pane_sync(m));

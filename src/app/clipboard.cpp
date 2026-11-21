@@ -50,8 +50,8 @@ App::Cmd App::update(Model& m, HintPick h) {
         return {};
     }
     if (hint.kind == Term::Hint::Kind::url) return update(m, OpenUrl{hint.text});
-    m.toast = Toast{.title = "copied", .body = hint.text, .kind = Toast::Kind::info};
-    m.toast_at = m.time;
+    m.toast.card = Toast{.title = "copied", .body = hint.text, .kind = Toast::Kind::info};
+    m.toast.at = m.time;
     return WriteClipboard{hint.text};
 }
 
@@ -102,12 +102,12 @@ App::Cmd App::update(Model& m, CopyOutput) {
     for (auto it = cs.rbegin(); it != cs.rend(); ++it) {
         if (!it->ran || !it->finished) continue;
         const std::string out = m.term->output_text(*it);
-        m.toast = Toast{.title = "copied the output of", .body = m.term->command_text(*it), .kind = Toast::Kind::info};
-        m.toast_at = m.time;
+        m.toast.card = Toast{.title = "copied the output of", .body = m.term->command_text(*it), .kind = Toast::Kind::info};
+        m.toast.at = m.time;
         return WriteClipboard{out};
     }
-    m.toast = Toast{.title = "no command output yet", .body = "needs shell integration (settings \u203A shell)", .kind = Toast::Kind::warning};
-    m.toast_at = m.time;
+    m.toast.card = Toast{.title = "no command output yet", .body = "needs shell integration (settings \u203A shell)", .kind = Toast::Kind::warning};
+    m.toast.at = m.time;
     return {};
 }
 
@@ -117,10 +117,10 @@ App::Cmd App::update(Model& m, Copy) {
     if (!m.term->has_selection()) return {};
     const auto si = m.term->selection_info();
     m.copy_flash_at = m.time;
-    m.toast = Toast{.title = "copied", .body = std::to_string(si.lines) + (si.lines == 1 ? " line, " : " lines, ") +
+    m.toast.card = Toast{.title = "copied", .body = std::to_string(si.lines) + (si.lines == 1 ? " line, " : " lines, ") +
                                              std::to_string(si.chars) + " chars" + (si.block ? " (block)" : ""),
                     .kind = Toast::Kind::info};
-    m.toast_at = m.time;
+    m.toast.at = m.time;
     return WriteClipboard{m.term->selection_text()};
 }
 
@@ -128,7 +128,7 @@ App::Cmd App::update(Model& m, Pasted p) {
     if (p.text.empty() || m.link.dropped) return {};
     // Ask first (paste.confirm): risky lines, multi-line, or only into programs
     // that would run each line as it lands.
-    if (m.ask.has_value()) return {};   // one question at a time
+    if (m.dialog.ask.has_value()) return {};   // one question at a time
     if (p.confirm == Confirm::asking) {
         std::string body = p.text;
         while (!body.empty() && (body.back() == '\n' || body.back() == '\r')) body.pop_back();
@@ -144,7 +144,7 @@ App::Cmd App::update(Model& m, Pasted p) {
         }
         if (ask) {
             m.pending_paste = p.text;
-            m.ask = Ask{.kind = Ask::Kind::paste, .focus = 2};
+            m.dialog.ask = Ask{.kind = Ask::Kind::paste, .focus = 2};
             return {};
         }
     }

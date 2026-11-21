@@ -85,35 +85,35 @@ TermDialogSpec close_dialog(const Ctx& c, const Model& m, const Ask& a) {
 }
 
 void dialog(const Ctx& c, const Model& m) {
-    if (m.ask) {
-        TermDialogSpec d = m.ask->kind == Ask::Kind::paste ? paste_dialog(c, m) : close_dialog(c, m, *m.ask);
-        d.focused = static_cast<int>(m.ask->focus);
-        d.remember_on = m.ask->remember;
+    if (m.dialog.ask) {
+        TermDialogSpec d = m.dialog.ask->kind == Ask::Kind::paste ? paste_dialog(c, m) : close_dialog(c, m, *m.dialog.ask);
+        d.focused = static_cast<int>(m.dialog.ask->focus);
+        d.remember_on = m.dialog.ask->remember;
         d.time = m.time;
         d.width = std::min(600.0f, m.size.x - 40.0f);
-        m.ask_last = std::move(d);
+        m.dialog.last = std::move(d);
     }
-    if (m.ask_t <= 0.0f) return;
-    TermDialogSpec d = m.ask_last;
-    d.appear = m.ask_t;
+    if (m.dialog.t <= 0.0f) return;
+    TermDialogSpec d = m.dialog.last;
+    d.appear = m.dialog.t;
     c.overlay(Overlay{.content = term_dialog(c, "ask", d), .id = part_id("ask", part_menu),
                       .placement = Placement::centered, .dismiss = Dismiss::never, .layer = 40,
-                      .scrim = 0.45f * m.ask_t, .passthrough = !m.ask.has_value()});
+                      .scrim = 0.45f * m.dialog.t, .passthrough = !m.dialog.ask.has_value()});
 }
 
 void settings_overlay(const Ctx& c, const Model& m) {
-    if (!m.settings_open && m.settings_t <= 0.0f) return;
-    const float e = 1.0f - (1.0f - m.settings_t) * (1.0f - m.settings_t);   // ease-out
+    if (!m.settings.open && m.settings.t <= 0.0f) return;
+    const float e = 1.0f - (1.0f - m.settings.t) * (1.0f - m.settings.t);   // ease-out
     c.overlay(Overlay{
-        .content = (node(settings_panel(c, "settings", setting_specs(m.cfg), m.panel, settings_props(c, m),
+        .content = (node(settings_panel(c, "settings", setting_specs(m.cfg), m.settings.ui, settings_props(c, m),
                                         [](SettingsOp op) -> App::Msg { return App::Panel{std::move(op)}; }))
                     | opacity(e) | translate(0.0f, (1.0f - e) * 16.0f)).build(),
         .id = part_id("settings", part_menu),
         .placement = Placement::centered,
-        .dismiss = m.settings_open ? Dismiss::modal : Dismiss::never,
+        .dismiss = m.settings.open ? Dismiss::modal : Dismiss::never,
         .layer = 10,
         .scrim = 0.35f * e,
-        .passthrough = !m.settings_open});   // closing: already out of the way
+        .passthrough = !m.settings.open});   // closing: already out of the way
 }
 
 }  // namespace
@@ -126,41 +126,41 @@ void overlays(const Ctx& c, const Model& m) {
     if (m.time - m.resized_at < 0.8)
         resize_hud(c, "hud", m.term->cols(), m.term->rows(),
                    std::to_string(static_cast<int>(m.size.x)) + "\u00D7" + std::to_string(static_cast<int>(m.size.y)) + "px");
-    if (m.toast && m.time - m.toast_at < 3.0 && !m.settings_open)
-        toasts(c, "toasts", {*m.toast}, m.size);
+    if (m.toast.card && m.time - m.toast.at < 3.0 && !m.settings.open)
+        toasts(c, "toasts", {*m.toast.card}, m.size);
     if (m.hint) hint_bar(c, "hint.tip", {.count = m.hint->hints.size(), .typed = m.hint->typed, .font_size = m.font_size, .y = m.size.y - 40.0f});
-    if (m.hosts_open) {
+    if (m.ssh.picker.open) {
         const auto hosts = picker_hosts(m);
-        ssh_hosts(c, "hosts", m.hosts_query, hosts, rank_hosts(hosts, m.hosts_query.text, unix_now()), m.hosts_sel,
-                  SshHostsProps{.now = unix_now(), .source = m.book.config_label.empty() ? "~/.ssh/config" : m.book.config_label,
+        ssh_hosts(c, "hosts", m.ssh.picker.query, hosts, rank_hosts(hosts, m.ssh.picker.query.text, unix_now()), m.ssh.picker.sel,
+                  SshHostsProps{.now = unix_now(), .source = m.ssh.book.config_label.empty() ? "~/.ssh/config" : m.ssh.book.config_label,
                                 .action = "new tab", .width = std::min(720.0f, m.win.x - 48.0f)});
     }
-    if (m.manager_open || m.manager_t > 0.0f) {
-        const float e = 1.0f - (1.0f - m.manager_t) * (1.0f - m.manager_t);   // ease-out
-        std::string store = (std::filesystem::path{m.host_src.store}.filename()).string();
+    if (m.ssh.manager.open || m.ssh.manager.t > 0.0f) {
+        const float e = 1.0f - (1.0f - m.ssh.manager.t) * (1.0f - m.ssh.manager.t);   // ease-out
+        std::string store = (std::filesystem::path{m.ssh.sources.store}.filename()).string();
         SshManagerProps mp{.now = unix_now(),
-                           .source = m.book.config_label.empty() ? "~/.ssh/config" : m.book.config_label,
+                           .source = m.ssh.book.config_label.empty() ? "~/.ssh/config" : m.ssh.book.config_label,
                            .store = store.empty() ? "hosts.vibe" : store,
                            .width = std::min(1020.0f, m.win.x - 40.0f),
                            .height = std::min(660.0f, m.win.y - 40.0f)};
-        for (const auto& f : m.book.folders) mp.folders.push_back({f.name, f.user, f.jump, f.identity, f.port});
-        for (const auto& s : m.imports) {
+        for (const auto& f : m.ssh.book.folders) mp.folders.push_back({f.name, f.user, f.jump, f.identity, f.port});
+        for (const auto& s : m.ssh.manager.imports) {
             SshImportSource is{s.name, s.where, static_cast<int>(s.hosts.size()), 0};
-            for (const auto& h : s.hosts) is.fresh += m.book.find(h.alias) ? 0 : 1;
+            for (const auto& h : s.hosts) is.fresh += m.ssh.book.find(h.alias) ? 0 : 1;
             mp.imports.push_back(std::move(is));
         }
-        mp.files = m.files;
-        mp.tunnels_known = m.listen_known;
+        mp.files = m.ssh.manager.files;
+        mp.tunnels_known = m.ssh.manager.ports_known;
         c.overlay(Overlay{
-            .content = (node(ssh_manager(c, "mgr", picker_hosts(m), m.manager, mp,
+            .content = (node(ssh_manager(c, "mgr", picker_hosts(m), m.ssh.manager.ui, mp,
                                          [](SshManagerOp op) -> App::Msg { return App::Manager{std::move(op)}; }))
                         | opacity(e) | translate(0.0f, (1.0f - e) * 16.0f)).build(),
             .id = part_id("mgr", part_menu),
             .placement = Placement::centered,
-            .dismiss = m.manager_open ? Dismiss::modal : Dismiss::never,
+            .dismiss = m.ssh.manager.open ? Dismiss::modal : Dismiss::never,
             .layer = 12,
             .scrim = 0.4f * e,
-            .passthrough = !m.manager_open});
+            .passthrough = !m.ssh.manager.open});
     }
     dialog(c, m);
 }

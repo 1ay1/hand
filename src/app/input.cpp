@@ -53,7 +53,7 @@ static std::optional<KeyEvent> mac_chord(const KeyEvent& k) {
 }
 
 std::optional<App::Msg> App::on(const Model& m, const KeyEvent& k_in) {
-    if (k_in.mods.super && !k_in.mods.ctrl && !k_in.mods.alt && !m.settings_open && !m.hosts_open && !m.ask) {
+    if (k_in.mods.super && !k_in.mods.ctrl && !k_in.mods.alt && !m.settings.open && !m.ssh.picker.open && !m.dialog.ask) {
         // ⌘K: clear screen and history (Terminal.app, iTerm), and the shell redraws its prompt
         if (k_in.key == Key::k)
             return E{[](Model& mm) {
@@ -69,37 +69,37 @@ std::optional<App::Msg> App::on(const Model& m, const KeyEvent& k_in) {
     const KeyEvent k = mac.value_or(k_in);
     const Mods md = k.mods;
     if (md.ctrl && !md.shift && !md.alt && k.key == Key::comma) return ToggleSettings{};
-    if (m.settings_open) {
-        if (auto op = settings_panel_key(m.panel, setting_specs(m.cfg), k.key, md)) return Panel{std::move(*op)};
+    if (m.settings.open) {
+        if (auto op = settings_panel_key(m.settings.ui, setting_specs(m.cfg), k.key, md)) return Panel{std::move(*op)};
         return std::nullopt;
     }
     const bool cs = md.ctrl && md.shift && !md.alt;
     if (cs && k.key == Key::h) return ToggleManager{};
-    if (m.manager_open) {   // the host manager has the keyboard
+    if (m.ssh.manager.open) {   // the host manager has the keyboard
         if (k.key == Key::ctrl || k.key == Key::shift || k.key == Key::alt || k.key == Key::super) return std::nullopt;
-        if (auto op = ssh_manager_key(m.manager, picker_hosts(m), unix_now(), k.key, md, &m.files)) return Manager{std::move(*op)};
+        if (auto op = ssh_manager_key(m.ssh.manager.ui, picker_hosts(m), unix_now(), k.key, md, &m.ssh.manager.files)) return Manager{std::move(*op)};
         return E{[](Model&) {}};   // never to the shell underneath
     }
-    if (m.hosts_open) {   // the host picker has the keyboard
+    if (m.ssh.picker.open) {   // the host picker has the keyboard
         if (k.key == Key::ctrl || k.key == Key::shift || k.key == Key::alt || k.key == Key::super) return std::nullopt;
         if (cs && k.key == Key::s) return OpenHosts{};
         return HostsKey{k.key, md};
     }
-    if (cs && k.key == Key::e && !m.ask) return TogglePane{};
-    if (m.pane_open && m.pane.focused && !m.ask) {   // the file pane has the keyboard
+    if (cs && k.key == Key::e && !m.dialog.ask) return TogglePane{};
+    if (m.pane.open && m.pane.ui.focused && !m.dialog.ask) {   // the file pane has the keyboard
         if (k.key == Key::ctrl || k.key == Key::shift || k.key == Key::alt || k.key == Key::super) return std::nullopt;
         if (!md.ctrl && !md.super)
-            if (auto op = file_pane_key(m.pane, pane_props(m), k.key, md)) return PaneOp{std::move(*op)};
+            if (auto op = file_pane_key(m.pane.ui, pane_props(m), k.key, md)) return PaneOp{std::move(*op)};
         if (!md.ctrl && !md.super) return E{[](Model&) {}};   // plain keys never reach the shell
     }
-    if (m.ask.has_value()) {   // the dialog has the keyboard
-        const bool paste = m.ask->kind == Ask::Kind::paste;
+    if (m.dialog.ask.has_value()) {   // the dialog has the keyboard
+        const bool paste = m.dialog.ask->kind == Ask::Kind::paste;
         const std::size_t n = paste ? 3 : 2;
         if (k.key == Key::escape) return Answer::dismiss();
-        if (k.key == Key::enter) return Answer::choose(paste && md.shift ? 1 : m.ask->focus);   // shift+enter: one line
+        if (k.key == Key::enter) return Answer::choose(paste && md.shift ? 1 : m.dialog.ask->focus);   // shift+enter: one line
         if (k.key == Key::tab || k.key == Key::right || k.key == Key::left) {
             const Step s = (k.key == Key::left || (k.key == Key::tab && md.shift)) ? Step::backward : Step::forward;
-            return E{[s, n](Model& mm) { if (mm.ask) mm.ask->focus = wrap(mm.ask->focus, s, n); }};
+            return E{[s, n](Model& mm) { if (mm.dialog.ask) mm.dialog.ask->focus = wrap(mm.dialog.ask->focus, s, n); }};
         }
         if (k.key == Key::space) return RememberToggle{};
         return E{[](Model&) {}};
@@ -124,7 +124,7 @@ std::optional<App::Msg> App::on(const Model& m, const KeyEvent& k_in) {
     }
     if (k.key == Key::ctrl && !m.ctrl_held) return E{[](Model& mm) { mm.ctrl_held = true; }};
     // ── tabs: kitty/foot-style chords, plus the browser ones ──────────────
-    if (k.key == Key::alt && m.tab_count() > 1 && !m.show_numbers) return E{[](Model& mm) { mm.show_numbers = true; mm.numbers_at = mm.time; }};
+    if (k.key == Key::alt && m.tab_count() > 1 && !m.strip.show_numbers) return E{[](Model& mm) { mm.strip.show_numbers = true; mm.strip.numbers_at = mm.time; }};
     if (cs && k.key == Key::t) return NewTab{};
     if (cs && k.key == Key::s) return OpenHosts{};
     if (cs && k.key == Key::w) return CloseTab{TabIndex{m.active}};
@@ -159,7 +159,7 @@ std::optional<App::Msg> App::on(const Model& m, const KeyEvent& k_in) {
                                                     : std::string{keys[i / keys.size() % keys.size()], keys[i % keys.size()]});
             mm.grid_key = 0;
             if (!h.hints.empty()) mm.hint = std::move(h);
-            else { mm.toast = Toast{.title = "nothing to pick", .body = "no links, paths, hashes or IPs on screen"}; mm.toast_at = mm.time; }
+            else { mm.toast.card = Toast{.title = "nothing to pick", .body = "no links, paths, hashes or IPs on screen"}; mm.toast.at = mm.time; }
         }};
     if (cs && (k.key == Key::z || k.key == Key::x)) {   // foot's prompt-prev / prompt-next
         const int d = k.key == Key::z ? -1 : 1;
@@ -213,7 +213,7 @@ std::optional<App::Msg> App::on(const Model& m, const KeyEvent& k_in) {
 std::optional<App::Msg> App::on(const Model& m, const ComposeEvent& c) {
     // the input method is composing (こん…, ´ before its e): shown at the
     // cursor, sent to the shell only when committed (a TextEvent)
-    if (m.settings_open || m.hosts_open || c.text == m.preedit) return std::nullopt;
+    if (m.settings.open || m.ssh.picker.open || c.text == m.preedit) return std::nullopt;
     return E{[t = c.text](Model& mm) { mm.preedit = t; }};
 }
 
@@ -223,20 +223,20 @@ std::optional<App::Msg> App::on(const Model& m, const ComposeEndEvent&) {
 }
 
 std::optional<App::Msg> App::on(const Model& m, const TextEvent& t) {
-    if (m.manager_open) {
-        if (auto op = ssh_manager_text(m.manager, picker_hosts(m), unix_now(), t.text)) return Manager{std::move(*op)};
+    if (m.ssh.manager.open) {
+        if (auto op = ssh_manager_text(m.ssh.manager.ui, picker_hosts(m), unix_now(), t.text)) return Manager{std::move(*op)};
         return E{[](Model&) {}};
     }
-    if (m.hosts_open)
-        return E{[s = t.text](Model& mm) { mm.hosts_query.insert(s); mm.hosts_sel = 0; }};
-    if (m.ask.has_value()) return E{[](Model&) {}};
-    if (m.pane_open && m.pane.focused) {   // the pane reads keys; text only while filtering
-        if (auto op = file_pane_text(m.pane, t.text)) return PaneOp{std::move(*op)};
+    if (m.ssh.picker.open)
+        return E{[s = t.text](Model& mm) { mm.ssh.picker.query.insert(s); mm.ssh.picker.sel = 0; }};
+    if (m.dialog.ask.has_value()) return E{[](Model&) {}};
+    if (m.pane.open && m.pane.ui.focused) {   // the pane reads keys; text only while filtering
+        if (auto op = file_pane_text(m.pane.ui, t.text)) return PaneOp{std::move(*op)};
         return E{[](Model&) {}};
     }
     if (m.link.dropped) return E{[](Model&) {}};
-    if (m.ask.has_value()) return E{[](Model&) {}};
-    if (m.copy && !m.settings_open) return CopyKey{Key::unknown, {}, t.text};
+    if (m.dialog.ask.has_value()) return E{[](Model&) {}};
+    if (m.copy && !m.settings.open) return CopyKey{Key::unknown, {}, t.text};
     if (m.hint) {
         std::string typed = m.hint->typed;
         bool upper = false;
@@ -248,8 +248,8 @@ std::optional<App::Msg> App::on(const Model& m, const TextEvent& t) {
             if (m.hint->labels[i] == typed) return HintPick{i, upper ? HintUse::insert : HintUse::act};
         return E{[typed](Model& mm) { if (mm.hint) mm.hint->typed = typed; mm.grid_key = 0; }};
     }
-    if (m.settings_open) {
-        if (auto op = settings_panel_text(m.panel, setting_specs(m.cfg), t.text)) return Panel{std::move(*op)};
+    if (m.settings.open) {
+        if (auto op = settings_panel_text(m.settings.ui, setting_specs(m.cfg), t.text)) return Panel{std::move(*op)};
         return std::nullopt;
     }
     if (m.search_open)
@@ -262,7 +262,7 @@ std::optional<App::Msg> App::on(const Model& m, const ScrollEvent& s_win) {
     ScrollEvent s = s_win;
     s.position.y -= term_top(m);   // terminal coordinates from here on
     s.position.x -= term_left(m);
-    if (m.settings_open || m.manager_open) return std::nullopt;   // the panel's scroll_view takes it
+    if (m.settings.open || m.ssh.manager.open) return std::nullopt;   // the panel's scroll_view takes it
     if (in_pane(m, s_win.position.x)) return std::nullopt;   // the file pane's list
     const float ch = std::max(m.metrics.cell_h, 1.0f);
     const int lines = static_cast<int>(std::round(s.delta.y / ch * m.cfg.scroll_lines));
@@ -308,11 +308,11 @@ std::optional<App::Msg> App::on(const Model& m, const MouseDown& e_win) {
     MouseDown e = e_win;
     e.position.y -= term_top(m);   // terminal coordinates from here on
     e.position.x -= term_left(m);
-    if (m.settings_open || m.manager_open) return std::nullopt;
+    if (m.settings.open || m.ssh.manager.open) return std::nullopt;
     if (in_pane(m, e_win.position.x)) return std::nullopt;   // the file pane's
-    if (m.pane_open && m.pane.focused)   // a click on the terminal takes the keyboard back
-        return E{[](Model& mm) { mm.pane.focused = false; }};
-    if (minimap_on(m) && e.position.x > m.size.x - std::max(m.mm_w, kMinimapRest)) return std::nullopt;   // the minimap's
+    if (m.pane.open && m.pane.ui.focused)   // a click on the terminal takes the keyboard back
+        return E{[](Model& mm) { mm.pane.ui.focused = false; }};
+    if (minimap_on(m) && e.position.x > m.size.x - std::max(m.minimap.width, kMinimapRest)) return std::nullopt;   // the minimap's
     const int col = cell_of(e.position.x, m.metrics.origin_x, m.metrics.cell_w, m.term->cols());
     const int row = cell_of(e.position.y, m.metrics.origin_y, m.metrics.cell_h, m.term->rows());
     const int btn = e.button == MouseButton::left ? 0 : e.button == MouseButton::middle ? 1 : e.button == MouseButton::right ? 2 : -1;
@@ -368,21 +368,21 @@ std::optional<App::Msg> App::on(const Model& m, const MouseMove& e_win) {
     MouseMove e = e_win;
     e.position.y -= term_top(m);   // terminal coordinates from here on
     e.position.x -= term_left(m);
-    if (m.settings_open || m.manager_open) return std::nullopt;
+    if (m.settings.open || m.ssh.manager.open) return std::nullopt;
     if (in_pane(m, e_win.position.x) && m.mouse_button < 0 && !m.selecting) {   // the file pane's
         // the pointer left the terminal: the scrollback map and its peek fold away
-        if (m.mm_open || m.mm_hover_y >= 0.0f || !m.hover_url.empty())
-            return E{[](Model& mm) { mm.mm_open = false; mm.mm_hover_y = -1.0f; mm.hover_url.clear(); }};
+        if (m.minimap.open || m.minimap.hover_y >= 0.0f || !m.hover_url.empty())
+            return E{[](Model& mm) { mm.minimap.open = false; mm.minimap.hover_y = -1.0f; mm.hover_url.clear(); }};
         return std::nullopt;
     }
-    if (!minimap_on(m) && (m.mm_open || m.mm_hover_y >= 0.0f))
-        return E{[](Model& mm) { mm.mm_open = false; mm.mm_hover_y = -1.0f; }};
+    if (!minimap_on(m) && (m.minimap.open || m.minimap.hover_y >= 0.0f))
+        return E{[](Model& mm) { mm.minimap.open = false; mm.minimap.hover_y = -1.0f; }};
     if (minimap_on(m) && m.mouse_button < 0 && !m.selecting) {
         const bool adjacent = !in_corner(m, e_win.position)   // the buttons beside it are theirs
-                           && e.position.x > m.size.x - (m.mm_open ? kMinimapOpen + 8.0f : kMinimapRest + 4.0f);
-        const bool over = adjacent && e.position.x > m.size.x - std::max(m.mm_w, kMinimapRest);
+                           && e.position.x > m.size.x - (m.minimap.open ? kMinimapOpen + 8.0f : kMinimapRest + 4.0f);
+        const bool over = adjacent && e.position.x > m.size.x - std::max(m.minimap.width, kMinimapRest);
         const float y = over ? e.position.y : -1.0f;
-        if (adjacent != m.mm_open || y != m.mm_hover_y) return E{[adjacent, y](Model& mm) { mm.mm_open = adjacent; mm.mm_hover_y = y; }};
+        if (adjacent != m.minimap.open || y != m.minimap.hover_y) return E{[adjacent, y](Model& mm) { mm.minimap.open = adjacent; mm.minimap.hover_y = y; }};
         if (adjacent) return std::nullopt;
     }
     // The app wants the mouse: motion is the app's, reported once per CELL
@@ -453,9 +453,9 @@ std::optional<App::Msg> App::on(const Model& m, const MouseUp& e_win) {
 
 /// Overlay dismissals arrive as Left on the overlay's id.
 std::optional<App::Msg> App::on(const Model& m, const Left& l) {
-    if (m.hosts_open && l.node == part_id("hosts", part_menu)) return E{[](Model& mm) { mm.hosts_open = false; }};
-    if (m.settings_open)
-        if (auto op = settings_panel_left(m.panel, "settings", l.node)) return Panel{std::move(*op)};
+    if (m.ssh.picker.open && l.node == part_id("hosts", part_menu)) return E{[](Model& mm) { mm.ssh.picker.open = false; }};
+    if (m.settings.open)
+        if (auto op = settings_panel_left(m.settings.ui, "settings", l.node)) return Panel{std::move(*op)};
     return std::nullopt;
 }
 
@@ -469,36 +469,36 @@ std::optional<App::Msg> App::on(const Model& m, const Pressed& p) {
         if (p.node == part_id("tabs", i) && p.button == MouseButton::left)
             return E{[i](Model& mm) {
                 (void)update(mm, SelectTab{TabIndex{i}});
-                mm.drag_tab = static_cast<int>(mm.active);
-                mm.drag_dx = 0.0f;
+                mm.strip.drag_tab = static_cast<int>(mm.active);
+                mm.strip.drag_dx = 0.0f;
             }};
     return std::nullopt;
 }
 
 std::optional<App::Msg> App::on(const Model& m, const Dragged& d) {
-    if (m.drag_tab < 0) return std::nullopt;
+    if (m.strip.drag_tab < 0) return std::nullopt;
     return E{[dx = d.delta.x](Model& mm) {
-        mm.drag_dx += dx;
+        mm.strip.drag_dx += dx;
         // past half a tab: swap with the neighbour (the pill slides after it)
         const float tab_w = std::clamp(mm.win.x / static_cast<float>(mm.tab_count()), 96.0f, 236.0f);
-        if (mm.drag_dx > tab_w * 0.5f && mm.active + 1 < mm.tab_count()) { (void)update(mm, MoveTab{Step::forward}); mm.drag_dx -= tab_w; }
-        else if (mm.drag_dx < -tab_w * 0.5f && mm.active > 0) { (void)update(mm, MoveTab{Step::backward}); mm.drag_dx += tab_w; }
-        mm.drag_tab = static_cast<int>(mm.active);
+        if (mm.strip.drag_dx > tab_w * 0.5f && mm.active + 1 < mm.tab_count()) { (void)update(mm, MoveTab{Step::forward}); mm.strip.drag_dx -= tab_w; }
+        else if (mm.strip.drag_dx < -tab_w * 0.5f && mm.active > 0) { (void)update(mm, MoveTab{Step::backward}); mm.strip.drag_dx += tab_w; }
+        mm.strip.drag_tab = static_cast<int>(mm.active);
     }};
 }
 
 std::optional<App::Msg> App::on(const Model& m, const Released&) {
-    if (m.drag_tab < 0) return std::nullopt;
-    return E{[](Model& mm) { mm.drag_tab = -1; mm.drag_dx = 0.0f; }};
+    if (m.strip.drag_tab < 0) return std::nullopt;
+    return E{[](Model& mm) { mm.strip.drag_tab = -1; mm.strip.drag_dx = 0.0f; }};
 }
 
 /// The tab strip's buttons, and the search bar's (mayag term_search parts).
 std::optional<App::Msg> App::on(const Model& m, const Clicked& c) {
-    if (m.hosts_open) {
+    if (m.ssh.picker.open) {
         if (c.node == part_id("hosts", part_inc)) return ConnectTyped{};
         const auto ranked = picker_rank(m);
         for (std::size_t k = 0; k < ranked.size(); ++k)
-            if (c.node == part_id("hosts", k)) return ConnectHost{m.book.hosts[static_cast<std::size_t>(ranked[k])]};
+            if (c.node == part_id("hosts", k)) return ConnectHost{m.ssh.book.hosts[static_cast<std::size_t>(ranked[k])]};
     }
     if (c.node == node_id("ssh.reconnect")) return Reconnect{};
     if (c.node == node_id("ssh.close")) return CloseTab{TabIndex{m.active}, Confirm::given};
@@ -515,7 +515,7 @@ std::optional<App::Msg> App::on(const Model& m, const Clicked& c) {
     }
     if (c.node == part_id("tabs", part_inc) || (c.node == node_id("tabs") && c.count == 2 && m.cfg.decorations)) return NewTab{};
     if (c.node == part_id("tabs", part_menu)) return OpenHosts{};   // the ⌄ beside + : connect somewhere
-    if (m.ask.has_value()) {
+    if (m.dialog.ask.has_value()) {
         for (std::size_t i = 0; i < 3; ++i) if (c.node == part_id("ask", i)) return Answer::choose(i);
         if (c.node == part_id("ask", 100)) return RememberToggle{};
     }
@@ -540,10 +540,10 @@ App::Sub App::subscribe(const Model& m) {
     }
     if (m.tab_count() > 1) s.push_back(Sub::every(std::chrono::milliseconds(1000), Msg{Clock{}}));   // activity sparklines
     // the host manager's live tunnel status: who listens on each -L / -D port
-    if (m.manager_open) s.push_back(Sub::every(std::chrono::milliseconds(900), Msg{TunnelProbe{}}));
+    if (m.ssh.manager.open) s.push_back(Sub::every(std::chrono::milliseconds(900), Msg{TunnelProbe{}}));
     // the file pane: re-read its folder (new and changed files glow), and follow `ssh` started in a tab
-    if (m.pane_open && m.cfg.files_watch) s.push_back(Sub::every(std::chrono::milliseconds(m.pane_where.empty() ? 1500 : 5000), Msg{PaneWatch{}}));
-    if (m.pane_open && m.tab_count() < 2) s.push_back(Sub::every(std::chrono::milliseconds(1000), Msg{Clock{}}));
+    if (m.pane.open && m.cfg.files_watch) s.push_back(Sub::every(std::chrono::milliseconds(m.pane.where.empty() ? 1500 : 5000), Msg{PaneWatch{}}));
+    if (m.pane.open && m.tab_count() < 2) s.push_back(Sub::every(std::chrono::milliseconds(1000), Msg{Clock{}}));
     if (m.focused && m.cfg.cursor_blink)
         s.push_back(Sub::every(std::chrono::milliseconds(static_cast<int>(m.cfg.blink_ms)), Msg{Blink{}}));
     const auto cur = m.term->cursor();
@@ -555,17 +555,17 @@ App::Sub App::subscribe(const Model& m) {
                          !motion::tail_settled(m.fx, m.cfg.cursor_anim == CursorAnim::smear ? static_cast<float>(cur.col) : m.cur_x,
                                                m.cfg.cursor_anim == CursorAnim::smear ? static_cast<float>(cur.row) : m.cur_y);
     const bool strip_goal = m.cfg.strip_always() || m.tab_count() > 1;
-    const bool animating = (m.pane_open && pane_glowing(m)) || gliding || breathing || tailing || m.fx.busy() || m.ask.has_value() || m.ask_t > 0.0f || m.time - m.copy_flash_at < 0.5 || m.tab_motion.animating() ||
-                           m.strip_t != (strip_goal ? 1.0f : 0.0f) || m.switch_t < 1.0f || m.drag_tab >= 0 || m.show_numbers || m.scroll_d != m.scroll_goal || m.out_shift != 0.0f ||
+    const bool animating = (m.pane.open && pane_glowing(m)) || gliding || breathing || tailing || m.fx.busy() || m.dialog.ask.has_value() || m.dialog.t > 0.0f || m.time - m.copy_flash_at < 0.5 || m.strip.motion.animating() ||
+                           m.strip.t != (strip_goal ? 1.0f : 0.0f) || m.strip.switch_t < 1.0f || m.strip.drag_tab >= 0 || m.strip.show_numbers || m.scroll_d != m.scroll_goal || m.out_shift != 0.0f ||
                            (m.bell_at >= 0.0 && m.time - m.bell_at < 0.45) ||
                            (m.cfg.blink_style == BlinkStyle::fade && m.cur_a != (m.cursor_on || !m.focused || !m.cfg.cursor_blink ? 1.0f : 0.0f)) ||
-                           m.settings_t != (m.settings_open ? 1.0f : 0.0f) || m.manager_t != (m.manager_open ? 1.0f : 0.0f) ||
+                           m.settings.t != (m.settings.open ? 1.0f : 0.0f) || m.ssh.manager.t != (m.ssh.manager.open ? 1.0f : 0.0f) ||
                            (m.selecting && m.sel_edge != 0.0f) ||
-                           m.mm_w != (m.mm_open ? kMinimapOpen : kMinimapRest) ||
-                           m.peek_t != ((m.cfg.peek && m.mm_hover_y >= 0.0f) ? 1.0f : 0.0f) ||
+                           m.minimap.width != (m.minimap.open ? kMinimapOpen : kMinimapRest) ||
+                           m.minimap.peek_t != ((m.cfg.peek && m.minimap.hover_y >= 0.0f) ? 1.0f : 0.0f) ||
                            m.tail_t != (tail_wanted(m) ? 1.0f : 0.0f) ||
                            m.sticky_t != (sticky_of(m) ? 1.0f : 0.0f) || (m.bell_at >= 0.0 && m.time - m.bell_at < 0.2) || m.time - m.resized_at < 0.9 ||
-                           (m.toast && m.time - m.toast_at < 3.2) || (m.link.dropped && m.time - m.link.dropped_at < 0.3);
+                           (m.toast.card && m.time - m.toast.at < 3.2) || (m.link.dropped && m.time - m.link.dropped_at < 0.3);
     if (const auto st = sticky_of(m); st && st->ran && !st->finished)
         s.push_back(Sub::every(std::chrono::milliseconds(1000), Msg{Clock{}}));
     if (animating) s.push_back(Sub::on_frame([](double dt) -> Msg { return Tick{dt}; }));

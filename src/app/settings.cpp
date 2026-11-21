@@ -22,21 +22,21 @@ using namespace mayag::dsl;
 using namespace hand::detail;
 
 App::Cmd App::update(Model& m, ToggleSettings) {
-    m.settings_open = !m.settings_open;
-    m.panel.filtering = false;
-    if (m.panel.menu >= 0) dsl::settings_ops::close_menu(m.panel, true);
-    for (auto& e : std::exchange(m.panel.out, {})) { const Config before = m.cfg; if (setting_apply(m.cfg, e)) apply(m, before); }
-    if (!m.settings_open && !m.cfg.demo) (void)config_save(m.cfg, config_path());   // closing is "done"
+    m.settings.open = !m.settings.open;
+    m.settings.ui.filtering = false;
+    if (m.settings.ui.menu >= 0) dsl::settings_ops::close_menu(m.settings.ui, true);
+    for (auto& e : std::exchange(m.settings.ui.out, {})) { const Config before = m.cfg; if (setting_apply(m.cfg, e)) apply(m, before); }
+    if (!m.settings.open && !m.cfg.demo) (void)config_save(m.cfg, config_path());   // closing is "done"
     return {};
 }
 
 App::Cmd App::update(Model& m, Panel p) {
-    p.op(m.panel);
-    for (auto& e : std::exchange(m.panel.out, {})) {
+    p.op(m.settings.ui);
+    for (auto& e : std::exchange(m.settings.ui.out, {})) {
         const Config before = m.cfg;
         if (setting_apply(m.cfg, e)) apply(m, before);
     }
-    if (std::exchange(m.panel.close, false)) return update(m, ToggleSettings{});
+    if (std::exchange(m.settings.ui.close, false)) return update(m, ToggleSettings{});
     return {};
 }
 

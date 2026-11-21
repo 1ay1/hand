@@ -23,13 +23,13 @@ using namespace hand::detail;
 
 float App::Model::strip_h() const noexcept {
     // the strip shows from the second tab on (or always, by setting), easing in
-    return std::round(std::clamp(cfg.tab_height, 22.0f, 60.0f) * strip_t);
+    return std::round(std::clamp(cfg.tab_height, 22.0f, 60.0f) * strip.t);
 }
 
 void App::fit(Model& m) {
     // the file pane takes the right side; the terminal keeps at least ~320 px
-    if (m.pane_open) m.pane_w = std::clamp(m.pane_w, 220.0f, std::max(220.0f, std::min(640.0f, m.win.x - 320.0f)));
-    const float side = m.pane_open ? m.pane_w : 0.0f;
+    if (m.pane.open) m.pane.width = std::clamp(m.pane.width, 220.0f, std::max(220.0f, std::min(640.0f, m.win.x - 320.0f)));
+    const float side = m.pane.open ? m.pane.width : 0.0f;
     m.size = Vec2{std::max(m.win.x - side, 1.0f), std::max(m.win.y - m.strip_h(), 1.0f)};
     const float cw = cell_width(m.font_size, m.cfg.font_family);
     const float ch = std::round(m.font_size * m.cfg.line_height);
@@ -56,13 +56,13 @@ void App::fit(Model& m) {
 void App::apply(Model& m, const Config& before) {
     const Config& c = m.cfg;
     if (c.font_size != before.font_size) m.font_size = c.font_size;
-    if (m.pane_open) {   // the file pane's settings take effect now
-        if (c.files_width != before.files_width) m.pane_w = c.files_width;
-        if (c.files_sort != before.files_sort) m.pane.sort = static_cast<mayag::dsl::FileSort>(std::clamp(c.files_sort, 0, 3));
-        if (c.files_hidden != before.files_hidden) m.pane.show_hidden = c.files_hidden;
+    if (m.pane.open) {   // the file pane's settings take effect now
+        if (c.files_width != before.files_width) m.pane.width = c.files_width;
+        if (c.files_sort != before.files_sort) m.pane.ui.sort = static_cast<mayag::dsl::FileSort>(std::clamp(c.files_sort, 0, 3));
+        if (c.files_hidden != before.files_hidden) m.pane.ui.show_hidden = c.files_hidden;
         if (c.files_git != before.files_git || c.files_preview_lines != before.files_preview_lines) {
-            m.pane_preview_path.clear();
-            m.pane_where = "\x01";   // re-list (git marks) on the next sync
+            m.pane.preview_path.clear();
+            m.pane.where = "\x01";   // re-list (git marks) on the next sync
         }
     }
     if (c.scheme != before.scheme) { m.palette = palette_of(c); m.term->set_palette(m.palette); }
@@ -143,12 +143,12 @@ App::Cmd App::init(Model& m) {
     m.cfg = config;
     m.palette = palette_of(m.cfg);
     m.font_size = m.cfg.font_size;
-    m.strip_t = m.cfg.strip_always() ? 1.0f : 0.0f;
+    m.strip.t = m.cfg.strip_always() ? 1.0f : 0.0f;
     fit(m);
     // the host book: prod detection on tabs needs it before the picker ever opens
     if (!m.cfg.demo) {
-        m.host_src = resolve(HostSources{.read_known = m.cfg.ssh_known_hosts});
-        m.book = hosts_load(m.host_src);
+        m.ssh.sources = resolve(HostSources{.read_known = m.cfg.ssh_known_hosts});
+        m.ssh.book = hosts_load(m.ssh.sources);
     }
     startup::mark("hand: init: host book");
     static_cast<Session&>(m) = spawn_session(m, "");
@@ -159,7 +159,7 @@ App::Cmd App::init(Model& m) {
         std::vector<Cmd> cmds;
         cmds.push_back(SetTitle{"hand"});
         cmds.push_back(update(m, TogglePane{}));
-        m.pane.focused = false;   // the shell has the keyboard at start
+        m.pane.ui.focused = false;   // the shell has the keyboard at start
         return Cmd::batch(std::move(cmds));
     }
     return SetTitle{"hand"};
@@ -183,11 +183,11 @@ App::Cmd App::update(Model& m, Output o) {
                 if (!c.finished || !c.ran || c.id <= se.notified) continue;
                 se.notified = c.id;
                 if (m.cfg.notify_after <= 0.0f || static_cast<double>(c.duration_ms) / 1000.0 < m.cfg.notify_after) continue;
-                m.toast = Toast{.title = (c.exit_code == 0 ? "\u2713 tab " : "\u2717 tab ") + std::to_string(i + 1) + " " +
+                m.toast.card = Toast{.title = (c.exit_code == 0 ? "\u2713 tab " : "\u2717 tab ") + std::to_string(i + 1) + " " +
                                          (c.exit_code == 0 ? "done" : "failed (" + std::to_string(c.exit_code) + ")"),
                                 .body = se.term->command_text(c),
                                 .kind = c.exit_code == 0 ? Toast::Kind::success : Toast::Kind::error};
-                m.toast_at = m.time;
+                m.toast.at = m.time;
             }
             return {};
         }
@@ -253,10 +253,10 @@ App::Cmd App::update(Model& m, Output o) {
         if (!m.focused && !m.cfg.demo)
             spawn_detached({"notify-send", "-a", "hand", "-u", c.exit_code == 0 ? "normal" : "critical", title,
                             cmd.empty() ? "command finished" : cmd});
-        m.toast = Toast{.title = title, .body = cmd, .kind = c.exit_code == 0 ? Toast::Kind::success : Toast::Kind::error};
-        m.toast_at = m.time;
+        m.toast.card = Toast{.title = title, .body = cmd, .kind = c.exit_code == 0 ? Toast::Kind::success : Toast::Kind::error};
+        m.toast.at = m.time;
     }
-    if (m.pane_open) cmds.push_back(pane_sync(m));   // a cd lands in the output (OSC 7)
+    if (m.pane.open) cmds.push_back(pane_sync(m));   // a cd lands in the output (OSC 7)
     return Cmd::batch(std::move(cmds));
 }
 
@@ -274,9 +274,9 @@ App::Cmd App::update(Model& m, Exited e) {
             se.grid_key = 0;
             if (i != m.active) {
                 se.unread = true;
-                m.toast = Toast{.title = "\u21C4 " + se.remote->alias + " disconnected", .body = "tab " + std::to_string(i + 1) + " \u00B7 enter there to reconnect",
+                m.toast.card = Toast{.title = "\u21C4 " + se.remote->alias + " disconnected", .body = "tab " + std::to_string(i + 1) + " \u00B7 enter there to reconnect",
                                 .kind = Toast::Kind::warning};
-                m.toast_at = m.time;
+                m.toast.at = m.time;
             }
             return {};
         }
@@ -314,13 +314,13 @@ App::Cmd App::update(Model& m, Tick t) {
     }
     {   // the tab strip eases in/out (the grid refits as it does); a switched tab slides in
         const float goal = (m.cfg.strip_always() || m.tab_count() > 1) ? 1.0f : 0.0f;
-        if (m.strip_t != goal) {
-            m.strip_t += (goal - m.strip_t) * (1.0f - std::exp(-mdt * 18.0f));
-            if (std::fabs(goal - m.strip_t) < 0.01f) m.strip_t = goal;
+        if (m.strip.t != goal) {
+            m.strip.t += (goal - m.strip.t) * (1.0f - std::exp(-mdt * 18.0f));
+            if (std::fabs(goal - m.strip.t) < 0.01f) m.strip.t = goal;
             fit(m);
         }
-        if (m.switch_t < 1.0f) m.switch_t = std::min(1.0f, m.switch_t + mdt * 6.0f);
-        if (m.show_numbers && m.time - m.numbers_at > 1.2) m.show_numbers = false;   // no key-up events: a timed hint
+        if (m.strip.switch_t < 1.0f) m.strip.switch_t = std::min(1.0f, m.strip.switch_t + mdt * 6.0f);
+        if (m.strip.show_numbers && m.time - m.strip.numbers_at > 1.2) m.strip.show_numbers = false;   // no key-up events: a timed hint
     }
     {   // the blink fades; the settings panel and new lines glide
         const auto toward = [&](float& v, float goal, float rate) {
@@ -329,26 +329,26 @@ App::Cmd App::update(Model& m, Tick t) {
         };
         if (m.cfg.blink_style == BlinkStyle::fade)
             toward(m.cur_a, m.cursor_on || !m.focused || !m.cfg.cursor_blink ? 1.0f : 0.0f, 16.0f * m.cfg.motion_speed);
-        toward(m.settings_t, m.settings_open ? 1.0f : 0.0f, m.cfg.motion ? 22.0f : 1000.0f);
-        toward(m.manager_t, m.manager_open ? 1.0f : 0.0f, m.cfg.motion ? 22.0f : 1000.0f);
+        toward(m.settings.t, m.settings.open ? 1.0f : 0.0f, m.cfg.motion ? 22.0f : 1000.0f);
+        toward(m.ssh.manager.t, m.ssh.manager.open ? 1.0f : 0.0f, m.cfg.motion ? 22.0f : 1000.0f);
         toward(m.out_shift, 0.0f, 22.0f);
-        toward(m.ask_t, m.ask.has_value() ? 1.0f : 0.0f, m.cfg.motion ? 20.0f : 1000.0f);
+        toward(m.dialog.t, m.dialog.ask.has_value() ? 1.0f : 0.0f, m.cfg.motion ? 20.0f : 1000.0f);
     }
     {   // the peek card and the live tail fade / slide in and out
         const auto ease = [&](float& v, bool on, float rate) {
             v += ((on ? 1.0f : 0.0f) - v) * (1.0f - std::exp(-static_cast<float>(t.dt) * rate));
             if (std::fabs(v - (on ? 1.0f : 0.0f)) < 0.01f) v = on ? 1.0f : 0.0f;
         };
-        ease(m.peek_t, m.cfg.peek && m.mm_hover_y >= 0.0f, 24.0f);
+        ease(m.minimap.peek_t, m.cfg.peek && m.minimap.hover_y >= 0.0f, 24.0f);
         ease(m.tail_t, tail_wanted(m), 16.0f);
         const auto st = sticky_of(m);
         if (st && st->id != m.sticky_id) { m.sticky_id = st->id; m.sticky_t = std::min(m.sticky_t, 0.35f); }   // a new command: re-slide
         ease(m.sticky_t, st.has_value(), 20.0f);
     }
     {   // the minimap slides open / shut
-        const float goal = m.mm_open ? kMinimapOpen : kMinimapRest;
-        m.mm_w += (goal - m.mm_w) * (1.0f - std::exp(-static_cast<float>(t.dt) * 22.0f));
-        if (std::fabs(goal - m.mm_w) < 0.3f) m.mm_w = goal;
+        const float goal = m.minimap.open ? kMinimapOpen : kMinimapRest;
+        m.minimap.width += (goal - m.minimap.width) * (1.0f - std::exp(-static_cast<float>(t.dt) * 22.0f));
+        if (std::fabs(goal - m.minimap.width) < 0.3f) m.minimap.width = goal;
     }
     if (m.scroll_d != m.scroll_goal) {   // critically damped glide, ~120 ms, frame-rate independent
         const float k = 1.0f - std::exp(-static_cast<float>(t.dt) * 18.0f);

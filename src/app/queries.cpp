@@ -29,10 +29,10 @@ using namespace mayag::dsl;
 /// Where the terminal starts (the strip may sit above it or below it).
 float term_top(const Model& m) { return m.cfg.tab_bottom ? 0.0f : m.strip_h(); }
 /// Where the terminal starts across (the file pane may dock on the left).
-float term_left(const Model& m) { return m.pane_open && m.cfg.files_left ? m.pane_w : 0.0f; }
+float term_left(const Model& m) { return m.pane.open && m.cfg.files_left ? m.pane.width : 0.0f; }
 bool in_pane(const Model& m, float x) {
-    if (!m.pane_open) return false;
-    return m.cfg.files_left ? x < m.pane_w : x >= m.win.x - m.pane_w;
+    if (!m.pane.open) return false;
+    return m.cfg.files_left ? x < m.pane.width : x >= m.win.x - m.pane.width;
 }
 bool in_strip(const Model& m, float y) {
     return m.cfg.tab_bottom ? y >= m.win.y - m.strip_h() : y < m.strip_h();
@@ -71,7 +71,7 @@ const std::optional<Host>& remote_of(const Session& se) {
 /// A remote's environment: what hosts.vibe says, else what its name suggests.
 HostEnv remote_env(const Model& m, const Host& h) {
     if (h.env != HostEnv::none) return h.env;
-    if (const Host* b = m.book.find(h.alias)) return b->env;
+    if (const Host* b = m.ssh.book.find(h.alias)) return b->env;
     return guess_env(h.alias, h.hostname);
 }
 
@@ -80,9 +80,9 @@ std::int64_t unix_now() { return static_cast<std::int64_t>(std::time(nullptr)); 
 /// The book as the picker shows it, with live tabs counted per host.
 std::vector<SshHost> picker_hosts(const Model& m) {
     std::vector<SshHost> out;
-    out.reserve(m.book.hosts.size());
-    for (const auto& h0 : m.book.hosts) {
-        const Host h = effective_host(h0, m.book);   // what connecting uses (folder defaults filled in)
+    out.reserve(m.ssh.book.hosts.size());
+    for (const auto& h0 : m.ssh.book.hosts) {
+        const Host h = effective_host(h0, m.ssh.book);   // what connecting uses (folder defaults filled in)
         SshHost s;
         s.alias = h.alias; s.user = h.user; s.hostname = h.hostname; s.port = h.port;
         s.jump = h.jump; s.identity = h.identity;
@@ -112,11 +112,11 @@ std::vector<SshHost> picker_hosts(const Model& m) {
             if (f->kind == mayag::dsl::SshForward::Kind::remote) {
                 st = s.connected ? T::remote : T::idle;
                 note = s.connected ? "listening on the server's port " + std::to_string(f->listen) : "";
-            } else if (m.listen_known) {
+            } else if (m.ssh.manager.ports_known) {
                 std::string owner;
                 bool listening = false;
-                for (std::size_t k = 0; k < m.listen_ports.size(); ++k)
-                    if (m.listen_ports[k] == f->listen) { listening = true; if (owner.empty()) owner = m.listen_owners[k]; }
+                for (std::size_t k = 0; k < m.ssh.manager.ports.size(); ++k)
+                    if (m.ssh.manager.ports[k] == f->listen) { listening = true; if (owner.empty()) owner = m.ssh.manager.port_owners[k]; }
                 const bool ssh_owns = owner.empty() || owner.find("ssh") != std::string::npos;
                 if (listening && !ssh_owns) { st = T::conflict; note = "port " + std::to_string(f->listen) + " is in use by " + owner; }
                 else if (s.connected) { st = listening ? T::up : T::down; note = listening ? "ssh is listening on " + std::to_string(f->listen)
@@ -131,9 +131,9 @@ std::vector<SshHost> picker_hosts(const Model& m) {
     return out;
 }
 
-/// The picker's rows: indices into m.book.hosts, best first.
+/// The picker's rows: indices into m.ssh.book.hosts, best first.
 std::vector<int> picker_rank(const Model& m) {
-    return rank_hosts(picker_hosts(m), m.hosts_query.text, unix_now());
+    return rank_hosts(picker_hosts(m), m.ssh.picker.query.text, unix_now());
 }
 
 /// The minimap maps the normal screen's history: a full-screen app (the
@@ -232,12 +232,12 @@ std::string busy_of(const Session& se, std::string* elapsed) {
 
 bool minimap_on(const Model& m) { return m.cfg.minimap && m.term && !m.term->alt_screen(); }
 
-float minimap_w(const Model& m) { return minimap_on(m) ? std::max(m.mm_w, kMinimapRest) : 0.0f; }
+float minimap_w(const Model& m) { return minimap_on(m) ? std::max(m.minimap.width, kMinimapRest) : 0.0f; }
 
-bool corner_buttons(const Model& m) { return !m.cfg.decorations && m.strip_t <= 0.0f; }
+bool corner_buttons(const Model& m) { return !m.cfg.decorations && m.strip.t <= 0.0f; }
 
 CornerControlsProps corner_props(const Model& m) {
-    const float pane = m.pane_open && !m.cfg.files_left ? m.pane_w : 0.0f;
+    const float pane = m.pane.open && !m.cfg.files_left ? m.pane.width : 0.0f;
     return {.width = m.win.x, .right_inset = minimap_w(m) + pane};
 }
 
@@ -399,7 +399,7 @@ void start_ssh(Model& m, Session& se, const Host& h) {
     se.link.dropped = false;
     if (m.cfg.demo) return;
     se.pty = std::make_shared<Pty>();
-    const auto argv = ssh_argv(h, m.book, {.multiplex = m.cfg.ssh_multiplex, .keepalive = m.cfg.ssh_keepalive});
+    const auto argv = ssh_argv(h, m.ssh.book, {.multiplex = m.cfg.ssh_multiplex, .keepalive = m.cfg.ssh_keepalive});
     if (!se.pty->spawn(m.metrics.fit_cols, m.metrics.fit_rows, "ssh", {},
                        std::vector<std::string>{argv.begin() + 1, argv.end()}, {})) {
         (void)se.term->feed("\x1b[31mhand: could not start ssh\x1b[0m\r\n");
@@ -418,7 +418,7 @@ void activate(Model& m, std::size_t i) {
     m.grid_key = 0;
     m.cur_known = false;              // the cursor appears where it is, no flight across tabs
     m.fx.ps.clear();
-    m.mm_hover_y = -1.0f;
+    m.minimap.hover_y = -1.0f;
     m.cursor_on = true;
     m.cur_a = 1.0f;
 }

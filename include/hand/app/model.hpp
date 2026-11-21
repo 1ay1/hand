@@ -11,20 +11,17 @@
 // `copy` is engaged exactly while copy mode is on; `ask` exactly while a
 // dialog is asking. What a value means is in its type.
 
+#include <hand/app/model/chrome.hpp>
+#include <hand/app/model/modes.hpp>
+#include <hand/app/model/pane.hpp>
+#include <hand/app/model/ssh.hpp>
 #include <hand/config/config.hpp>
 #include <hand/core/pty.hpp>
 #include <hand/core/term.hpp>
 #include <hand/core/types.hpp>
-#include <hand/ssh/hosts.hpp>
 
 #include <mayag/mayag.hpp>
-#include <mayag/widget/settings_panel.hpp>
-#include <mayag/widget/file_pane.hpp>
-#include <mayag/widget/ssh_manager.hpp>
-#include <mayag/widget/tab_strip.hpp>
-#include <mayag/widget/term_dialog.hpp>
 #include <mayag/widget/terminal_view.hpp>
-#include <mayag/widget/toast.hpp>
 
 #include <cstdint>
 #include <memory>
@@ -34,40 +31,6 @@
 #include <vector>
 
 namespace hand {
-
-/// Copy mode (ctrl+shift+m): a keyboard cursor through the scrollback, vim keys.
-struct CopyMode {
-    enum class Visual : std::uint8_t { none, chars, lines, block };   ///< v, V, ^v
-    std::int64_t row = 0;          ///< absolute line of the cursor
-    int          col = 0;
-    Visual       visual = Visual::none;
-    std::int64_t anchor_row = 0;   ///< where visual mode started
-    int          anchor_col = 0;
-};
-
-/// Hints (ctrl+shift+space): every URL / path / hash on screen, labelled.
-struct HintMode {
-    std::vector<Term::Hint>  hints;
-    std::vector<std::string> labels;
-    std::string              typed;
-};
-
-/// The confirmation dialog: one question at a time.
-struct Ask {
-    enum class Kind : std::uint8_t { paste, close_tab, quit };
-    Kind        kind = Kind::paste;
-    TabIndex    tab{0};             ///< close_tab: which
-    std::size_t focus = 0;          ///< the focused action (0 = cancel)
-    bool        remember = false;   ///< "don't ask again" ticked
-};
-
-/// The machine a tab talks to over ssh.
-struct Remote {
-    bool   launched = false;        ///< hand ran ssh as the tab's program (so it can reconnect)
-    bool   dropped = false;         ///< it ended badly: the tab stays, offering reconnect
-    double dropped_at = -10.0;
-    double connected_at = -10.0;
-};
 
 struct Session {
     SessionId               sid = kNoSession;     ///< stable id: routes pty output, keys the stream
@@ -137,67 +100,19 @@ struct Model : Session {
     std::vector<Session>    tabs;                 ///< tabs[active] is a placeholder (the Model holds it)
     std::size_t             active = 0;
     SessionIds              session_ids;          ///< hands out each new session's id
-    mayag::dsl::TabStripMotion tab_motion;        ///< the sliding pill
-    float                   strip_t = 0.0f;       ///< the strip, 0..1 (eased in when a second tab opens)
-    float                   switch_t = 1.0f;      ///< the content's slide on a tab switch, 0..1
-    int                     switch_dir = 0;       ///< -1 came from the right, +1 from the left
-    int                     drag_tab = -1;        ///< a tab being dragged to reorder
-    float                   drag_dx = 0.0f;
-    bool                    show_numbers = false; ///< alt pressed: alt+N hints on the tabs (for a moment)
-    double                  numbers_at = -10.0;
-    // settings (ctrl+,): a panel over the terminal. settings_panel owns the
-    // interaction; we own its state.
-    bool                    settings_open = false;
-    mayag::dsl::SettingsPanelState panel;
-    float                   settings_t = 0.0f;    ///< the panel, 0..1 (eased in AND out)
-    bool                    ctrl_held = false;
-    // the minimap: open while the pointer is near the right edge (eased width)
-    bool                    mm_open = false;
-    float                   mm_w = 14.0f;
-    float                   mm_hover_y = -1.0f;   ///< pointer over the minimap (terminal y), -1 = not
-    float                   peek_t = 0.0f;        ///< the peek card, 0..1 (eased)
+    StripModel              strip;                ///< the tab strip
+    bool                    ctrl_held = false;    ///< ctrl is down: links are armed
+    MinimapModel            minimap;
     std::uint64_t           clock = 0;            ///< 1 Hz: live timers, activity samples
     double                  resized_at = -10.0;
     bool                    sized_once = false;
-    std::optional<mayag::dsl::Toast> toast;
-    double                  toast_at = -10.0;
+    ToastModel              toast;
     mutable mayag::Rect     sel_chip{};           ///< where the selection chip was drawn (terminal coords)
-    // the confirmation dialog: one at a time, eased in and out
-    std::optional<Ask>      ask;
-    float                   ask_t = 0.0f;         ///< 0..1, eased toward ask.has_value()
-    mutable mayag::dsl::TermDialogSpec ask_last;  ///< what was shown (drawn while it fades out)
-    // the ssh host picker (ctrl+shift+s)
-    bool                    hosts_open = false;
-    mayag::TextEditState    hosts_query;
-    int                     hosts_sel = 0;
-    HostSources             host_src;
-    HostBook                book;                 ///< loaded when the picker opens (files can change)
-    // the ssh host manager (ctrl+shift+h): every host, organised and editable
-    bool                    manager_open = false;
-    float                   manager_t = 0.0f;     ///< 0..1, eased in and out
-    mayag::dsl::SshManagerState manager;
-    mayag::dsl::SshFilesView    files;            ///< the manager's Files tab, as shown (dotfiles filtered)
-    std::vector<mayag::dsl::SshRemoteEntry> files_all;   ///< the whole listing
-    std::vector<int>            listen_ports;     ///< listening TCP ports (tunnel status), refreshed 1 Hz while open
-    std::vector<std::string>    listen_owners;
-    bool                        listen_known = true;
-    std::vector<ImportSource>   imports;          ///< other clients' sessions, read when the manager opens
-    // the file pane beside the terminal (ctrl+shift+e): the active tab's directory
-    bool                        pane_open = false;
-    float                       pane_w = 300.0f;
-    mayag::dsl::FilePaneState   pane;
-    std::string                 pane_where;       ///< "" local, else the ssh host's alias
-    std::optional<Host>         pane_host;        ///< the host it lists over SFTP
-    std::string                 pane_path;        ///< the folder shown
-    std::string                 pane_followed;    ///< the shell's directory it last followed
-    bool                        pane_follow = true;
-    std::vector<mayag::dsl::FileEntry> pane_entries;
-    bool                        pane_loading = false;
-    std::string                 pane_error, pane_busy, pane_note;
-    std::uint64_t               pane_token = 0;   ///< the listing awaited (older ones are dropped)
-    std::map<std::string, double> pane_fresh_at;  ///< name -> when a re-read found it new / changed (the glow)
-    std::optional<mayag::dsl::FilePreview> pane_preview;
-    std::string                 pane_preview_path;   ///< what pane_preview shows (or is being read)
+    // what floats over the terminal, and what sits beside it
+    SettingsModel           settings;             ///< ctrl+,
+    DialogModel             dialog;               ///< the one open question
+    SshModel                ssh;                  ///< ctrl+shift+s picker, ctrl+shift+h manager
+    PaneModel               pane;                 ///< ctrl+shift+e
 
     [[nodiscard]] std::size_t tab_count() const noexcept { return std::max<std::size_t>(tabs.size(), 1); }
     [[nodiscard]] float strip_h() const noexcept;

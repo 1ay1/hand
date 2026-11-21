@@ -62,7 +62,7 @@ Place place_of(const Model& m) {
     const std::string osc_dir = m.term ? m.term->cwd() : std::string{};
     if (r && !m.link.dropped) {
         p.where = r->alias;
-        p.host = m.book.find(r->alias) ? *m.book.find(r->alias) : *r;
+        p.host = m.ssh.book.find(r->alias) ? *m.ssh.book.find(r->alias) : *r;
         // a remote shell's OSC 7 names its own host; a stale local one does not count
         if (!osc_dir.empty() && !is_here(osc_host)) p.dir = osc_dir;
         else p.note = "The remote shell does not report its directory: showing where you log in. Add OSC 7 to its prompt to follow cd.";
@@ -231,7 +231,7 @@ std::optional<FilePreview> read_preview(const std::string& path, int max_lines) 
 
 /// The path as a shell argument: PowerShell, cmd and POSIX quote differently.
 std::string shell_quote(const Model& m, const std::string& path) {
-    if (m.pane_where.empty()) {
+    if (m.pane.where.empty()) {
 #if defined(_WIN32)
         const std::string sh = lower(Pty::resolve_shell(m.cfg.shell));
         if (sh.find("cmd") != std::string::npos) return "\"" + path + "\"";
@@ -247,7 +247,7 @@ std::string shell_quote(const Model& m, const std::string& path) {
 
 std::string cd_command(const Model& m, const std::string& path) {
 #if defined(_WIN32)
-    if (m.pane_where.empty() && lower(Pty::resolve_shell(m.cfg.shell)).find("cmd") != std::string::npos)
+    if (m.pane.where.empty() && lower(Pty::resolve_shell(m.cfg.shell)).find("cmd") != std::string::npos)
         return "cd /d " + shell_quote(m, path);
 #endif
     return "cd " + shell_quote(m, path);
@@ -259,18 +259,18 @@ namespace detail {
 
 FilePaneProps pane_props(const Model& m) {
     FilePaneProps p;
-    p.path = m.pane_path;
-    p.where = m.pane_where;
-    p.entries = m.pane_entries;
+    p.path = m.pane.path;
+    p.where = m.pane.where;
+    p.entries = m.pane.entries;
     for (auto& e : p.entries)   // the glow fades over ~2.5 s
-        if (const auto it = m.pane_fresh_at.find(e.name); it != m.pane_fresh_at.end())
+        if (const auto it = m.pane.fresh_at.find(e.name); it != m.pane.fresh_at.end())
             e.fresh = std::clamp(1.0f - static_cast<float>((m.time - it->second) / 2.5), 0.0f, 1.0f);
-    p.loading = m.pane_loading;
-    p.following = m.pane_follow;
-    p.error = m.pane_error;
-    p.busy = m.pane_busy;
-    p.note = m.pane_note;
-    p.width = m.pane_w;
+    p.loading = m.pane.loading;
+    p.following = m.pane.follow;
+    p.error = m.pane.error;
+    p.busy = m.pane.busy;
+    p.note = m.pane.note;
+    p.width = m.pane.width;
     p.left = m.cfg.files_left;
     p.now = unix_now();
     p.dirs_first = m.cfg.files_dirs_first;
@@ -279,9 +279,9 @@ FilePaneProps pane_props(const Model& m) {
     p.age = m.cfg.files_age;
     p.type_colors = m.cfg.files_type_colors;
     p.preview_lines = static_cast<int>(m.cfg.files_preview_lines);
-    if (m.cfg.files_preview && m.pane_preview && !m.pane_preview_path.empty()) p.preview = m.pane_preview;
-    std::string shown = m.pane_path;
-    if (m.pane_where.empty()) {   // ~ for home, as the shell writes it
+    if (m.cfg.files_preview && m.pane.preview && !m.pane.preview_path.empty()) p.preview = m.pane.preview;
+    std::string shown = m.pane.path;
+    if (m.pane.where.empty()) {   // ~ for home, as the shell writes it
         std::string home;
 #if defined(_WIN32)
         if (const char* u = std::getenv("USERPROFILE"); u && *u) home = u;
@@ -295,13 +295,13 @@ FilePaneProps pane_props(const Model& m) {
             shown = "~" + shown.substr(home.size());
         p.title = shown;
     } else {
-        p.title = m.pane_where + ":" + shown;
+        p.title = m.pane.where + ":" + shown;
     }
     return p;
 }
 
 bool pane_glowing(const Model& m) {
-    for (const auto& [name, at] : m.pane_fresh_at)
+    for (const auto& [name, at] : m.pane.fresh_at)
         if (m.time - at < 2.5) return true;
     return false;
 }
@@ -312,19 +312,19 @@ bool pane_glowing(const Model& m) {
 /// re-read of the same folder (no spinner; what changed glows).
 static App::Cmd pane_list(Model& m, std::string dir, bool quiet = false) {
     if (!quiet) {
-        if (dir != m.pane_path) { m.pane_fresh_at.clear(); m.pane.filter.clear(); m.pane.filtering = false; }
-        m.pane_path = dir;
-        m.pane_loading = true;
-        m.pane_error.clear();
+        if (dir != m.pane.path) { m.pane.fresh_at.clear(); m.pane.ui.filter.clear(); m.pane.ui.filtering = false; }
+        m.pane.path = dir;
+        m.pane.loading = true;
+        m.pane.error.clear();
     }
-    const std::uint64_t token = ++m.pane_token;
-    if (m.pane_where.empty())   // read-only, so even demo shots list for real
+    const std::uint64_t token = ++m.pane.token;
+    if (m.pane.where.empty())   // read-only, so even demo shots list for real
         return App::Cmd::task([](Sk out, std::uint64_t tk, std::string d, bool git, bool q) {
             auto r = list_local(tk, d, git);
             r.notice = q ? App::Notice::quiet : App::Notice::loud;
             out.send(App::Msg{std::move(r)});
         }, token, std::move(dir), m.cfg.files_git, quiet);
-    if (!m.pane_host || m.cfg.demo) return {};
+    if (!m.pane.host || m.cfg.demo) return {};
     return App::Cmd::task([](Sk out, std::uint64_t tk, Host h, HostBook book, std::string d, bool q) {
         const auto l = sftp::list(h, book, d);
         App::PaneListed r{tk, l.path.empty() ? d : l.path, {}, l.error, q ? App::Notice::quiet : App::Notice::loud};
@@ -334,129 +334,129 @@ static App::Cmd pane_list(Model& m, std::string dir, bool quiet = false) {
             r.entries.push_back(std::move(f));
         }
         out.send(App::Msg{std::move(r)});
-    }, token, *m.pane_host, m.book, std::move(dir), quiet);
+    }, token, *m.pane.host, m.ssh.book, std::move(dir), quiet);
 }
 
 /// The selection's preview: read it (a task) when the selection moved.
 static App::Cmd pane_preview(Model& m) {
-    if (!m.pane_open || !m.cfg.files_preview || !m.pane_where.empty()) {
-        m.pane_preview.reset(); m.pane_preview_path.clear();
+    if (!m.pane.open || !m.cfg.files_preview || !m.pane.where.empty()) {
+        m.pane.preview.reset(); m.pane.preview_path.clear();
         return {};
     }
-    const auto vis = file_pane_view(m.pane_entries, m.pane, m.cfg.files_dirs_first);
-    if (vis.empty() || !m.pane.focused) { m.pane_preview.reset(); m.pane_preview_path.clear(); return {}; }
-    const auto& e = m.pane_entries[vis[static_cast<std::size_t>(std::clamp(m.pane.sel, 0, static_cast<int>(vis.size()) - 1))].i];
-    const std::string path = file_pane_detail::join(m.pane_path, e.name, '/');
-    if (path == m.pane_preview_path) return {};
-    m.pane_preview_path = path;
+    const auto vis = file_pane_view(m.pane.entries, m.pane.ui, m.cfg.files_dirs_first);
+    if (vis.empty() || !m.pane.ui.focused) { m.pane.preview.reset(); m.pane.preview_path.clear(); return {}; }
+    const auto& e = m.pane.entries[vis[static_cast<std::size_t>(std::clamp(m.pane.ui.sel, 0, static_cast<int>(vis.size()) - 1))].i];
+    const std::string path = file_pane_detail::join(m.pane.path, e.name, '/');
+    if (path == m.pane.preview_path) return {};
+    m.pane.preview_path = path;
     return App::Cmd::task([](Sk out, std::string p, int n) { out.send(App::Msg{App::PanePreview{p, read_preview(p, n)}}); },
                           path, static_cast<int>(m.cfg.files_preview_lines));
 }
 
 App::Cmd App::update(Model& m, PanePreview p) {
-    if (p.path != m.pane_preview_path) return {};
-    m.pane_preview = std::move(p.preview);
-    if (!m.pane_preview) m.pane_preview_path.clear();
+    if (p.path != m.pane.preview_path) return {};
+    m.pane.preview = std::move(p.preview);
+    if (!m.pane.preview) m.pane.preview_path.clear();
     return {};
 }
 
 App::Cmd App::update(Model& m, PaneWatch) {
-    if (!m.pane_open || m.pane_loading || m.pane_path.empty() || !m.cfg.files_watch) return {};
-    return pane_list(m, m.pane_path, true);
+    if (!m.pane.open || m.pane.loading || m.pane.path.empty() || !m.cfg.files_watch) return {};
+    return pane_list(m, m.pane.path, true);
 }
 
 App::Cmd App::pane_sync(Model& m) {
-    if (!m.pane_open) return {};
+    if (!m.pane.open) return {};
     const Place p = place_of(m);
-    const bool moved_machine = p.where != m.pane_where;
+    const bool moved_machine = p.where != m.pane.where;
     if (moved_machine) {
-        m.pane_where = p.where;
-        m.pane_host = p.host;
-        m.pane_follow = true;   // a new machine: start at its shell's directory
-        m.pane_entries.clear();
-        m.pane.sel = 0;
-        m.pane.scroll.offset.y = 0.0f;
+        m.pane.where = p.where;
+        m.pane.host = p.host;
+        m.pane.follow = true;   // a new machine: start at its shell's directory
+        m.pane.entries.clear();
+        m.pane.ui.sel = 0;
+        m.pane.ui.scroll.offset.y = 0.0f;
     }
-    m.pane_note = p.note;
-    if (!moved_machine && (!m.pane_follow || !m.cfg.files_follow || p.dir == m.pane_followed)) return {};
-    m.pane_followed = p.dir;
-    m.pane.sel = 0;
-    m.pane.scroll.offset.y = 0.0f;
+    m.pane.note = p.note;
+    if (!moved_machine && (!m.pane.follow || !m.cfg.files_follow || p.dir == m.pane.followed)) return {};
+    m.pane.followed = p.dir;
+    m.pane.ui.sel = 0;
+    m.pane.ui.scroll.offset.y = 0.0f;
     return pane_list(m, p.dir);
 }
 
 App::Cmd App::update(Model& m, TogglePane) {
-    if (m.pane_open && m.pane.focused) {   // open and in use: close it
-        m.pane_open = false;
-        m.pane.focused = false;
+    if (m.pane.open && m.pane.ui.focused) {   // open and in use: close it
+        m.pane.open = false;
+        m.pane.ui.focused = false;
         fit(m);
         return {};
     }
-    if (m.pane_open) { m.pane.focused = true; return pane_preview(m); }
-    m.pane_open = true;
-    m.pane.focused = true;
-    m.pane_w = m.cfg.files_width;
-    m.pane.show_hidden = m.cfg.files_hidden;
-    m.pane.sort = static_cast<FileSort>(std::clamp(m.cfg.files_sort, 0, 3));
-    m.pane_follow = m.cfg.files_follow || m.pane_path.empty();
-    m.pane_where = "\x01";   // force a fresh look at where the shell is
+    if (m.pane.open) { m.pane.ui.focused = true; return pane_preview(m); }
+    m.pane.open = true;
+    m.pane.ui.focused = true;
+    m.pane.width = m.cfg.files_width;
+    m.pane.ui.show_hidden = m.cfg.files_hidden;
+    m.pane.ui.sort = static_cast<FileSort>(std::clamp(m.cfg.files_sort, 0, 3));
+    m.pane.follow = m.cfg.files_follow || m.pane.path.empty();
+    m.pane.where = "\x01";   // force a fresh look at where the shell is
     fit(m);
     return pane_sync(m);
 }
 
 App::Cmd App::update(Model& m, PaneResize r) {
-    m.pane_w += r.dx;
+    m.pane.width += r.dx;
     fit(m);
-    m.cfg.files_width = m.pane_w;   // remembered (saved with the settings)
+    m.cfg.files_width = m.pane.width;   // remembered (saved with the settings)
     return {};
 }
 
 App::Cmd App::update(Model& m, PaneListed r) {
-    if (r.token != m.pane_token) return {};   // an older request
+    if (r.token != m.pane.token) return {};   // an older request
     if (r.notice == Notice::quiet) {   // a watch re-read: same folder, glow what changed
-        if (!r.error.empty() || r.path != m.pane_path) return {};
+        if (!r.error.empty() || r.path != m.pane.path) return {};
         std::map<std::string, const FileEntry*> before;
-        for (const auto& e : m.pane_entries) before[e.name] = &e;
-        bool changed = r.entries.size() != m.pane_entries.size();
+        for (const auto& e : m.pane.entries) before[e.name] = &e;
+        bool changed = r.entries.size() != m.pane.entries.size();
         for (const auto& e : r.entries) {
             const auto it = before.find(e.name);
             const bool fresh = it == before.end() || it->second->size != e.size || it->second->mtime != e.mtime;
-            if (fresh) m.pane_fresh_at[e.name] = m.time;
+            if (fresh) m.pane.fresh_at[e.name] = m.time;
             changed = changed || fresh || it->second->git != e.git;
         }
         if (!changed) return {};
         // keep the selection on the same file as rows come and go
-        const auto vis = file_pane_view(m.pane_entries, m.pane, m.cfg.files_dirs_first);
+        const auto vis = file_pane_view(m.pane.entries, m.pane.ui, m.cfg.files_dirs_first);
         std::string selected;
-        if (!vis.empty()) selected = m.pane_entries[vis[static_cast<std::size_t>(std::clamp(m.pane.sel, 0, static_cast<int>(vis.size()) - 1))].i].name;
-        m.pane_entries = std::move(r.entries);
-        const auto now_vis = file_pane_view(m.pane_entries, m.pane, m.cfg.files_dirs_first);
+        if (!vis.empty()) selected = m.pane.entries[vis[static_cast<std::size_t>(std::clamp(m.pane.ui.sel, 0, static_cast<int>(vis.size()) - 1))].i].name;
+        m.pane.entries = std::move(r.entries);
+        const auto now_vis = file_pane_view(m.pane.entries, m.pane.ui, m.cfg.files_dirs_first);
         for (std::size_t q = 0; q < now_vis.size(); ++q)
-            if (m.pane_entries[now_vis[q].i].name == selected) m.pane.sel = static_cast<int>(q);
-        if (m.pane_fresh_at.count(selected)) m.pane_preview_path.clear();   // re-read its preview
+            if (m.pane.entries[now_vis[q].i].name == selected) m.pane.ui.sel = static_cast<int>(q);
+        if (m.pane.fresh_at.count(selected)) m.pane.preview_path.clear();   // re-read its preview
         return pane_preview(m);
     }
-    m.pane_loading = false;
-    m.pane_error = r.error;
-    m.pane_path = r.path;
-    if (r.error.empty() || !r.entries.empty()) m.pane_entries = std::move(r.entries);
-    if (m.pane_follow && m.pane_followed.empty()) m.pane_followed = r.path;   // the login dir, resolved
-    m.pane.sel = std::clamp(m.pane.sel, 0, std::max(static_cast<int>(m.pane_entries.size()) - 1, 0));
-    m.pane_preview_path.clear();
+    m.pane.loading = false;
+    m.pane.error = r.error;
+    m.pane.path = r.path;
+    if (r.error.empty() || !r.entries.empty()) m.pane.entries = std::move(r.entries);
+    if (m.pane.follow && m.pane.followed.empty()) m.pane.followed = r.path;   // the login dir, resolved
+    m.pane.ui.sel = std::clamp(m.pane.ui.sel, 0, std::max(static_cast<int>(m.pane.entries.size()) - 1, 0));
+    m.pane.preview_path.clear();
     return pane_preview(m);
 }
 
 App::Cmd App::update(Model& m, PaneOp p) {
     using A = FilePaneAction;
-    const FileSort sort_before = m.pane.sort;
-    const bool hidden_before = m.pane.show_hidden;
-    p.op(m.pane);
-    if (m.pane.sort != sort_before) m.cfg.files_sort = static_cast<int>(m.pane.sort);
-    if (m.pane.show_hidden != hidden_before) m.cfg.files_hidden = m.pane.show_hidden;
+    const FileSort sort_before = m.pane.ui.sort;
+    const bool hidden_before = m.pane.ui.show_hidden;
+    p.op(m.pane.ui);
+    if (m.pane.ui.sort != sort_before) m.cfg.files_sort = static_cast<int>(m.pane.ui.sort);
+    if (m.pane.ui.show_hidden != hidden_before) m.cfg.files_hidden = m.pane.ui.show_hidden;
     std::vector<Cmd> cmds;
     const auto toast = [&](std::string title, std::string body, Toast::Kind k) {
-        m.toast = Toast{.title = std::move(title), .body = std::move(body), .kind = k};
-        m.toast_at = m.time;
+        m.toast.card = Toast{.title = std::move(title), .body = std::move(body), .kind = k};
+        m.toast.at = m.time;
     };
     // typing into the shell is only safe at its prompt
     const auto at_prompt = [&] {
@@ -464,68 +464,68 @@ App::Cmd App::update(Model& m, PaneOp p) {
         if (m.term->alt_screen()) { toast("the shell is busy", "a full-screen program has the terminal", Toast::Kind::info); return false; }
         return true;
     };
-    for (auto& a : std::exchange(m.pane.out, {})) {
+    for (auto& a : std::exchange(m.pane.ui.out, {})) {
         switch (a.kind) {
             case A::Kind::list:
-                m.pane_follow = a.path == m.pane_followed;
+                m.pane.follow = a.path == m.pane.followed;
                 cmds.push_back(pane_list(m, a.path));
-                m.pane.sel = 0;
-                m.pane.scroll.offset.y = 0.0f;
+                m.pane.ui.sel = 0;
+                m.pane.ui.scroll.offset.y = 0.0f;
                 break;
             case A::Kind::follow: {
-                m.pane_follow = true;
+                m.pane.follow = true;
                 const Place pl = place_of(m);
-                m.pane_followed = pl.dir;
-                m.pane.sel = 0;
+                m.pane.followed = pl.dir;
+                m.pane.ui.sel = 0;
                 cmds.push_back(pane_list(m, pl.dir));
                 break;
             }
             case A::Kind::cd:
                 if (!at_prompt()) break;
                 m.pty->write(cd_command(m, a.path) + "\r");
-                m.pane_follow = true;   // the shell goes there; the pane goes with it
-                m.pane_followed = a.path;
-                if (m.pane_path != a.path) cmds.push_back(pane_list(m, a.path));
-                m.pane.focused = false;
+                m.pane.follow = true;   // the shell goes there; the pane goes with it
+                m.pane.followed = a.path;
+                if (m.pane.path != a.path) cmds.push_back(pane_list(m, a.path));
+                m.pane.ui.focused = false;
                 break;
             case A::Kind::paste:
                 if (!at_prompt()) break;
                 m.pty->write(shell_quote(m, a.path) + " ");
-                m.pane.focused = false;
+                m.pane.ui.focused = false;
                 break;
             case A::Kind::copy_path:
                 toast("copied", a.path, Toast::Kind::info);
                 cmds.push_back(WriteClipboard{a.path});
                 break;
             case A::Kind::reveal:
-                if (m.pane_where.empty() && !m.cfg.demo) proc::reveal(a.path);
+                if (m.pane.where.empty() && !m.cfg.demo) proc::reveal(a.path);
                 break;
             case A::Kind::open:
-                if (m.pane_where.empty()) {
+                if (m.pane.where.empty()) {
                     if (!m.cfg.demo) proc::open_path(a.path);
                     break;
                 }
                 [[fallthrough]];
             case A::Kind::download: {
-                if (m.pane_where.empty() || !m.pane_host || m.cfg.demo) break;
+                if (m.pane.where.empty() || !m.pane.host || m.cfg.demo) break;
                 const std::string name = a.path.substr(a.path.find_last_of('/') + 1);
-                m.pane_busy = "Downloading " + name + "\u2026";
+                m.pane.busy = "Downloading " + name + "\u2026";
                 cmds.push_back(Cmd::task([](Sk out, Host h, HostBook book, std::string remote, std::string nm) {
                     const std::string dir = proc::downloads_dir();
                     const std::string err = sftp::get(h, book, {remote}, dir);
                     out.send(App::Msg{App::FilesDone{h.alias, "", "Downloaded " + nm, err, dir + "/" + nm}});
-                }, *m.pane_host, m.book, a.path, name));
+                }, *m.pane.host, m.ssh.book, a.path, name));
                 break;
             }
             case A::Kind::upload:
-                if (m.pane_where.empty() || m.cfg.demo) break;
+                if (m.pane.where.empty() || m.cfg.demo) break;
                 cmds.push_back(Cmd::task([](Sk out, std::string alias, std::string dir) {
                     out.send(App::Msg{App::UploadPicked{alias, dir, proc::pick_files("Upload to " + dir)}});
-                }, m.pane_where, a.path));
+                }, m.pane.where, a.path));
                 break;
             case A::Kind::close:
-                m.pane_open = false;
-                m.pane.focused = false;
+                m.pane.open = false;
+                m.pane.ui.focused = false;
                 fit(m);
                 break;
         }

@@ -236,8 +236,8 @@ void minimap(std::vector<Node>& layers, const Ctx& c, const Model& m, const Term
     }
     const float hgt = m.size.y;
     sb.rest_width = kMinimapRest;
-    sb.expanded = m.mm_w > kMinimapRest + 0.5f;
-    sb.width = std::max(m.mm_w, kMinimapRest);
+    sb.expanded = m.minimap.width > kMinimapRest + 0.5f;
+    sb.width = std::max(m.minimap.width, kMinimapRest);
     sb.line_px = 2.0f;
     const float used = std::min(hgt, scrollback_scale(sb, hgt) * static_cast<float>(std::max(info.total, 1)));
     sb.buckets = scrollback_buckets(info.total, used, 2.0f);
@@ -252,8 +252,8 @@ void minimap(std::vector<Node>& layers, const Ctx& c, const Model& m, const Term
                             }};
                         })).build());
 
-    if (m.peek_t <= 0.0f || m.mm_hover_y < 0.0f || info.total <= 0) return;
-    const std::int64_t line = std::clamp<std::int64_t>(static_cast<std::int64_t>(m.mm_hover_y / hgt * static_cast<float>(info.total)),
+    if (m.minimap.peek_t <= 0.0f || m.minimap.hover_y < 0.0f || info.total <= 0) return;
+    const std::int64_t line = std::clamp<std::int64_t>(static_cast<std::int64_t>(m.minimap.hover_y / hgt * static_cast<float>(info.total)),
                                                      0, info.total - 1);
     std::optional<Term::Command> at;
     for (const auto& cmd : cmds) {
@@ -265,7 +265,7 @@ void minimap(std::vector<Node>& layers, const Ctx& c, const Model& m, const Term
     const std::int64_t first = std::clamp<std::int64_t>(line - kRows / 2, 0, std::max<std::int64_t>(info.total - kRows, 0));
     const int pcols = std::min(m.term->cols(), 72);
     PeekProps pp{.grid = m.term->grid_at(first, kRows, pcols), .theme = term_theme(m), .view = o, .rows = kRows, .cols = pcols,
-                 .line = line, .total = info.total, .hover_y = m.mm_hover_y, .ease = m.peek_t};
+                 .line = line, .total = info.total, .hover_y = m.minimap.hover_y, .ease = m.minimap.peek_t};
     pp.grid.selection.push_back({static_cast<int>(line - first), 0, pcols});   // the hovered line, highlighted
     if (at && at->ran) {
         pp.command = m.term->command_text(*at);
@@ -290,7 +290,7 @@ Node terminal(const Ctx& c, const Model& m) {
     std::vector<Node> layers;
     layers.push_back(m.cfg.bell_shake && m.bell_at >= 0.0 ? bell_shake(std::move(grid_node), static_cast<float>(m.time - m.bell_at))
                                                           : std::move(grid_node));
-    if (!m.settings_open) remote(layers, c, m, b);
+    if (!m.settings.open) remote(layers, c, m, b);
     cursor_motion(layers, m);
     std::vector<Node> history_layers;
     const float tail_h = history(history_layers, c, m, b, o);

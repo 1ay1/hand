@@ -47,7 +47,7 @@ const std::optional<Host>& remote_of(const Session& se);
 HostEnv remote_env(const Model& m, const Host& h);
 /// The book as the picker shows it, with live tabs counted per host.
 std::vector<SshHost> picker_hosts(const Model& m);
-/// The picker's rows: indices into m.book.hosts, best first.
+/// The picker's rows: indices into m.ssh.book.hosts, best first.
 std::vector<int> picker_rank(const Model& m);
 /// The minimap maps the normal screen's history: a full-screen app (the
 /// alternate screen: vim, htop, cmatrix) owns the whole window and gets none.

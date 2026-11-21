@@ -25,17 +25,17 @@ Node App::view(const Model& m) {
     const Ctx& c = ctx();
     view::overlays(c, m);
     Node body = view::terminal(c, m);
-    if (m.pane_open) {   // the active tab's files, beside its terminal
-        Node pane = file_pane(c, "files", m.pane, detail::pane_props(m),
+    if (m.pane.open) {   // the active tab's files, beside its terminal
+        Node pane = file_pane(c, "files", m.pane.ui, detail::pane_props(m),
                               [](FilePaneOp op) -> App::Msg { return App::PaneOp{std::move(op)}; },
                               [](float grow) -> App::Msg { return App::PaneResize{grow}; });
         body = (m.cfg.files_left ? h(node(std::move(pane)), node(std::move(body))) : h(node(std::move(body)), node(std::move(pane))))
                | width(m.win.x) | height(m.size.y);
     }
     const float full = std::clamp(m.cfg.tab_height, 22.0f, 60.0f);
-    TabbedWindowProps wp{.size = m.win, .strip_full = full, .strip_t = m.strip_t, .bottom = m.cfg.tab_bottom,
-                         .switch_t = m.switch_t, .switch_dir = m.switch_dir};
-    Node strip = m.strip_t > 0.0f ? view::tabs(c, m, full) : Node{};
+    TabbedWindowProps wp{.size = m.win, .strip_full = full, .strip_t = m.strip.t, .bottom = m.cfg.tab_bottom,
+                         .switch_t = m.strip.switch_t, .switch_dir = m.strip.switch_dir};
+    Node strip = m.strip.t > 0.0f ? view::tabs(c, m, full) : Node{};
     // no strip and no system title bar: the window's buttons, small, in the corner
     if (detail::corner_buttons(m)) corner_controls(c, "corner", detail::corner_props(m));
     return tabbed_window(c, wp, std::move(strip), std::move(body));

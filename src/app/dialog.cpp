@@ -45,11 +45,11 @@ std::string one_line(const std::string& text) {
 }  // namespace
 
 App::Cmd App::update(Model& m, RequestQuit) {
-    if (m.cfg.close_confirm != CloseConfirm::never && !m.ask) {
+    if (m.cfg.close_confirm != CloseConfirm::never && !m.dialog.ask) {
         bool busy = false;
         for (std::size_t i = 0; i < m.tab_count(); ++i) busy = busy || !busy_of(m.at(i), nullptr).empty();
         if (busy || m.cfg.close_confirm == CloseConfirm::always) {
-            m.ask = Ask{.kind = Ask::Kind::quit, .focus = 1};
+            m.dialog.ask = Ask{.kind = Ask::Kind::quit, .focus = 1};
             return {};
         }
     }
@@ -57,13 +57,13 @@ App::Cmd App::update(Model& m, RequestQuit) {
 }
 
 App::Cmd App::update(Model& m, RememberToggle) {
-    if (m.ask) m.ask->remember = !m.ask->remember;
+    if (m.dialog.ask) m.dialog.ask->remember = !m.dialog.ask->remember;
     return {};
 }
 
 App::Cmd App::update(Model& m, Answer a) {
-    if (!m.ask) return {};
-    const Ask asked = *std::exchange(m.ask, std::nullopt);
+    if (!m.dialog.ask) return {};
+    const Ask asked = *std::exchange(m.dialog.ask, std::nullopt);
     const auto* choice = std::get_if<Answer::Choose>(&a.pick);
     const std::size_t action = choice ? choice->action : 0;   // dismissing is cancelling
     const bool yes = action != 0;
