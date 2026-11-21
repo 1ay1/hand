@@ -41,11 +41,11 @@ void select(Model& m, const CopyMode& cm) {
 }  // namespace
 
 App::Cmd App::update(Model& m, HintPick h) {
-    if (!m.hint || h.i >= m.hint->hints.size()) { m.hint.reset(); m.grid_key = 0; return {}; }
-    const Term::Hint hint = m.hint->hints[h.i];
+    if (!m.hint || h.hint >= m.hint->hints.size()) { m.hint.reset(); m.grid_key = 0; return {}; }
+    const Term::Hint hint = m.hint->hints[h.hint];
     m.hint.reset();
     m.grid_key = 0;
-    if (h.insert) {   // type it at the prompt
+    if (h.use == HintUse::insert) {   // type it at the prompt
         if (m.pty) m.pty->write(m.term->encode_paste(hint.text));
         return {};
     }
@@ -79,7 +79,7 @@ App::Cmd App::update(Model& m, CopyKey k) {
             break;
         case Do::search:
             m.copy.reset();
-            return update(m, Search{0});
+            return update(m, SearchToggle{});
         case Do::yank: {
             // nothing marked: yank the line under the cursor
             if (m.copy->visual == CopyMode::Visual::none) m.term->select_abs(m.copy->row, 0, m.copy->row, screen.max_col, 1);
@@ -129,7 +129,7 @@ App::Cmd App::update(Model& m, Pasted p) {
     // Ask first (paste.confirm): risky lines, multi-line, or only into programs
     // that would run each line as it lands.
     if (m.ask.has_value()) return {};   // one question at a time
-    if (!p.confirmed) {
+    if (p.confirm == Confirm::asking) {
         std::string body = p.text;
         while (!body.empty() && (body.back() == '\n' || body.back() == '\r')) body.pop_back();
         const bool multi = body.find('\n') != std::string::npos;
@@ -156,17 +156,18 @@ App::Cmd App::update(Model& m, Pasted p) {
     return {};
 }
 
-App::Cmd App::update(Model& m, Search s) {
-    if (s.op == 0) {
-        m.search_open = !m.search_open;
-        if (!m.search_open) { m.term->search_clear(); m.search_query.clear(); }
-        else if (m.term->has_selection()) {   // seed with the selection, like every editor
-            const std::string sel = m.term->selection_text();
-            if (!sel.empty() && sel.find('\n') == std::string::npos) { m.search_query.set(sel); (void)m.term->search(sel); }
-        }
-        return {};
+App::Cmd App::update(Model& m, SearchToggle) {
+    m.search_open = !m.search_open;
+    if (!m.search_open) { m.term->search_clear(); m.search_query.clear(); }
+    else if (m.term->has_selection()) {   // seed with the selection, like every editor
+        const std::string sel = m.term->selection_text();
+        if (!sel.empty() && sel.find('\n') == std::string::npos) { m.search_query.set(sel); (void)m.term->search(sel); }
     }
-    if (s.op > 0) m.term->search_next(); else m.term->search_prev();
+    return {};
+}
+
+App::Cmd App::update(Model& m, SearchStep s) {
+    if (s.step == Step::forward) m.term->search_next(); else m.term->search_prev();
     settle_scroll(m);   // fly to the match
     return {};
 }

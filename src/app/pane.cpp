@@ -321,13 +321,13 @@ static App::Cmd pane_list(Model& m, std::string dir, bool quiet = false) {
     if (m.pane_where.empty())   // read-only, so even demo shots list for real
         return App::Cmd::task([](Sk out, std::uint64_t tk, std::string d, bool git, bool q) {
             auto r = list_local(tk, d, git);
-            r.quiet = q;
+            r.notice = q ? App::Notice::quiet : App::Notice::loud;
             out.send(App::Msg{std::move(r)});
         }, token, std::move(dir), m.cfg.files_git, quiet);
     if (!m.pane_host || m.cfg.demo) return {};
     return App::Cmd::task([](Sk out, std::uint64_t tk, Host h, HostBook book, std::string d, bool q) {
         const auto l = sftp::list(h, book, d);
-        App::PaneListed r{tk, l.path.empty() ? d : l.path, {}, l.error, q};
+        App::PaneListed r{tk, l.path.empty() ? d : l.path, {}, l.error, q ? App::Notice::quiet : App::Notice::loud};
         for (const auto& e : l.entries) {
             FileEntry f;
             f.name = e.name; f.dir = e.dir; f.link = e.link; f.size = e.size; f.when = e.when; f.target = e.target;
@@ -413,7 +413,7 @@ App::Cmd App::update(Model& m, PaneResize r) {
 
 App::Cmd App::update(Model& m, PaneListed r) {
     if (r.token != m.pane_token) return {};   // an older request
-    if (r.quiet) {   // a watch re-read: same folder, glow what changed
+    if (r.notice == Notice::quiet) {   // a watch re-read: same folder, glow what changed
         if (!r.error.empty() || r.path != m.pane_path) return {};
         std::map<std::string, const FileEntry*> before;
         for (const auto& e : m.pane_entries) before[e.name] = &e;

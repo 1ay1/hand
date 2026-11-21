@@ -93,14 +93,15 @@ std::optional<App::Msg> App::on(const Model& m, const KeyEvent& k_in) {
         if (!md.ctrl && !md.super) return E{[](Model&) {}};   // plain keys never reach the shell
     }
     if (m.ask.has_value()) {   // the dialog has the keyboard
-        const int n = (m.ask && m.ask->kind == Ask::Kind::paste) ? 3 : 2;
-        if (k.key == Key::escape) return Answer{-1};
-        if (k.key == Key::enter) return Answer{(m.ask && m.ask->kind == Ask::Kind::paste) && md.shift ? 1 : m.ask->focus};
+        const bool paste = m.ask->kind == Ask::Kind::paste;
+        const std::size_t n = paste ? 3 : 2;
+        if (k.key == Key::escape) return Answer::dismiss();
+        if (k.key == Key::enter) return Answer::choose(paste && md.shift ? 1 : m.ask->focus);   // shift+enter: one line
         if (k.key == Key::tab || k.key == Key::right || k.key == Key::left) {
-            const int d = (k.key == Key::left || (k.key == Key::tab && md.shift)) ? -1 : 1;
-            return E{[d, n](Model& mm) { if (mm.ask) mm.ask->focus = ((mm.ask->focus + d) % n + n) % n; }};
+            const Step s = (k.key == Key::left || (k.key == Key::tab && md.shift)) ? Step::backward : Step::forward;
+            return E{[s, n](Model& mm) { if (mm.ask) mm.ask->focus = wrap(mm.ask->focus, s, n); }};
         }
-        if (k.key == Key::space) return Answer{100};
+        if (k.key == Key::space) return RememberToggle{};
         return E{[](Model&) {}};
     }
     if (cs && k.key == Key::m)   // copy mode: vim keys through the scrollback
@@ -126,19 +127,19 @@ std::optional<App::Msg> App::on(const Model& m, const KeyEvent& k_in) {
     if (k.key == Key::alt && m.tab_count() > 1 && !m.show_numbers) return E{[](Model& mm) { mm.show_numbers = true; mm.numbers_at = mm.time; }};
     if (cs && k.key == Key::t) return NewTab{};
     if (cs && k.key == Key::s) return OpenHosts{};
-    if (cs && k.key == Key::w) return CloseTab{m.active};
+    if (cs && k.key == Key::w) return CloseTab{TabIndex{m.active}};
     if (m.link.dropped) {   // a dropped ssh tab: enter reconnects, esc / q closes, nothing reaches a pty
         if (k.key == Key::enter || k.key == Key::r) return Reconnect{};
-        if (k.key == Key::escape || k.key == Key::q) return CloseTab{m.active, true};
+        if (k.key == Key::escape || k.key == Key::q) return CloseTab{TabIndex{m.active}, Confirm::given};
         return E{[](Model&) {}};
     }
-    if (md.ctrl && k.key == Key::tab) return StepTab{md.shift ? -1 : 1};
-    if (cs && (k.key == Key::page_down || k.key == Key::page_up)) return MoveTab{k.key == Key::page_down ? 1 : -1};
-    if (md.ctrl && !md.shift && (k.key == Key::page_down || k.key == Key::page_up)) return StepTab{k.key == Key::page_down ? 1 : -1};
-    if (cs && (k.key == Key::right || k.key == Key::left)) return StepTab{k.key == Key::right ? 1 : -1};
+    if (md.ctrl && k.key == Key::tab) return StepTab{md.shift ? Step::backward : Step::forward};
+    if (cs && (k.key == Key::page_down || k.key == Key::page_up)) return MoveTab{k.key == Key::page_down ? Step::forward : Step::backward};
+    if (md.ctrl && !md.shift && (k.key == Key::page_down || k.key == Key::page_up)) return StepTab{k.key == Key::page_down ? Step::forward : Step::backward};
+    if (cs && (k.key == Key::right || k.key == Key::left)) return StepTab{k.key == Key::right ? Step::forward : Step::backward};
     if (md.alt && !md.ctrl && !md.shift && k.key >= Key::n1 && k.key <= Key::n9) {
         const auto i = static_cast<std::size_t>(static_cast<int>(k.key) - static_cast<int>(Key::n1));
-        if (m.tab_count() > 1) return SelectTab{k.key == Key::n9 ? m.tab_count() - 1 : std::min(i, m.tab_count() - 1)};
+        if (m.tab_count() > 1) return SelectTab{TabIndex{k.key == Key::n9 ? m.tab_count() - 1 : std::min(i, m.tab_count() - 1)}};
     }
     if (m.hint) {
         if (k.key == Key::escape || (cs && k.key == Key::space))
@@ -174,12 +175,12 @@ std::optional<App::Msg> App::on(const Model& m, const KeyEvent& k_in) {
         }};
     }
     if (cs && k.key == Key::g) return CopyOutput{};
-    if (cs && k.key == Key::f) return Search{0};
+    if (cs && k.key == Key::f) return SearchToggle{};
     if (m.search_open) {
-        if (k.key == Key::escape) return Search{0};
-        if (k.key == Key::enter || k.key == Key::f3) return Search{md.shift ? -1 : 1};
-        if (k.key == Key::up) return Search{-1};
-        if (k.key == Key::down) return Search{1};
+        if (k.key == Key::escape) return SearchToggle{};
+        if (k.key == Key::enter || k.key == Key::f3) return SearchStep{md.shift ? Step::backward : Step::forward};
+        if (k.key == Key::up) return SearchStep{Step::backward};
+        if (k.key == Key::down) return SearchStep{Step::forward};
         return E{[k](Model& mm) {
             if (mm.search_query.handle_key(k.key, k.mods)) (void)mm.term->search(mm.search_query.text);
         }};
@@ -244,7 +245,7 @@ std::optional<App::Msg> App::on(const Model& m, const TextEvent& t) {
             typed.push_back(ch);
         }
         for (std::size_t i = 0; i < m.hint->labels.size(); ++i)
-            if (m.hint->labels[i] == typed) return HintPick{i, upper};
+            if (m.hint->labels[i] == typed) return HintPick{i, upper ? HintUse::insert : HintUse::act};
         return E{[typed](Model& mm) { if (mm.hint) mm.hint->typed = typed; mm.grid_key = 0; }};
     }
     if (m.settings_open) {
@@ -467,7 +468,7 @@ std::optional<App::Msg> App::on(const Model& m, const Pressed& p) {
     for (std::size_t i = 0; i < m.tab_count(); ++i)
         if (p.node == part_id("tabs", i) && p.button == MouseButton::left)
             return E{[i](Model& mm) {
-                (void)update(mm, SelectTab{i});
+                (void)update(mm, SelectTab{TabIndex{i}});
                 mm.drag_tab = static_cast<int>(mm.active);
                 mm.drag_dx = 0.0f;
             }};
@@ -480,8 +481,8 @@ std::optional<App::Msg> App::on(const Model& m, const Dragged& d) {
         mm.drag_dx += dx;
         // past half a tab: swap with the neighbour (the pill slides after it)
         const float tab_w = std::clamp(mm.win.x / static_cast<float>(mm.tab_count()), 96.0f, 236.0f);
-        if (mm.drag_dx > tab_w * 0.5f && mm.active + 1 < mm.tab_count()) { (void)update(mm, MoveTab{1}); mm.drag_dx -= tab_w; }
-        else if (mm.drag_dx < -tab_w * 0.5f && mm.active > 0) { (void)update(mm, MoveTab{-1}); mm.drag_dx += tab_w; }
+        if (mm.drag_dx > tab_w * 0.5f && mm.active + 1 < mm.tab_count()) { (void)update(mm, MoveTab{Step::forward}); mm.drag_dx -= tab_w; }
+        else if (mm.drag_dx < -tab_w * 0.5f && mm.active > 0) { (void)update(mm, MoveTab{Step::backward}); mm.drag_dx += tab_w; }
         mm.drag_tab = static_cast<int>(mm.active);
     }};
 }
@@ -500,10 +501,10 @@ std::optional<App::Msg> App::on(const Model& m, const Clicked& c) {
             if (c.node == part_id("hosts", k)) return ConnectHost{m.book.hosts[static_cast<std::size_t>(ranked[k])]};
     }
     if (c.node == node_id("ssh.reconnect")) return Reconnect{};
-    if (c.node == node_id("ssh.close")) return CloseTab{m.active, true};
+    if (c.node == node_id("ssh.close")) return CloseTab{TabIndex{m.active}, Confirm::given};
     for (std::size_t i = 0; i < m.tab_count(); ++i) {
-        if (c.node == part_id("tabs", tab_part_close + i)) return CloseTab{i};
-        if (c.node == part_id("tabs", i) && c.button == MouseButton::middle) return CloseTab{i};
+        if (c.node == part_id("tabs", tab_part_close + i)) return CloseTab{TabIndex{i}};
+        if (c.node == part_id("tabs", i) && c.button == MouseButton::middle) return CloseTab{TabIndex{i}};
         if (c.node == part_id("tabs", i) && c.count == 2) return NewTab{};   // double-click a tab: a new one beside it
     }
     // the window's own buttons (no system title bar)
@@ -515,17 +516,17 @@ std::optional<App::Msg> App::on(const Model& m, const Clicked& c) {
     if (c.node == part_id("tabs", part_inc) || (c.node == node_id("tabs") && c.count == 2 && m.cfg.decorations)) return NewTab{};
     if (c.node == part_id("tabs", part_menu)) return OpenHosts{};   // the ⌄ beside + : connect somewhere
     if (m.ask.has_value()) {
-        for (int i = 0; i < 3; ++i) if (c.node == part_id("ask", static_cast<std::size_t>(i))) return Answer{i};
-        if (c.node == part_id("ask", 100)) return Answer{100};
+        for (std::size_t i = 0; i < 3; ++i) if (c.node == part_id("ask", i)) return Answer::choose(i);
+        if (c.node == part_id("ask", 100)) return RememberToggle{};
     }
     if (c.node == node_id("sel.copy")) return Copy{};
-    if (c.node == node_id("sel.find")) return Search{0};
+    if (c.node == node_id("sel.find")) return SearchToggle{};
     if (c.node == node_id("sel.open")) return OpenUrl{m.term->selection_text()};
     if (c.node == node_id("sel.clear")) return E{[](Model& mm) { mm.term->select_clear(); }};
     if (!m.search_open) return std::nullopt;
-    if (c.node == part_id("search", 5)) return Search{-1};
-    if (c.node == part_id("search", 6)) return Search{1};
-    if (c.node == part_id("search", 9)) return Search{0};
+    if (c.node == part_id("search", 5)) return SearchStep{Step::backward};
+    if (c.node == part_id("search", 6)) return SearchStep{Step::forward};
+    if (c.node == part_id("search", 9)) return SearchToggle{};
     return std::nullopt;
 }
 
@@ -534,7 +535,7 @@ App::Sub App::subscribe(const Model& m) {
     // every tab's shell keeps running: one reader per session, keyed by its id
     for (std::size_t i = 0; i < m.tab_count(); ++i) {
         const Session& se = m.at(i);
-        if (se.pty) s.push_back(Sub::stream("pty." + std::to_string(se.sid), read_pty, se.pty->fd(),
+        if (se.pty) s.push_back(Sub::stream("pty." + std::to_string(se.sid.get()), read_pty, se.pty->fd(),
                                             static_cast<int>(se.pty->pid()), se.sid));
     }
     if (m.tab_count() > 1) s.push_back(Sub::every(std::chrono::milliseconds(1000), Msg{Clock{}}));   // activity sparklines

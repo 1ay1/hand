@@ -14,6 +14,7 @@
 #include <hand/config/config.hpp>
 #include <hand/core/pty.hpp>
 #include <hand/core/term.hpp>
+#include <hand/core/types.hpp>
 #include <hand/ssh/hosts.hpp>
 
 #include <mayag/mayag.hpp>
@@ -55,8 +56,8 @@ struct HintMode {
 struct Ask {
     enum class Kind : std::uint8_t { paste, close_tab, quit };
     Kind        kind = Kind::paste;
-    std::size_t tab = 0;            ///< close_tab: which
-    int         focus = 0;          ///< the focused action
+    TabIndex    tab{0};             ///< close_tab: which
+    std::size_t focus = 0;          ///< the focused action (0 = cancel)
     bool        remember = false;   ///< "don't ask again" ticked
 };
 
@@ -69,7 +70,7 @@ struct Remote {
 };
 
 struct Session {
-    std::uint64_t           sid = 0;              ///< stable id: routes pty output, keys the stream
+    SessionId               sid = kNoSession;     ///< stable id: routes pty output, keys the stream
     std::shared_ptr<Pty>    pty;
     std::shared_ptr<Term>   term;
     std::string             title = "hand";       ///< OSC 0/2
@@ -135,7 +136,7 @@ struct Model : Session {
     // tabs: the parked sessions, in strip order, with a hole where the active one goes
     std::vector<Session>    tabs;                 ///< tabs[active] is a placeholder (the Model holds it)
     std::size_t             active = 0;
-    std::uint64_t           next_sid = 1;
+    SessionIds              session_ids;          ///< hands out each new session's id
     mayag::dsl::TabStripMotion tab_motion;        ///< the sliding pill
     float                   strip_t = 0.0f;       ///< the strip, 0..1 (eased in when a second tab opens)
     float                   switch_t = 1.0f;      ///< the content's slide on a tab switch, 0..1

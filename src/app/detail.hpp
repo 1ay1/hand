@@ -80,9 +80,9 @@ bool tail_wanted(const Model& m);
 /// (pty_fed). So a firehose (`yes`) is throttled by the kernel's pty buffer
 /// -- the producer blocks -- instead of piling gigabytes into the mailbox,
 /// starving frames and parking ctrl-C behind seconds of queued output.
-void read_pty(Sink<App::Msg> out, std::stop_token st, int fd, int pid, std::uint64_t sid);
+void read_pty(Sink<App::Msg> out, std::stop_token st, int fd, int pid, SessionId sid);
 /// The UI has fed shell `sid`'s last chunk: its reader may send the next.
-void pty_fed(std::uint64_t sid);
+void pty_fed(SessionId sid);
 /// How far below its row the grid is drawn (0..1): a scroll glide between rows
 /// plus the glide of a freshly arrived line at the live prompt.
 float draw_frac(const Model& m);

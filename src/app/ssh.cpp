@@ -48,7 +48,7 @@ App::Cmd App::update(Model& m, HostsKey k) {
     if (k.key == Key::escape) { m.hosts_open = false; return {}; }
     if (k.key == Key::enter) {
         // enter: a new tab; alt+enter: here (only from a plain shell prompt)
-        if (const Host* h = chosen()) return update(m, ConnectHost{*h, md.alt});
+        if (const Host* h = chosen()) return update(m, ConnectHost{*h, md.alt ? Where::this_tab : Where::new_tab});
         if (adhoc) return update(m, ConnectTyped{});
         return {};
     }
@@ -109,7 +109,7 @@ App::Cmd App::update(Model& m, ConnectHost c) {
         if (x.alias == c.host.alias) { ++x.uses; x.last = unix_now(); }
     // here: type it at this tab's prompt (scrollback and cwd stay); only when
     // the tab is a quiet local shell -- never into a running program
-    if (c.here && m.pty && !m.link.launched && busy_of(m, nullptr).empty() && !remote_of(m)) {
+    if (c.where == Where::this_tab && m.pty && !m.link.launched && busy_of(m, nullptr).empty() && !remote_of(m)) {
         m.pty->write(m.term->encode_paste(ssh_command(c.host)) + "\r");
         return {};
     }
@@ -207,7 +207,7 @@ App::Cmd App::update(Model& m, Manager p) {
             case A::Kind::connect_here:
                 if (!known) break;
                 m.manager_open = false;
-                cmds.push_back(update(m, ConnectHost{m.book.hosts[static_cast<std::size_t>(a.host)], a.kind == A::Kind::connect_here}));
+                cmds.push_back(update(m, ConnectHost{m.book.hosts[static_cast<std::size_t>(a.host)], a.kind == A::Kind::connect_here ? Where::this_tab : Where::new_tab}));
                 break;
             case A::Kind::pin: {
                 if (!known) break;
@@ -324,7 +324,7 @@ App::Cmd App::update(Model& m, Manager p) {
                 q += "'";
                 h.command = "cd " + q + " && exec \"$SHELL\" -l";
                 m.manager_open = false;
-                cmds.push_back(update(m, ConnectHost{h, false}));
+                cmds.push_back(update(m, ConnectHost{h, Where::new_tab}));
                 break;
             }
             case A::Kind::files_get: {
@@ -412,7 +412,7 @@ App::Cmd App::update(Model& m, TunnelScan s) {
 App::Cmd App::update(Model& m, Reconnect) {
     if (!m.link.dropped || !m.remote) return {};
     (void)m.term->feed("\r\n\x1b[2m\u21C4 reconnecting to " + m.remote->alias + "\u2026\x1b[0m\r\n");
-    m.sid = m.next_sid++;   // a new reader stream for the new pty
+    m.sid = m.session_ids.next();   // a new reader stream for the new pty
     start_ssh(m, m, *m.remote);
     m.grid_key = 0;
     settle_scroll(m);

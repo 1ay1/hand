@@ -1,4 +1,4 @@
-// hand::App — the shells (spawn, output, exit), the clocks, the window's dialog.
+// hand::App — the shells (spawn, output, exit) and the clocks.
 
 #include "detail.hpp"
 
@@ -102,7 +102,7 @@ void App::settle_scroll(Model& m) {
 
 App::Session App::spawn_session(Model& m, const std::string& cwd) {
     Session se;
-    se.sid = m.next_sid++;
+    se.sid = m.session_ids.next();
     se.opened_at = m.time;
     se.term = std::make_shared<Term>(std::max(m.metrics.fit_cols, 2), std::max(m.metrics.fit_rows, 1), m.palette,
                                      static_cast<int>(m.cfg.scrollback));
@@ -126,7 +126,7 @@ App::Session App::spawn_session(Model& m, const std::string& cwd) {
 
 App::Session App::spawn_ssh(Model& m, const Host& h) {
     Session se;
-    se.sid = m.next_sid++;
+    se.sid = m.session_ids.next();
     se.opened_at = m.time;
     se.term = std::make_shared<Term>(std::max(m.metrics.fit_cols, 2), std::max(m.metrics.fit_rows, 1), m.palette,
                                      static_cast<int>(m.cfg.scrollback));
@@ -166,8 +166,8 @@ App::Cmd App::init(Model& m) {
 }
 
 App::Cmd App::update(Model& m, Output o) {
-    struct Credit { std::uint64_t sid; ~Credit() { detail::pty_fed(sid); } } credit{o.sid};   // fed: the reader may send the next
-    if (o.sid != 0 && o.sid != m.sid) {   // a background tab: feed it, mark it
+    struct Credit { SessionId sid; ~Credit() { detail::pty_fed(sid); } } credit{o.sid};   // fed: the reader may send the next
+    if (o.sid != kNoSession && o.sid != m.sid) {   // a background tab: feed it, mark it
         for (std::size_t i = 0; i < m.tab_count(); ++i) {
             if (i == m.active || m.tabs[i].sid != o.sid) continue;
             Session& se = m.tabs[i];
@@ -262,7 +262,7 @@ App::Cmd App::update(Model& m, Output o) {
 
 App::Cmd App::update(Model& m, Exited e) {
     for (std::size_t i = 0; i < m.tab_count(); ++i) {
-        if (m.at(i).sid != e.sid && !(e.sid == 0 && i == m.active)) continue;
+        if (m.at(i).sid != e.sid && !(e.sid == kNoSession && i == m.active)) continue;
         Session& se = m.at(i);
         // ssh's own failure (255: refused, timed out, the link died) on a tab hand
         // connected: keep the tab and its scrollback, offer to reconnect. A
@@ -280,7 +280,7 @@ App::Cmd App::update(Model& m, Exited e) {
             }
             return {};
         }
-        return update(m, CloseTab{i, true});   // the shell left: nothing to ask
+        return update(m, CloseTab{TabIndex{i}, Confirm::given});   // the shell left: nothing to ask
     }
     return {};
 }
@@ -385,50 +385,6 @@ App::Cmd App::update(Model& m, Tick t) {
     if (!motion::cursor_settled(m.fx, m.cfg.cursor_anim, m.cur_x, m.cur_y, tx, ty) && m.term->scroll_offset() == 0)
         motion::travel(m.fx, m.cfg.cursor_fx, m.metrics.origin_x + (m.cur_x + 0.5f) * cw, m.metrics.origin_y + (m.cur_y + 0.5f) * chh,
                        chh, m.palette);
-    return {};
-}
-
-App::Cmd App::update(Model& m, RequestQuit) {
-    if (m.cfg.close_confirm != CloseConfirm::never && !m.ask) {
-        bool busy = false;
-        for (std::size_t i = 0; i < m.tab_count(); ++i) busy = busy || !busy_of(m.at(i), nullptr).empty();
-        if (busy || m.cfg.close_confirm == CloseConfirm::always) {
-            m.ask = Ask{.kind = Ask::Kind::quit, .focus = 1};
-            return {};
-        }
-    }
-    if (!m.cfg.demo) (void)config_save(m.cfg, config_path());
-    return Cmd::quit();
-}
-
-App::Cmd App::update(Model& m, Answer a) {
-    if (!m.ask) return {};
-    if (a.action == 100) { m.ask->remember = !m.ask->remember; return {}; }
-    const Ask asked = *std::exchange(m.ask, std::nullopt);
-    const bool yes = a.action > 0;
-    if (yes && asked.remember) {   // "don't ask again", remembered in hand.vibe
-        if (asked.kind == Ask::Kind::paste) m.cfg.paste_confirm = PasteConfirm::risky;
-        else m.cfg.close_confirm = CloseConfirm::never;
-        if (!m.cfg.demo) (void)config_save(m.cfg, config_path());
-    }
-    switch (asked.kind) {
-        case Ask::Kind::paste: {
-            std::string text = std::exchange(m.pending_paste, {});
-            if (!yes) return {};
-            if (a.action == 1) {   // one line: newlines become spaces, nothing runs until you press enter
-                std::string one;
-                for (const auto& l : split_lines(text)) { if (!one.empty() && !l.empty()) one += ' '; one += l; }
-                text = one;
-            }
-            return update(m, Pasted{std::move(text), true});
-        }
-        case Ask::Kind::close_tab:
-            return yes ? update(m, CloseTab{asked.tab, true}) : Cmd{};
-        case Ask::Kind::quit:
-            if (!yes) return {};
-            if (!m.cfg.demo) (void)config_save(m.cfg, config_path());
-            return Cmd::quit();
-    }
     return {};
 }
 

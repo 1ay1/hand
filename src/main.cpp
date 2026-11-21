@@ -1236,7 +1236,7 @@ int main(int argc, char** argv) {
                         settle();
                         ok(rt.model().active == 0 && has("TAB-ONE") && !has("TAB-TWO"), "ctrl+tab switches back, screen intact");
                         // output for a background tab lands there, and marks it
-                        const std::uint64_t bg = rt.model().tabs[1].sid;
+                        const hand::SessionId bg = rt.model().tabs[1].sid;
                         rt.send(hand::App::Msg{hand::App::Output{std::string{"\r\nbackground!"}, bg}});
                         rt.tick();
                         ok(rt.model().tabs[1].unread && !has("background!"), "background output goes to its tab and marks it unread");
@@ -1322,7 +1322,7 @@ int main(int argc, char** argv) {
                         rt.press_key(K::w, Mods{.shift = true, .ctrl = true});
                         settle();
                         ok(rt.model().tab_count() == 2, "ctrl+shift+w closes the tab");
-                        rt.send(hand::App::Msg{hand::App::CloseTab{1}});
+                        rt.send(hand::App::Msg{hand::App::CloseTab{hand::TabIndex{1}}});
                         settle();
                         ok(rt.model().tab_count() == 1 && rt.model().strip_h() == 0.0f && rt.model().term->rows() == rows1,
                            "back to one tab: the strip slides away and the grid gets its rows back");
@@ -2139,7 +2139,7 @@ int main(int argc, char** argv) {
                                 "\x1b[1;31mdeploy@prod-db\x1b[0m:\x1b[1;34m~\x1b[0m$ systemctl status postgresql\r\n"
                                 "\x1b[1;32m\u25CF\x1b[0m postgresql.service - PostgreSQL RDBMS\r\n"
                                 "     Active: \x1b[1;32mactive (exited)\x1b[0m since Mon 2024-11-18 22:01:03 UTC\r\n"
-                                "\x1b[1;31mdeploy@prod-db\x1b[0m:\x1b[1;34m~\x1b[0m$ "}, 0}});
+                                "\x1b[1;31mdeploy@prod-db\x1b[0m:\x1b[1;34m~\x1b[0m$ "}, hand::kNoSession}});
                             rt.tick();
                         }
                         if (shot == "ssh-drop")

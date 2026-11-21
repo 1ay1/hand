@@ -63,7 +63,7 @@ TermDialogSpec close_dialog(const Ctx& c, const Model& m, const Ask& a) {
     const bool quit = a.kind == Ask::Kind::quit;
     std::vector<std::size_t> which;
     if (quit) for (std::size_t i = 0; i < m.tab_count(); ++i) which.push_back(i);
-    else which.push_back(a.tab);
+    else which.push_back(a.tab.get());
     int busy = 0;
     for (std::size_t i : which) {
         std::string el;
@@ -74,7 +74,7 @@ TermDialogSpec close_dialog(const Ctx& c, const Model& m, const Ask& a) {
     }
     d.tag = quit ? "QUIT" : "CLOSE";
     d.tone = c.theme.danger;
-    d.title = quit ? "Quit hand?" : "Close tab " + std::to_string(a.tab + 1) + "?";
+    d.title = quit ? "Quit hand?" : "Close tab " + std::to_string(a.tab.get() + 1) + "?";
     d.body = busy == 0 ? (quit ? "Every tab closes with it." : "Nothing is running in it.")
            : busy == 1 ? "Something is still running \u2014 closing ends it."
                        : std::to_string(busy) + " tabs still have something running \u2014 closing ends them.";
@@ -87,7 +87,7 @@ TermDialogSpec close_dialog(const Ctx& c, const Model& m, const Ask& a) {
 void dialog(const Ctx& c, const Model& m) {
     if (m.ask) {
         TermDialogSpec d = m.ask->kind == Ask::Kind::paste ? paste_dialog(c, m) : close_dialog(c, m, *m.ask);
-        d.focused = m.ask->focus;
+        d.focused = static_cast<int>(m.ask->focus);
         d.remember_on = m.ask->remember;
         d.time = m.time;
         d.width = std::min(600.0f, m.size.x - 40.0f);

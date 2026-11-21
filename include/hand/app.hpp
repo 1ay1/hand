@@ -29,56 +29,66 @@ struct App {
     using Msg = msg::Any;
     using Cmd = mayag::Cmd<Msg, mayag::set_title, mayag::write_clipboard, mayag::read_clipboard, mayag::window_action>;
     using Sub = mayag::Sub<Msg>;
-    // the message types, under their old names (App::NewTab{} reads well at call sites)
-    using Output = msg::Output;   using Exited = msg::Exited;     using NewTab = msg::NewTab;
-    using CloseTab = msg::CloseTab; using SelectTab = msg::SelectTab; using StepTab = msg::StepTab;
-    using MoveTab = msg::MoveTab; using Blink = msg::Blink;       using Tick = msg::Tick;
-    using Clock = msg::Clock;     using Copy = msg::Copy;         using PasteReq = msg::PasteReq;
-    using Pasted = msg::Pasted;   using CopyOutput = msg::CopyOutput; using CopyKey = msg::CopyKey;
-    using Search = msg::Search;   using OpenUrl = msg::OpenUrl;   using HintPick = msg::HintPick;
-    using Panel = msg::Panel;     using ToggleSettings = msg::ToggleSettings;
-    using Answer = msg::Answer;   using RequestQuit = msg::RequestQuit; using WindowAct = msg::WindowAct;
-    using OpenHosts = msg::OpenHosts; using HostsKey = msg::HostsKey; using ConnectHost = msg::ConnectHost;
-    using ConnectTyped = msg::ConnectTyped; using Reconnect = msg::Reconnect;
+    // every leaf message under its own name (App::NewTab{} reads well at call sites)
+    using Output = msg::Output;         using Exited = msg::Exited;
+    using NewTab = msg::NewTab;         using CloseTab = msg::CloseTab;     using SelectTab = msg::SelectTab;
+    using StepTab = msg::StepTab;       using MoveTab = msg::MoveTab;
+    using Blink = msg::Blink;           using Tick = msg::Tick;             using Clock = msg::Clock;
+    using Copy = msg::Copy;             using PasteReq = msg::PasteReq;     using Pasted = msg::Pasted;
+    using CopyOutput = msg::CopyOutput; using CopyKey = msg::CopyKey;       using OpenUrl = msg::OpenUrl;
+    using HintPick = msg::HintPick;     using HintUse = msg::HintUse;
+    using SearchToggle = msg::SearchToggle; using SearchStep = msg::SearchStep;
+    using Answer = msg::Answer;         using RememberToggle = msg::RememberToggle;
+    using RequestQuit = msg::RequestQuit; using WindowAct = msg::WindowAct;
+    using Panel = msg::Panel;           using ToggleSettings = msg::ToggleSettings;
+    using OpenHosts = msg::OpenHosts;   using HostsKey = msg::HostsKey;     using ConnectHost = msg::ConnectHost;
+    using ConnectTyped = msg::ConnectTyped; using Reconnect = msg::Reconnect; using Where = msg::Where;
     using ToggleManager = msg::ToggleManager; using Manager = msg::Manager;
     using FilesListed = msg::FilesListed; using FilesDone = msg::FilesDone; using UploadPicked = msg::UploadPicked;
     using TunnelProbe = msg::TunnelProbe; using TunnelScan = msg::TunnelScan;
-    using TogglePane = msg::TogglePane; using PaneOp = msg::PaneOp; using PaneListed = msg::PaneListed; using PaneResize = msg::PaneResize;
-    using PaneWatch = msg::PaneWatch; using PanePreview = msg::PanePreview;
+    using TogglePane = msg::TogglePane; using PaneOp = msg::PaneOp;         using PaneListed = msg::PaneListed;
+    using PaneResize = msg::PaneResize; using PaneWatch = msg::PaneWatch;   using PanePreview = msg::PanePreview;
+    using Notice = msg::Notice;
 
     static inline Config config{};   ///< set by main() before run
     /// Advance of one mono cell at `size` pt in face `family` (main binds the font stack).
     static inline float (*cell_width)(float size, int family) = [](float size, int) { return size * 0.6f; };
 
     static Cmd init(Model& m);
-    // src/app/session.cpp: the shells, the clocks, the dialog
+
+    // ── update: one overload per leaf, grouped by domain (jaal checks every leaf is here) ──
+    // ShellMsg (src/app/session.cpp)
     static Cmd update(Model& m, Output o);
     static Cmd update(Model& m, Exited e);
+    // ClockMsg (src/app/session.cpp)
     static Cmd update(Model& m, Blink);
     static Cmd update(Model& m, Tick t);
     static Cmd update(Model& m, Clock);
+    // DialogMsg (src/app/dialog.cpp)
     static Cmd update(Model& m, Answer a);
+    static Cmd update(Model& m, RememberToggle);
+    // WindowMsg (src/app/dialog.cpp, src/app/settings.cpp)
     static Cmd update(Model& m, RequestQuit);
     static Cmd update(Model&, WindowAct w) { return mayag::WindowAction{.kind = w.kind}; }
-    // src/app/tabs.cpp
+    static Cmd update(Model& m, Panel p);
+    static Cmd update(Model& m, ToggleSettings);
+    // TabMsg (src/app/tabs.cpp)
     static Cmd update(Model& m, NewTab);
     static Cmd update(Model& m, CloseTab c);
     static Cmd update(Model& m, SelectTab s);
     static Cmd update(Model& m, StepTab s);
     static Cmd update(Model& m, MoveTab s);
-    // src/app/clipboard.cpp: copy, paste, search, hints, copy mode
+    // TextMsg, SearchMsg (src/app/clipboard.cpp)
     static Cmd update(Model& m, Copy);
     static Cmd update(Model& m, PasteReq);
     static Cmd update(Model& m, Pasted p);
     static Cmd update(Model& m, CopyOutput);
     static Cmd update(Model& m, CopyKey k);
-    static Cmd update(Model& m, Search s);
     static Cmd update(Model& m, OpenUrl u);
     static Cmd update(Model& m, HintPick h);
-    // src/app/settings.cpp: the panel over the terminal
-    static Cmd update(Model& m, Panel p);
-    static Cmd update(Model& m, ToggleSettings);
-    // src/app/ssh.cpp
+    static Cmd update(Model& m, SearchToggle);
+    static Cmd update(Model& m, SearchStep s);
+    // SshMsg, ManagerMsg (src/app/ssh.cpp)
     static Cmd update(Model& m, OpenHosts);
     static Cmd update(Model& m, HostsKey k);
     static Cmd update(Model& m, ConnectHost c);
@@ -91,6 +101,7 @@ struct App {
     static Cmd update(Model& m, UploadPicked);
     static Cmd update(Model& m, TunnelProbe);
     static Cmd update(Model& m, TunnelScan);
+    // PaneMsg (src/app/pane.cpp)
     static Cmd update(Model& m, TogglePane);
     static Cmd update(Model& m, PaneOp);
     static Cmd update(Model& m, PaneListed);
@@ -99,7 +110,8 @@ struct App {
     static Cmd update(Model& m, PanePreview);
     /// The pane follows the active tab's directory: list it if it moved.
     static Cmd pane_sync(Model& m);
-    static Cmd update(Model& m, mayag::Edit<Model> e) { e(m); settle_scroll(m); return {}; }
+    // Edit: a direct model edit from an input gesture
+    static Cmd update(Model& m, msg::Edit e) { e(m); settle_scroll(m); return {}; }
 
     // src/app/input.cpp: window input -> messages
     static std::optional<Msg> on(const Model& m, const mayag::KeyEvent& k);

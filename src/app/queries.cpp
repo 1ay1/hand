@@ -273,23 +273,23 @@ struct Flow {
 };
 
 std::mutex g_flows_mu;
-std::unordered_map<std::uint64_t, std::shared_ptr<Flow>> g_flows;
+std::unordered_map<SessionId, std::shared_ptr<Flow>> g_flows;
 
-std::shared_ptr<Flow> flow_open(std::uint64_t sid) {
+std::shared_ptr<Flow> flow_open(SessionId sid) {
     auto f = std::make_shared<Flow>();
     const std::lock_guard lk(g_flows_mu);
     g_flows[sid] = f;
     return f;
 }
-void flow_close(std::uint64_t sid, const std::shared_ptr<Flow>& f) {
+void flow_close(SessionId sid, const std::shared_ptr<Flow>& f) {
     const std::lock_guard lk(g_flows_mu);
     if (const auto it = g_flows.find(sid); it != g_flows.end() && it->second == f) g_flows.erase(it);
 }
 
 }  // namespace
 
-void pty_fed(std::uint64_t sid) {
-    if (sid == 0) return;
+void pty_fed(SessionId sid) {
+    if (sid == kNoSession) return;
     const std::lock_guard lk(g_flows_mu);   // held: the pipe can't close under us
     const auto it = g_flows.find(sid);
     if (it == g_flows.end()) return;
@@ -298,7 +298,7 @@ void pty_fed(std::uint64_t sid) {
     f.wake.signal();   // already pending: the signal simply collapses
 }
 
-void read_pty(Sink<App::Msg> out, std::stop_token st, int fd, int pid, std::uint64_t sid) {
+void read_pty(Sink<App::Msg> out, std::stop_token st, int fd, int pid, SessionId sid) {
     // Pipelined: while one chunk is with the UI the reader keeps draining the
     // pty into the next, so the producer never stalls on the (tiny, ~1 KB on
     // macOS) pty buffer; only when that next chunk is full (kCap) does it
@@ -310,7 +310,7 @@ void read_pty(Sink<App::Msg> out, std::stop_token st, int fd, int pid, std::uint
     // feedback loop that ran a `yes` flood down to 8 fps.
     constexpr std::size_t kSlice = 512u << 10;
     const auto flow = flow_open(sid);
-    struct Close { std::uint64_t sid; const std::shared_ptr<Flow>& f; ~Close() { flow_close(sid, f); } } closer{sid, flow};
+    struct Close { SessionId sid; const std::shared_ptr<Flow>& f; ~Close() { flow_close(sid, f); } } closer{sid, flow};
     std::string buf;
     bool alive = true;
     const auto ship = [&] {

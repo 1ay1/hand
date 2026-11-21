@@ -35,11 +35,12 @@ App::Cmd App::update(Model& m, NewTab) {
 }
 
 App::Cmd App::update(Model& m, CloseTab c) {
-    if (c.i >= m.tab_count()) return {};
-    if (!c.confirmed && m.cfg.close_confirm != CloseConfirm::never && !m.ask) {
-        const bool busy = !busy_of(m.at(c.i), nullptr).empty();
+    const std::size_t i = c.tab.get();
+    if (i >= m.tab_count()) return {};
+    if (c.confirm == Confirm::asking && m.cfg.close_confirm != CloseConfirm::never && !m.ask) {
+        const bool busy = !busy_of(m.at(i), nullptr).empty();
         if (busy || m.cfg.close_confirm == CloseConfirm::always) {
-            m.ask = Ask{.kind = m.tab_count() == 1 ? Ask::Kind::quit : Ask::Kind::close_tab, .tab = c.i, .focus = 1};
+            m.ask = Ask{.kind = m.tab_count() == 1 ? Ask::Kind::quit : Ask::Kind::close_tab, .tab = c.tab, .focus = 1};
             return {};
         }
     }
@@ -47,24 +48,25 @@ App::Cmd App::update(Model& m, CloseTab c) {
         if (!m.cfg.demo) (void)config_save(m.cfg, config_path());
         return Cmd::quit();
     }
-    if (c.i == m.active) {
-        const std::size_t to = c.i + 1 < m.tab_count() ? c.i + 1 : c.i - 1;   // the neighbour on the right, else left
-        m.switch_dir = to > c.i ? 1 : -1;
+    if (i == m.active) {
+        const std::size_t to = i + 1 < m.tab_count() ? i + 1 : i - 1;   // the neighbour on the right, else left
+        m.switch_dir = to > i ? 1 : -1;
         activate(m, to);
         m.switch_t = m.cfg.motion ? 0.0f : 1.0f;
     }
     // the closing session's pty dies with its Session (SIGHUP to the shell)
-    m.tabs.erase(m.tabs.begin() + static_cast<long>(c.i));
-    if (m.active > c.i) --m.active;
+    m.tabs.erase(m.tabs.begin() + static_cast<long>(i));
+    if (m.active > i) --m.active;
     if (m.tab_count() == 1 && !m.cfg.strip_always() && !m.cfg.motion) m.strip_t = 0.0f;
     fit(m);
     return SetTitle{m.title};
 }
 
 App::Cmd App::update(Model& m, SelectTab st) {
-    if (st.i >= m.tab_count() || st.i == m.active) return {};
-    m.switch_dir = st.i > m.active ? 1 : -1;
-    activate(m, st.i);
+    const std::size_t i = st.tab.get();
+    if (i >= m.tab_count() || i == m.active) return {};
+    m.switch_dir = i > m.active ? 1 : -1;
+    activate(m, i);
     m.switch_t = m.cfg.motion ? 0.0f : 1.0f;
     std::vector<Cmd> cmds;
     cmds.push_back(SetTitle{m.title});
@@ -73,13 +75,12 @@ App::Cmd App::update(Model& m, SelectTab st) {
 }
 
 App::Cmd App::update(Model& m, StepTab st) {
-    const auto n = static_cast<long>(m.tab_count());
-    if (n < 2) return {};
-    return update(m, SelectTab{static_cast<std::size_t>(((static_cast<long>(m.active) + st.d) % n + n) % n)});
+    if (m.tab_count() < 2) return {};
+    return update(m, SelectTab{TabIndex{wrap(m.active, st.step, m.tab_count())}});
 }
 
 App::Cmd App::update(Model& m, MoveTab mv) {
-    const long to = static_cast<long>(m.active) + mv.d;
+    const long to = static_cast<long>(m.active) + delta(mv.step);
     if (to < 0 || to >= static_cast<long>(m.tab_count())) return {};
     std::swap(m.tabs[m.active], m.tabs[static_cast<std::size_t>(to)]);   // the placeholder moves with it
     m.active = static_cast<std::size_t>(to);
