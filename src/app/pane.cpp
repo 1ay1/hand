@@ -82,8 +82,8 @@ std::int64_t unix_of(fs::file_time_type t) {
     return static_cast<std::int64_t>(std::chrono::system_clock::to_time_t(sys));
 }
 
-std::string when_of(std::int64_t unix) {
-    const std::time_t tt = static_cast<std::time_t>(unix);
+std::string when_of(std::int64_t epoch_s) {   // not `unix`: a predefined macro in GNU mode
+    const std::time_t tt = static_cast<std::time_t>(epoch_s);
     std::tm tm{};
 #if defined(_WIN32)
     localtime_s(&tm, &tt);
