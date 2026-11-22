@@ -205,10 +205,14 @@ enum class Notice : std::uint8_t { loud, quiet };
 struct TogglePane {};                                              ///< ctrl+shift+e
 struct PaneOp { mayag::dsl::FilePaneOp op; };
 struct PaneListed { std::uint64_t token = 0; std::string path; std::vector<mayag::dsl::FileEntry> entries; std::string error; Notice notice = Notice::loud; };
-struct PaneResize { float dx = 0.0f; };                            ///< grow by dx px
+/// The pane's edge, dragged. `begin`: pressed (the width now is the base);
+/// then `grow`: the pointer's travel since the press (px wider than the base).
+struct PaneResize { bool begin = false; float grow = 0.0f; bool end = false; };
+/// A pane drag paused (or ended): fit the terminal grids to the new size.
+struct PaneSettle {};
 struct PaneWatch {};                                               ///< re-read the pane's folder (files.watch)
 struct PanePreview { std::string path; std::optional<mayag::dsl::FilePreview> preview; };
-using PaneMsg = std::variant<TogglePane, PaneOp, PaneListed, PaneResize, PaneWatch, PanePreview>;
+using PaneMsg = std::variant<TogglePane, PaneOp, PaneListed, PaneResize, PaneWatch, PanePreview, PaneSettle>;
 
 // ── the root ───────────────────────────────────────────────────────────────
 /// A direct model edit. For the self-test and scripted shots only: the app

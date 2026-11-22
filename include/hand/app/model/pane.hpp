@@ -17,6 +17,8 @@ namespace hand {
 struct PaneModel {
     bool                                   open = false;
     float                                  width = 300.0f;
+    float                                  grab_width = 300.0f;   ///< the width when its edge was pressed
+    bool                                   dragging = false;      ///< its edge is held: grids wait (fit())
     mayag::dsl::FilePaneState              ui;
     std::string                            where;          ///< "" local, else the ssh host's alias
     std::optional<Host>                    host;           ///< the host it lists over SFTP

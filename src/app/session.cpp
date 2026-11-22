@@ -44,6 +44,12 @@ void App::fit(Model& m) {
     const int rows = std::max(1, static_cast<int>((m.size.y - 2.0f * pad) / ch));
     m.metrics.fit_cols = cols;
     m.metrics.fit_rows = rows;
+    // A pane edge being dragged: the layout follows the pointer every frame,
+    // but the grids keep their size until the drag pauses (PaneSettle). A
+    // grid resize rewraps all of history (14 ms a tab at 10k lines) and
+    // sends every shell SIGWINCH -- per column, it ran the drag at 20 fps.
+    // Meanwhile the grid draws clipped to (or short of) the new space.
+    if (m.pane.dragging) return;
     // every tab, not just the visible one: a background shell sees the real size
     for (std::size_t i = 0; i < m.tab_count(); ++i) {
         Session& se = m.at(i);

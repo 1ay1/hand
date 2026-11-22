@@ -225,9 +225,21 @@ App::Cmd App::update(Model& m, TogglePane) {
 }
 
 App::Cmd App::update(Model& m, PaneResize r) {
-    m.pane.width += r.dx;
-    fit(m);
+    // By position: the width at the press plus the pointer's travel since,
+    // so the edge stays under the pointer (fit() clamps; summing deltas would
+    // carry the clamped-away pixels and drift).
+    if (r.begin) { m.pane.grab_width = m.pane.width; m.pane.dragging = true; return {}; }
+    if (r.end) return update(m, PaneSettle{});
+    m.pane.width = m.pane.grab_width + r.grow;
+    fit(m);   // the layout follows the pointer this frame; the grids wait (see fit)
     m.cfg.files_width = m.pane.width;   // remembered (saved with the settings)
+    // ...until the drag pauses: then the grids fit and the shells redraw once
+    return Cmd::after(mayag::TaskKey{"pane.settle"}, std::chrono::milliseconds(60), Msg{PaneSettle{}});
+}
+
+App::Cmd App::update(Model& m, PaneSettle) {
+    m.pane.dragging = false;
+    fit(m);
     return {};
 }
 

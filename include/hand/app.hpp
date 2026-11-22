@@ -71,7 +71,7 @@ struct App {
     using FilesListed = msg::FilesListed; using FilesDone = msg::FilesDone; using UploadPicked = msg::UploadPicked;
     using TunnelProbe = msg::TunnelProbe; using TunnelScan = msg::TunnelScan;
     using TogglePane = msg::TogglePane; using PaneOp = msg::PaneOp;         using PaneListed = msg::PaneListed;
-    using PaneResize = msg::PaneResize; using PaneWatch = msg::PaneWatch;   using PanePreview = msg::PanePreview;
+    using PaneResize = msg::PaneResize; using PaneSettle = msg::PaneSettle; using PaneWatch = msg::PaneWatch;   using PanePreview = msg::PanePreview;
     using Notice = msg::Notice;
     using Spawned = msg::Spawned;       using Probe = msg::Probe;           using Probed = msg::Probed;
     using HostsLoaded = msg::HostsLoaded;
@@ -193,6 +193,7 @@ struct App {
     static Cmd update(Model& m, PaneOp);
     static Cmd update(Model& m, PaneListed);
     static Cmd update(Model& m, PaneResize);
+    static Cmd update(Model& m, PaneSettle);
     static Cmd update(Model& m, PaneWatch);
     static Cmd update(Model& m, PanePreview);
     /// The pane follows the active tab's directory: list it if it moved.

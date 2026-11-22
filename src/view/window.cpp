@@ -28,7 +28,7 @@ Node App::view(const Model& m) {
     if (m.pane.open) {   // the active tab's files, beside its terminal
         Node pane = file_pane(c, "files", m.pane.ui, detail::pane_props(m),
                               [](FilePaneOp op) -> App::Msg { return App::PaneOp{std::move(op)}; },
-                              [](float grow) -> App::Msg { return App::PaneResize{grow}; });
+                              [](FilePaneResize r) -> App::Msg { return App::PaneResize{r.begin, r.grow, r.end}; });
         body = (m.cfg.files_left ? h(node(std::move(pane)), node(std::move(body))) : h(node(std::move(body)), node(std::move(pane))))
                | width(m.win.x) | height(m.size.y);
     }

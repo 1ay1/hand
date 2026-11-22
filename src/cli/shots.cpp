@@ -79,6 +79,37 @@ if (shot == "bench") {
     run("streaming (a line/frame)", [&](int i) { rt.post(hand::App::Msg{hand::App::Output{"line " + std::to_string(i) + " \x1b[33mwarning\x1b[0m: something\r\n"}}); });
     run("scrolling history", [&](int i) { rt.window().scroll(Vec2{400.0f, 300.0f}, Vec2{0.0f, (i / 30) % 2 ? -48.0f : 48.0f}); });
     run("pointer over tabs", [&](int i) { rt.window().move_to(Vec2{40.0f + static_cast<float>(i % 60) * 6.0f, 14.0f}); });
+    {   // the file pane's edge, dragged 3 px a frame over a FULL scrollback (10k lines of 120 chars)
+        std::string hist;
+        for (int i = 0; i < 10000; ++i)
+            hist += "\x1b[32m" + std::to_string(i) + "\x1b[0m " + std::string(110, static_cast<char>('a' + i % 26)) + "\r\n";
+        rt.send(hand::App::Msg{hand::App::Output{hist}});
+        {
+            hand::Term t{170, 42, hand::palette_of(hand::Config{})};
+            (void)t.feed(hist);
+            const auto a = clk::now();
+            for (int i = 0; i < 40; ++i) t.resize(170 - (i % 2), 42);
+            std::printf("  toe resize, 10k-line scrollback: %.3f ms per column change\n",
+                        std::chrono::duration<double, std::milli>(clk::now() - a).count() / 40.0);
+        }
+        rt.send(hand::App::Msg{hand::App::TogglePane{}});
+        rt.send(hand::App::Msg{hand::App::PaneResize{true, 0.0f}});
+        run("pane open, pointer moving", [&](int i) { rt.window().move_to(Vec2{900.0f + static_cast<float>(i % 60) * 6.0f, 300.0f}); });
+        run("dragging the pane edge", [&](int i) {
+            rt.post(hand::App::Msg{hand::App::PaneResize{false, static_cast<float>((i % 60 < 30 ? i % 60 : 60 - i % 60) * 3)}});
+        });
+        if (std::getenv("HAND_BENCH_DIAG")) {
+            rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) { m.cfg.minimap = false; }}});
+            run("  ...minimap off", [&](int i) {
+                rt.post(hand::App::Msg{hand::App::PaneResize{false, static_cast<float>((i % 60 < 30 ? i % 60 : 60 - i % 60) * 3)}});
+            });
+            rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) { m.cfg.minimap = true; m.cfg.files_left = false; }}});
+            run("  ...pane on the right", [&](int i) {
+                rt.post(hand::App::Msg{hand::App::PaneResize{false, static_cast<float>((i % 60 < 30 ? i % 60 : 60 - i % 60) * 3)}});
+            });
+        }
+        rt.send(hand::App::Msg{hand::App::TogglePane{}});
+    }
     std::printf("  damage: %.1f%% of tiles reused, %llu mismatches\n",
                 100.0 * static_cast<double>(rt.window().tiles_reused()) / static_cast<double>(std::max<std::uint64_t>(rt.window().tiles_total(), 1)),
                 static_cast<unsigned long long>(rt.window().damage_mismatches()));
