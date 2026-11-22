@@ -153,9 +153,9 @@ be absent is an `optional`, never a `bool` next to its data.
 ### Msg: a closed tree of sums
 
 ```
-Msg ─┬─ ShellMsg    Output Exited
+Msg ─┬─ ShellMsg    Output Exited Spawned Probe Probed
      ├─ TabMsg      NewTab CloseTab SelectTab StepTab MoveTab TabPress TabDrag TabRelease
-     ├─ ClockMsg    Blink Tick Clock
+     ├─ ClockMsg    Blink Tick Clock (App::Second)
      ├─ TextMsg     Copy PasteReq Pasted CopyOutput CopyKey OpenUrl HintPick
      ├─ SearchMsg   SearchToggle SearchStep SearchKey SearchText
      ├─ ScrollMsg   ScrollBy ScrollLive ScrollTop ScrollToPrompt ScrollToLine JumpPrompt ClearScrollback
@@ -165,7 +165,7 @@ Msg ─┬─ ShellMsg    Output Exited
      ├─ ModeMsg     ToggleCopyMode OpenHints CloseHints HintBackspace HintTyped PickerText PickerClose PaneBlur
      ├─ DialogMsg   Answer RememberToggle DialogFocus
      ├─ WindowMsg   RequestQuit WindowAct Panel ToggleSettings
-     ├─ SshMsg      OpenHosts HostsKey ConnectHost ConnectTyped Reconnect
+     ├─ SshMsg      OpenHosts HostsKey ConnectHost ConnectTyped Reconnect HostsLoaded
      ├─ ManagerMsg  ToggleManager Manager FilesListed FilesDone UploadPicked TunnelProbe TunnelScan
      ├─ PaneMsg     TogglePane PaneOp PaneListed PaneResize PaneWatch PanePreview
      └─ Edit        a direct model edit -- the self-test and shots only
@@ -179,8 +179,37 @@ test rejects an anonymous `mayag::Edit` anywhere in `src/app` or `src/view`.
 `include/hand/app/msg.hpp` defines each domain as a `std::variant` of leaf
 structs, and `msg::Any` as a struct deriving from the variant of domains.
 A leaf converts straight into `Msg` (`return NewTab{};`), because only one
-domain holds it. jaal walks the tree to `update(Model&, Leaf)`. A leaf
-without a handler does not compile, and the error names its path.
+domain holds it. jaal hands the whole `Msg` to the seam (below), which visits
+it down to `update(Model&, Leaf)`. A leaf without a handler does not compile.
+
+### The seam: time in, effects out
+
+`App::update(Model&, Msg, Time now)` is the only update jaal calls (`Msg` is
+declared `MAYAG_HANDLED_AS_GROUP`). Every step it:
+
+1. stamps the step's time: `m.now`, and `m.wall_ms` (the wall clock read
+   once at start, in `Env`, plus the steady time since). jaal reads the clock
+   once per step; hand never does.
+2. dispatches the leaf (`App::step`): a pure function of (Model, leaf).
+3. drains what the step asked of the ptys (`App::drain`). A handler never
+   touches a pty. It appends to `se.input`, sets `se.launch`, or resizes the
+   `Term`, and the drain turns the difference into `Cmd::run(fx::pty_write)`,
+   `fx::spawn` or `fx::pty_resize`. A new pty comes back as `Spawned`.
+
+Everything that reaches the world lives in `src/app/fx/` (pty, store, os,
+files, remote, reader) and is named in a `Cmd`: `Cmd::run(fx::save_config,
+cfg, path)` runs on the loop after the step, and `Cmd::task(fx::list_local,
+...)` runs on the pool. What runs in a tab (`se.proc`, a typed `ssh` host) is
+not asked by the view: `Probe` (after output, throttled) runs `fx::probe`, and
+`Probed` reports only changes. The environment (`$HOME`, `$EDITOR`, `$SHELL`,
+the host name, the start directory, hand.vibe's path, a seed) is read once in
+`src/cli/env.cpp` and handed in as `Flags::env` → `m.env`.
+
+The `purity` test enforces it. No clock, environment, file, process, pty,
+persistence or randomness call, and no function-local `static`, may appear in
+`src/app` or `src/view` outside `src/app/fx/`. No `mutable` model state is
+allowed except a memo marked `// memo:` (the snapshot cache, which equals
+recomputing it). There is no allowlist: a new need gets an effect.
 
 To add a message: add the leaf to its domain's variant, declare
 `update(Model&, Leaf)` in `app.hpp` under that domain, and define it in that
@@ -188,7 +217,7 @@ domain's file.
 
 | domain     | handlers in             |
 |------------|-------------------------|
-| ShellMsg, ClockMsg | `src/app/session.cpp` |
+| ShellMsg, ClockMsg, the seam | `src/app/session.cpp` |
 | TabMsg     | `src/app/tabs.cpp`      |
 | TextMsg, SearchMsg | `src/app/clipboard.cpp` |
 | ScrollMsg  | `src/app/scroll.cpp`    |
@@ -203,6 +232,7 @@ domain's file.
 | (input: pointer) | `src/app/input_pointer.cpp` — wheel, press/move/release → Msg |
 | (input: widgets) | `src/app/input_widgets.cpp` — resize, focus, gestures on nodes → Msg |
 | (subscriptions) | `src/app/subscribe.cpp` — pty readers, blink, clock, frames |
+| (effects) | `src/app/fx/*.cpp` — the only code that reaches the world |
 
 ### View: composition only
 
@@ -247,8 +277,10 @@ Messages follow the same rules:
 6. **Changes are named.** Input decides; `update` changes. No anonymous model
    edits in the app or view (enforced by `layering`).
 7. **Effects are returned.** `update` mutates the model and returns a `Cmd`:
-   clipboard, title, window actions, tasks. Threads exist only as mayag
-   streams and tasks (`Sub::stream`, `Task`).
+   clipboard, title, window actions, and `Cmd::run` / `Cmd::task` naming a
+   body in `src/app/fx/`. It never writes a pty, a file or reads the clock or
+   environment (enforced by `purity`). Threads exist only as mayag streams
+   and tasks (`Sub::stream`, `Task`).
 8. **The UI is mayag.** View code composes widgets with theme tokens. A new
    visual is a mayag widget.
 9. **Every behaviour has a check.** `hand --headless` (ctest `app_headless`)

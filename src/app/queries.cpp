@@ -2,29 +2,28 @@
 
 #include "detail.hpp"
 
-#include <hand/core/credit.hpp>
-#include <hand/core/pty.hpp>
 
 #include <mayag/widget/ssh.hpp>
 #include <mayag/widget/terminal/window.hpp>
 
 #include <algorithm>
-#include <cerrno>
-#include <chrono>
 #include <cmath>
-#include <filesystem>
 #include <cstdio>
-#include <cstring>
-#include <ctime>
 #include <memory>
-#include <hand/core/platform.hpp>
-#include <thread>
 
 namespace hand::detail {
 
-HostSources host_sources(const Config& c) {
-    return HostSources{.store = (std::filesystem::path{config_path()}.parent_path() / "hosts.vibe").string(),
-                       .read_known = c.ssh_known_hosts};
+HostSources host_sources(const Model& m) {
+    // ~/.ssh under the run's home; hosts.vibe beside hand.vibe (paths only: nothing is read here)
+    HostSources s{.read_known = m.cfg.ssh_known_hosts};
+    const std::string& cp = m.env.config_path;
+    const auto slash = cp.find_last_of("/\\");
+    s.store = (slash == std::string::npos ? std::string{} : cp.substr(0, slash + 1)) + "hosts.vibe";
+    if (!m.env.home.empty()) {
+        s.ssh_config = m.env.home + "/.ssh/config";
+        s.known_hosts = m.env.home + "/.ssh/known_hosts";
+    }
+    return s;
 }
 
 using namespace mayag;
@@ -42,35 +41,12 @@ bool in_strip(const Model& m, float y) {
     return m.cfg.tab_bottom ? y >= m.win.y - m.strip_h() : y < m.strip_h();
 }
 
-/// A clock for caches that must refresh even while the frame clock is idle.
-double mono_s() {
-    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
-}
-
-/// The foreground process of a session's shell (cached ~0.5 s, on the wall clock).
-std::string fg_process(const Session& se) {
-    const double now = mono_s();
-    if (!se.pty || now - se.proc_at < 0.5) return se.proc;
-    se.proc_at = now;
-    const pid_t pg = pty_foreground(se.pty->fd());
-    if (pg <= 0) return se.proc;
-    se.proc = proc_name(pg);
-    return se.proc;
-}
+/// The foreground process of a session's shell, as the last probe found it.
+const std::string& fg_process(const Session& se) { return se.proc; }
 
 /// The machine a tab talks to: the host hand launched it on, else the
 /// destination of an `ssh ...` you typed at its shell (cached ~1 s).
-const std::optional<Host>& remote_of(const Session& se) {
-    if (se.link.launched || !se.pty) return se.remote;
-    const double now = mono_s();
-    if (now - se.remote_at < 1.0) return se.remote;
-    se.remote_at = now;
-    const std::string p = fg_process(se);
-    if (p != "ssh" && p != "mosh" && p != "autossh" && p != "mosh-client") { se.remote.reset(); return se.remote; }
-    const auto argv = proc_argv(pty_foreground(se.pty->fd()));
-    se.remote = ssh_destination(argv);
-    return se.remote;
-}
+const std::optional<Host>& remote_of(const Session& se) { return se.remote; }
 
 /// A remote's environment: what hosts.vibe says, else what its name suggests.
 HostEnv remote_env(const Model& m, const Host& h) {
@@ -79,7 +55,7 @@ HostEnv remote_env(const Model& m, const Host& h) {
     return guess_env(h.alias, h.hostname);
 }
 
-std::int64_t unix_now() { return static_cast<std::int64_t>(std::time(nullptr)); }
+std::int64_t unix_now(const Model& m) { return m.wall_ms / 1000; }
 
 /// The book as the picker shows it, with live tabs counted per host.
 std::vector<SshHost> picker_hosts(const Model& m) {
@@ -100,7 +76,7 @@ std::vector<SshHost> picker_hosts(const Model& m) {
         s.editable = h.editable();
         for (std::size_t i = 0; i < m.tab_count(); ++i) {
             const Session& se = m.at(i);
-            const auto& r = remote_of(se);
+            const auto& r = se.remote;
             if (!r || se.link.dropped) continue;
             if (r->alias == h.alias || (r->hostname == h.hostname && r->port == h.port && (r->user.empty() || h.user.empty() || r->user == h.user)))
                 ++s.sessions;
@@ -137,7 +113,7 @@ std::vector<SshHost> picker_hosts(const Model& m) {
 
 /// The picker's rows: indices into m.ssh.book.hosts, best first.
 std::vector<int> picker_rank(const Model& m) {
-    return rank_hosts(picker_hosts(m), m.ssh.picker.query.text, unix_now());
+    return rank_hosts(picker_hosts(m), m.ssh.picker.query.text, unix_now(m));
 }
 
 /// The minimap maps the normal screen's history: a full-screen app (the
@@ -150,10 +126,6 @@ std::optional<Term::Command> sticky_of(const Model& m) {
     return se.term->command_at_top();
 }
 
-std::int64_t wall_ms() {
-    using namespace std::chrono;
-    return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
-}
 
 /// "12.3s", "4m05s", "1h02m"
 std::string pretty_ms(std::int64_t ms) {
@@ -166,8 +138,8 @@ std::string pretty_ms(std::int64_t ms) {
 }
 
 /// A path for a header: $HOME as ~, long ones keep their last two parts.
-std::string short_path(std::string p) {
-    if (const char* h = std::getenv("HOME"); h && *h && p.rfind(h, 0) == 0) p = "~" + p.substr(std::strlen(h));
+std::string short_path(const Model& m, std::string p) {
+    if (const std::string& h = m.env.home; !h.empty() && p.rfind(h, 0) == 0) p = "~" + p.substr(h.size());
     int slashes = 0;
     for (char ch : p) slashes += ch == '/';
     if (p.size() > 28 && slashes > 2) {
@@ -221,16 +193,16 @@ bool is_shell(const std::string& p) {
 }
 
 /// What a tab is busy with ("" = just a prompt), and for how long.
-std::string busy_of(const Session& se, std::string* elapsed) {
+std::string busy_of(const Model& m, const Session& se, std::string* elapsed) {
     if (!se.term || se.link.dropped) return {};
     std::string what;
     for (const auto& c : se.term->commands()) {   // shell integration knows exactly
         if (c.ran && !c.finished) {
             what = se.term->command_text(c);
-            if (elapsed && c.start_ms > 0) *elapsed = pretty_ms(std::max<std::int64_t>(wall_ms() - c.start_ms, 0));
+            if (elapsed && c.start_ms > 0) *elapsed = pretty_ms(std::max<std::int64_t>(m.wall_ms - c.start_ms, 0));
         }
     }
-    const std::string proc = fg_process(se);
+    const std::string& proc = se.proc;
     if (what.empty() && !is_shell(proc)) what = proc;   // without integration: the foreground program
     return what;
 }
@@ -260,70 +232,6 @@ bool tail_wanted(const Model& m) {
     if (!se.term || m.cfg.live_tail < 1.0f || se.term->alt_screen()) return false;
     const auto cur = se.term->cursor();
     return se.term->scroll_offset() > 0 && cur.row + se.term->scroll_offset() >= se.term->rows();
-}
-
-/// The pty reader: one background stream per shell (see detail.hpp).
-void read_pty(Sink<App::Msg> out, std::stop_token st, mayag::CoOwned<Pty> pty, SessionId sid) {
-    // This reader co-owns the pty: the fd stays open until it returns, even
-    // if the tab is closed under it (the stream is then stopped, and the
-    // last owner out closes the fd).
-    const int fd = pty->fd();
-    // Pipelined: while one chunk is with the UI the reader keeps draining the
-    // pty into the next, so the producer never stalls on the (tiny, ~1 KB on
-    // macOS) pty buffer; only when that next chunk is full (kCap) does it
-    // stop reading -- and then the producer blocks, which is the throttle.
-    constexpr std::size_t kCap = 4u << 20;
-    // Each Output is at most a frame's worth of parsing (~6 ms at toe's
-    // ~80 MB/s): a bigger one would starve the frame it lands in, and while
-    // that frame is late the reader piles up an even bigger next one -- a
-    // feedback loop that ran a `yes` flood down to 8 fps.
-    constexpr std::size_t kSlice = 512u << 10;
-    auto credit = mayag::CoOwned<OutputCredit>::make();   // this reader's, shared with the UI through each Output
-    std::string buf;
-    bool alive = true;
-    const auto ship = [&] {
-        std::string chunk;
-        if (buf.size() <= kSlice) chunk = std::exchange(buf, std::string{});
-        else {
-            // cut on a UTF-8 boundary, so no slice ends mid-character
-            std::size_t n = kSlice;
-            while (n > kSlice - 4 && (static_cast<unsigned char>(buf[n]) & 0xC0) == 0x80) --n;
-            chunk.assign(buf, 0, n);
-            buf.erase(0, n);
-        }
-        credit->spend();
-        if (!out.send(App::Output{std::move(chunk), sid, credit})) credit->refund();
-    };
-    while (!st.stop_requested()) {
-        const bool busy = !credit->free();
-        if (!busy && !buf.empty()) { ship(); continue; }
-        if (!alive) {
-            if (busy) {   // the last output lands before the exit
-                (void)credit->wait(-1, 50);
-                credit->settle();
-                continue;
-            }
-            int code = -1;
-            for (int i = 0; i < 20 && code < 0; ++i) {   // bounded: ≤ ~200 ms
-                code = pty->reap();
-                if (code < 0) std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            }
-            out.send(App::Exited{std::max(code, 0), sid});
-            return;
-        }
-        const bool room = buf.size() < kCap;
-        // 50 ms: stop is always prompt. pty = -1 while back-pressured, so a
-        // stalled reader waits only on the credit, never on the pty.
-        const plat::Ready r = credit->wait(room ? pty_handle(fd) : -1, 50);
-        if (r.error) { alive = false; continue; }
-        if (r.woke) credit->settle();
-        if (room && r.data) alive = pty_read(fd, buf, 0);
-        // A quiet pty: ask whether the child is gone. On POSIX a dead child
-        // breaks the pty (r.data, then EOF above); a ConPTY pipe stays open
-        // until the pseudoconsole is closed, so only pty_read can tell, and
-        // without this `exit` left the tab (and the window) open forever.
-        else if (room && !r.woke) alive = pty_read(fd, buf, 0);
-    }
 }
 
 /// The viewport row under window y, through a smooth-scroll glide (the grid is
@@ -377,10 +285,9 @@ void start_ssh(Model& m, Session& se, const Host& h) {
     se.link.connected_at = m.time;
     se.link.dropped = false;
     if (m.cfg.demo) return;
-    const auto argv = ssh_argv(h, m.ssh.book, {.multiplex = m.cfg.ssh_multiplex, .keepalive = m.cfg.ssh_keepalive});
-    se.pty = PtyRef::make({.cols = m.metrics.fit_cols, .rows = m.metrics.fit_rows, .shell = "ssh",
-                           .args = std::vector<std::string>{argv.begin() + 1, argv.end()}});
-    if (!se.pty) (void)se.term->feed("\x1b[31mhand: could not start ssh\x1b[0m\r\n");
+    // the drain after this step runs it (fx::spawn builds ssh's argv)
+    se.launch = Launch{.spec = {.cols = m.metrics.fit_cols, .rows = m.metrics.fit_rows},
+                       .ssh = SshTarget{h, m.ssh.book, {.multiplex = m.cfg.ssh_multiplex, .keepalive = m.cfg.ssh_keepalive}}};
 }
 
 /// Bring tab `i` to the front: it is read, and its cursor appears where it is.

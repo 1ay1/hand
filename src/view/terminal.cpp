@@ -154,7 +154,6 @@ void selection(std::vector<Node>& layers, const Ctx& c, const Model& m, const Te
                                             .visual = static_cast<int>(se.copy->visual), .sel_lines = si.lines, .sel_chars = static_cast<int>(si.chars),
                                             .lift = tail_h}));
     }
-    m.sel_chip = Rect{};
     if (cfg.sel_toolbar && si.any && si.chars > 0 && !se.selecting && !se.copy && !se.term->alt_screen()) {
         const std::string text = si.lines == 1 ? se.term->selection_text() : std::string{};
         const bool openable = !text.empty() && text.find(' ') == std::string::npos &&
@@ -162,12 +161,9 @@ void selection(std::vector<Node>& layers, const Ctx& c, const Model& m, const Te
         const auto end_line = se.term->line(si.r1);
         int used = static_cast<int>(end_line.size());
         while (used > 0 && (end_line[static_cast<std::size_t>(used - 1)] == U' ' || end_line[static_cast<std::size_t>(used - 1)] == U'\0')) --used;
-        Rect placed;
         Node chip = selection_chip(c, "sel", b, {.lines = si.lines, .chars = static_cast<int>(si.chars), .block = si.block, .openable = openable,
-                                                 .c0 = si.c0, .c1 = si.c1, .row0 = row_of(si.r0), .row1 = row_of(si.r1), .end_used = used},
-                                   &placed);
-        m.sel_chip = placed;
-        if (placed.size.x > 0.0f) layers.push_back(std::move(chip));
+                                                 .c0 = si.c0, .c1 = si.c1, .row0 = row_of(si.r0), .row1 = row_of(si.r1), .end_used = used});
+        if (chip.style().id != 0) layers.push_back(std::move(chip));   // off screen: an empty node
     }
 }
 
@@ -193,10 +189,10 @@ float history(std::vector<Node>& layers, const Ctx& c, const Model& m, const Ter
             const std::int64_t out0 = cmd->output_row >= 0 ? cmd->output_row : cmd->prompt_row + 1;
             const std::int64_t out1 = cmd->finished && cmd->end_row > out0 ? cmd->end_row : static_cast<std::int64_t>(info.total);
             const std::int64_t span = std::max<std::int64_t>(out1 - out0, 1);
-            const std::string time = !cmd->finished ? (cmd->start_ms > 0 ? pretty_ms(std::max<std::int64_t>(wall_ms() - cmd->start_ms, 0)) : std::string{})
+            const std::string time = !cmd->finished ? (cmd->start_ms > 0 ? pretty_ms(std::max<std::int64_t>(m.wall_ms - cmd->start_ms, 0)) : std::string{})
                                                     : (cmd->duration_ms > 0 ? pretty_ms(cmd->duration_ms) : std::string{});
             layers.push_back((node(sticky_command(c, "sticky", b,
-                                                  {.line = se.term->command_text(*cmd), .cwd = short_path(cmd->cwd), .state = state_of(*cmd),
+                                                  {.line = se.term->command_text(*cmd), .cwd = short_path(m, cmd->cwd), .state = state_of(*cmd),
                                                    .exit_code = cmd->exit_code, .time = time,
                                                    .at = std::clamp<std::int64_t>(info.first - out0 + 1, 1, span), .span = span,
                                                    .now = m.time, .ease = se.sticky_t, .marks = cfg.shell_marks}))

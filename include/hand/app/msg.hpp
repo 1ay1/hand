@@ -1,7 +1,7 @@
 #pragma once
 // hand::msg — everything that can happen, as a closed tree of sums.
 //
-//   Msg ─┬─ ShellMsg     Output Exited                          a pty spoke
+//   Msg ─┬─ ShellMsg     Output Exited Spawned Probe Probed    a pty spoke
 //        ├─ TabMsg       NewTab CloseTab SelectTab StepTab MoveTab
 //        ├─ ClockMsg     Blink Tick Clock                       time passed
 //        ├─ TextMsg      Copy PasteReq Pasted CopyOutput CopyKey OpenUrl HintPick
@@ -13,7 +13,7 @@
 //        ├─ ModeMsg      ToggleCopyMode OpenHints CloseHints HintBackspace HintTyped PickerText PickerClose PaneBlur
 //        ├─ DialogMsg    Answer RememberToggle DialogFocus      the question
 //        ├─ WindowMsg    RequestQuit WindowAct Panel ToggleSettings
-//        ├─ SshMsg       OpenHosts HostsKey ConnectHost ConnectTyped Reconnect
+//        ├─ SshMsg       OpenHosts HostsKey ConnectHost ConnectTyped Reconnect HostsLoaded
 //        ├─ ManagerMsg   ToggleManager Manager FilesListed FilesDone UploadPicked TunnelProbe TunnelScan
 //        ├─ PaneMsg      TogglePane PaneOp PaneListed PaneResize PaneWatch PanePreview
 //        └─ Edit         a direct model edit (self-test and shots only)
@@ -46,7 +46,14 @@ namespace hand::msg {
 /// gives it back once the bytes are fed, and only then does the next chunk come.
 struct Output { std::string bytes; SessionId sid = kNoSession; std::optional<mayag::CoOwned<OutputCredit>> credit; };
 struct Exited { int code = 0; SessionId sid = kNoSession; };        ///< a pty's program ended
-using ShellMsg = std::variant<Output, Exited>;
+/// A spawn effect finished: the session's pty (empty: it did not start), and
+/// whether its shell rewraps its own prompt (fish with hand's integration).
+struct Spawned { SessionId sid = kNoSession; std::optional<mayag::CoOwned<Pty>> pty; bool reflow_aware = false; };
+/// What runs in each tab now (the probe effect read it off the ptys).
+struct TabProc { SessionId sid = kNoSession; std::string proc; std::optional<Host> remote; };
+struct Probe {};                                                   ///< ask the ptys what runs in them
+struct Probed { std::vector<TabProc> tabs; };                      ///< ...and they answered (only on a change)
+using ShellMsg = std::variant<Output, Exited, Spawned, Probe, Probed>;
 
 // ── tabs ───────────────────────────────────────────────────────────────────
 struct NewTab {};
@@ -174,7 +181,10 @@ struct HostsKey { mayag::Key key; mayag::Mods mods; };
 struct ConnectHost { Host host; Where where = Where::new_tab; };
 struct ConnectTyped {};                                            ///< the picker's query as a destination
 struct Reconnect {};                                               ///< the dropped ssh tab, again
-using SshMsg = std::variant<OpenHosts, HostsKey, ConnectHost, ConnectTyped, Reconnect>;
+/// The host book came back from disk (~/.ssh/config, known_hosts, hosts.vibe;
+/// PuTTY and MobaXterm when the manager asked).
+struct HostsLoaded { HostBook book; std::optional<std::vector<ImportSource>> imports; };
+using SshMsg = std::variant<OpenHosts, HostsKey, ConnectHost, ConnectTyped, Reconnect, HostsLoaded>;
 
 // ── ssh: the host manager ──────────────────────────────────────────────────
 struct ToggleManager {};                                           ///< ctrl+shift+h
@@ -226,3 +236,6 @@ static_assert(mayag::Postable<hand::msg::Any>, "a hand message holds something b
 // ...and every leaf except the loop-only Edit really is Sendable: a message
 // that reaches update() from a reader or a task carries only owned values.
 static_assert(!mayag::Sendable<hand::msg::Edit>, "Edit is loop-only: it must never cross threads");
+// App::update(Model&, Msg, now) is the seam: it stamps the time, dispatches
+// the leaf and drains the ptys' requests -- so jaal hands it the whole Msg.
+MAYAG_HANDLED_AS_GROUP(hand::msg::Any);

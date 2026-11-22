@@ -95,11 +95,16 @@ void settings_panel([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Ch
         ok(!rt.model().settings.open && rt.model().settings.t > 0.0f, "closing, it fades out instead of vanishing");
         for (int i = 0; i < 30; ++i) rt.tick();
         ok(rt.model().settings.t == 0.0f, "...and is gone");
+        // the real blink timer must not flip it back mid-check (a loaded machine
+        // can fire it in the same step): park it far away while we look
+        const float blink_ms = rt.model().cfg.blink_ms;
+        rt.send(hand::App::Msg{hand::msg::Edit{[](hand::App::Model& mm) { mm.cfg.blink_ms = 60000.0f; mm.cursor_on = true; mm.tab().cur_a = 1.0f; }}});
         rt.send(hand::App::Msg{hand::App::Blink{}});
         rt.tick();
         const float mid = rt.model().tab().cur_a;
         for (int i = 0; i < 30; ++i) rt.tick();
         ok(mid > 0.0f && mid < 1.0f && (rt.model().tab().cur_a == 0.0f || rt.model().tab().cur_a == 1.0f), "the cursor blink fades, not snaps");
+        rt.send(hand::App::Msg{hand::msg::Edit{[blink_ms](hand::App::Model& mm) { mm.cfg.blink_ms = blink_ms; }}});
         rt.window().drive_frames(false);
     }
     {

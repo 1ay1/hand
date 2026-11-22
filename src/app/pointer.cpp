@@ -64,7 +64,7 @@ App::Cmd App::update(Model& m, SelectClear) {
 App::Cmd App::update(Model& m, ReportPress r) {
     Session& se = m.tab();
     se.mouse_button = r.button;
-    if (se.pty) se.pty->write(r.bytes);
+    if (se.pty) se.input += r.bytes;
     return {};
 }
 
@@ -72,14 +72,14 @@ App::Cmd App::update(Model& m, ReportMotion r) {
     Session& se = m.tab();
     se.mouse_cell_col = r.col;
     se.mouse_cell_row = r.row;
-    if (se.pty && !r.bytes.empty()) se.pty->write(r.bytes);
+    if (se.pty && !r.bytes.empty()) se.input += r.bytes;
     return {};
 }
 
 App::Cmd App::update(Model& m, ReportRelease r) {
     Session& se = m.tab();
     se.mouse_button = -1;
-    if (se.pty && !r.bytes.empty()) se.pty->write(r.bytes);
+    if (se.pty && !r.bytes.empty()) se.input += r.bytes;
     return {};
 }
 

@@ -11,7 +11,7 @@ App::Cmd App::update(Model& m, Typed t) {
     Session& se = m.tab();
     se.fx.typed_at = se.active_at = m.time;   // the motion effects follow keystrokes, pty or not
     if (t.bytes.find('\r') != std::string::npos) se.fx.enter_at = m.time;
-    if (!se.pty) return {};
+    if (!se.pty && !se.starting) return {};
     se.term->select_clear();
     se.term->scroll_to_bottom();   // typing snaps back to the live screen
     se.scroll_d = se.scroll_goal = 0.0f;
@@ -19,7 +19,7 @@ App::Cmd App::update(Model& m, Typed t) {
     se.new_below = 0;
     m.cursor_on = true;
     se.cur_a = 1.0f;
-    se.pty->write(t.bytes);
+    se.input += t.bytes;
     return {};
 }
 
@@ -59,7 +59,7 @@ App::Cmd App::update(Model& m, Focused f) {
     m.focused = f.focused;
     m.cursor_on = true;
     se.cur_a = 1.0f;
-    if (!f.report.empty() && se.pty) se.pty->write(f.report);
+    if (!f.report.empty() && se.pty) se.input += f.report;
     return {};
 }
 

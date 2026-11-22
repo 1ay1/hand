@@ -69,7 +69,7 @@ App::Cmd App::update(Model& m, ClearScrollback) {
     se.scroll_d = 0.0f;
     se.scroll_applied = 0;
     se.grid_key = 0;
-    if (se.pty) se.pty->write("\x0c");   // the shell redraws its prompt
+    if (se.pty) se.input += "\x0c";   // the shell redraws its prompt
     return {};
 }
 

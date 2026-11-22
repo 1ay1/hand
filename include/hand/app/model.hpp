@@ -32,10 +32,30 @@
 
 namespace hand {
 
+/// The world a run starts in, read ONCE by main (src/cli/env.cpp) and handed
+/// in as Flags: update and view never ask the OS for any of it.
+struct Env {
+    std::string   home;            ///< ~ for paths (%USERPROFILE% on Windows: ssh's home)
+    std::string   editor = "vi";   ///< $VISUAL, else $EDITOR
+    std::string   shell;           ///< the shell an empty shell setting means ($SHELL; Windows: pwsh, ...)
+    std::string   host_name;       ///< this machine (is an OSC 7 host here?)
+    std::string   cwd;             ///< where hand started (a shell that reports no directory is here)
+    std::string   config_path;     ///< hand.vibe (hosts.vibe sits beside it)
+    std::int64_t  wall_epoch_ms = 0;   ///< the wall clock when the run began (unix ms)
+    std::uint64_t entropy = 0;     ///< seeds what must be unguessable (DEC 2034 tokens)
+};
+
 /// The window: config, its tabs, and what sits over and beside them.
 struct Model {
     Config                  cfg;
+    Env                     env;                  ///< from Flags
     std::shared_ptr<const mayag::typo::FontStack> fonts;   ///< from Flags: what cells are measured with
+    // time, stamped by App's root update from the step time jaal passes in
+    // (never read from a clock): every message one step folds agrees on it
+    mayag::SteadyClock::time_point now{};          ///< this step
+    mayag::SteadyClock::time_point began{};        ///< the first step (wall_ms counts from here)
+    std::int64_t            wall_ms = 0;          ///< this step on the wall clock (unix ms): command timings, "3h ago"
+    bool                    probe_due = false;    ///< a Probe is scheduled (output came: what runs may have changed)
     Palette                 palette;
     mayag::Vec2             win{800, 540};        ///< the window
     mayag::Vec2             size{800, 500};       ///< the terminal area (the window below the tab strip)
@@ -54,7 +74,6 @@ struct Model {
     double                  resized_at = -10.0;
     bool                    sized_once = false;
     ToastModel              toast;
-    mutable mayag::Rect     sel_chip{};           ///< where the selection chip was drawn (terminal coords)
     // what floats over the terminal, and what sits beside it
     SettingsModel           settings;             ///< ctrl+,
     DialogModel             dialog;               ///< the one open question

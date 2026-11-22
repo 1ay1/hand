@@ -49,12 +49,13 @@ struct Ask {
     TabIndex    tab{0};             ///< close_tab: which
     std::size_t focus = 0;          ///< the focused action (0 = cancel)
     bool        remember = false;   ///< "don't ask again" ticked
+    std::string paste;              ///< paste: what is about to be pasted
 };
 
 struct DialogModel {
     std::optional<Ask>                 ask;    ///< engaged: a question is open
     float                              t = 0.0f;   ///< 0..1, eased toward ask.has_value()
-    mutable mayag::dsl::TermDialogSpec last;   ///< what was shown (drawn while it fades out)
+    Ask                                was;    ///< the last question asked (drawn while it fades out)
 };
 
 /// One notice at a time, in the corner.

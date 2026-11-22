@@ -95,9 +95,9 @@ bool block_valid(const toe::term::CommandBlock& b) {
 
 struct Term::Impl {
     toe::term::Model m;
-    Impl(int cols, int rows, const Palette& pal, int scrollback)
+    Impl(int cols, int rows, const Palette& pal, int scrollback, std::uint64_t entropy)
         : m(toe::term::Config{.default_fg = rgb_of(pal.fg), .default_bg = rgb_of(pal.bg), .word_separators = {},
-                              .scrollback_lines = scrollback},
+                              .scrollback_lines = scrollback, .entropy = entropy},
             toe::Extent{cols, rows}) {
         // the scheme's 16 colours are the palette's first 16 slots
         auto& s = m.screen;
@@ -112,8 +112,8 @@ struct Term::Impl {
     }
 };
 
-Term::Term(int cols, int rows, const Palette& pal, int scrollback)
-    : p_(std::make_unique<Impl>(std::max(cols, 2), std::max(rows, 1), pal, scrollback)) {}
+Term::Term(int cols, int rows, const Palette& pal, int scrollback, std::uint64_t entropy)
+    : p_(std::make_unique<Impl>(std::max(cols, 2), std::max(rows, 1), pal, scrollback, entropy)) {}
 Term::~Term() = default;
 Term::Term(Term&&) noexcept = default;
 Term& Term::operator=(Term&&) noexcept = default;
@@ -121,11 +121,11 @@ Term& Term::operator=(Term&&) noexcept = default;
 int Term::cols() const { return p_->m.screen.size().cols; }
 int Term::rows() const { return p_->m.screen.size().rows; }
 
-Effects Term::feed(std::string_view bytes) {
+Effects Term::feed(std::string_view bytes, std::int64_t now_ms) {
     Effects fx;
     if (bytes.empty()) return fx;
     ++epoch_; ++content_epoch_;
-    for (auto& c : toe::term::feed_output(p_->m, bytes)) {
+    for (auto& c : toe::term::feed_output(p_->m, bytes, now_ms)) {
         std::visit([&](auto& x) {
             using T = std::decay_t<decltype(x)>;
             if constexpr (std::is_same_v<T, toe::WriteChild>) fx.reply += x.bytes;

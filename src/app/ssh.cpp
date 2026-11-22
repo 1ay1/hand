@@ -1,6 +1,7 @@
 // hand::App — SSH: the host picker, connecting, reconnecting.
 
 #include "detail.hpp"
+#include "fx/fx.hpp"
 
 #include <hand/core/shell.hpp>
 #include <hand/core/proc.hpp>
@@ -26,13 +27,14 @@ using namespace hand::detail;
 App::Cmd App::update(Model& m, OpenHosts) {
     if (m.ssh.picker.open) { m.ssh.picker.open = false; return {}; }
     if (m.dialog.ask.has_value() || m.settings.open) return {};
-    // read the files fresh: ~/.ssh/config may have changed since launch
-    m.ssh.sources = resolve(detail::host_sources(m.cfg));
-    if (!m.cfg.demo) m.ssh.book = hosts_load(m.ssh.sources);
     m.ssh.picker.open = true;
     m.ssh.picker.query = {};
     m.ssh.picker.sel = 0;
-    return {};
+    // read the files fresh (~/.ssh/config may have changed since launch); the
+    // picker shows the book it has until they land, a moment later
+    m.ssh.sources = detail::host_sources(m);
+    if (m.cfg.demo) return {};
+    return Cmd::run(fx::load_hosts, m.ssh.sources, false);
 }
 
 App::Cmd App::update(Model& m, HostsKey k) {
@@ -56,12 +58,13 @@ App::Cmd App::update(Model& m, HostsKey k) {
         if (const Host* h = chosen()) {
             const std::string alias = h->alias;
             const bool to = !h->pinned;
-            if (!m.cfg.demo) hosts_set_pinned(m.ssh.sources, *h, to);
+            Cmd saved = m.cfg.demo ? Cmd{} : Cmd::run(fx::set_pinned, m.ssh.sources, *h, to);
             for (auto& x : m.ssh.book.hosts) if (x.alias == alias) x.pinned = to;
             // follow the host to its new place in the list
             const auto r2 = picker_rank(m);
             for (std::size_t i = 0; i < r2.size(); ++i)
                 if (m.ssh.book.hosts[static_cast<std::size_t>(r2[i])].alias == alias) m.ssh.picker.sel = static_cast<int>(i);
+            return saved;
         }
         return {};
     }
@@ -76,17 +79,14 @@ App::Cmd App::update(Model& m, HostsKey k) {
     }
     if (md.ctrl && !md.shift && k.key == Key::e) {   // ~/.ssh/config in your editor, in a new tab
         m.ssh.picker.open = false;
-        const char* ed = std::getenv("VISUAL");
-        if (!ed || !*ed) ed = std::getenv("EDITOR");
-        const std::string editor = ed && *ed ? ed : "vi";
-        (void)update(m, NewTab{});
-        if (m.tab().pty) {
+        Cmd opened = update(m, NewTab{});
+        if (m.tab().launch || m.tab().pty) {   // typed once its shell is up (the drain holds it till then)
             std::string path = m.ssh.sources.ssh_config;
             std::string q = "'";
             for (char ch : path) q += ch == '\'' ? std::string{"'\\''"} : std::string(1, ch);
-            m.tab().pty->write(editor + " " + q + "'\r");
+            m.tab().input += m.env.editor + " " + q + "'\r";
         }
-        return {};
+        return opened;
     }
     if (k.key == Key::down || (k.key == Key::tab && !md.shift) || (md.ctrl && k.key == Key::n)) {
         if (total > 0) m.ssh.picker.sel = (m.ssh.picker.sel + 1) % total;
@@ -104,14 +104,14 @@ App::Cmd App::update(Model& m, HostsKey k) {
 
 App::Cmd App::update(Model& m, ConnectHost c) {
     m.ssh.picker.open = false;
-    if (!m.cfg.demo) hosts_record_use(m.ssh.sources, c.host, unix_now());
+    Cmd used = m.cfg.demo ? Cmd{} : Cmd::run(fx::record_use, m.ssh.sources, c.host, unix_now(m));
     for (auto& x : m.ssh.book.hosts)
-        if (x.alias == c.host.alias) { ++x.uses; x.last = unix_now(); }
+        if (x.alias == c.host.alias) { ++x.uses; x.last = unix_now(m); }
     // here: type it at this tab's prompt (scrollback and cwd stay); only when
     // the tab is a quiet local shell -- never into a running program
-    if (c.where == Where::this_tab && m.tab().pty && !m.tab().link.launched && busy_of(m.tab(), nullptr).empty() && !remote_of(m.tab())) {
-        m.tab().pty->write(m.tab().term->encode_paste(ssh_command(c.host)) + "\r");
-        return {};
+    if (c.where == Where::this_tab && m.tab().pty && !m.tab().link.launched && busy_of(m, m.tab(), nullptr).empty() && !remote_of(m.tab())) {
+        m.tab().input += m.tab().term->encode_paste(ssh_command(c.host)) + "\r";
+        return used;
     }
     const bool first_split = m.tab_count() == 1 && !m.cfg.strip_always();
     // beside the current tab, not at the end: it belongs to what you were doing
@@ -121,7 +121,7 @@ App::Cmd App::update(Model& m, ConnectHost c) {
     m.strip.switch_t = m.cfg.motion ? 0.0f : 1.0f;
     if (first_split && !m.cfg.motion) m.strip.t = 1.0f;
     fit(m);
-    return SetTitle{c.host.alias};
+    return Cmd::batch(std::move(used), SetTitle{c.host.alias});
 }
 
 App::Cmd App::update(Model& m, ConnectTyped) {
@@ -137,12 +137,9 @@ App::Cmd App::update(Model& m, ToggleManager) {
     if (m.dialog.ask.has_value()) return {};
     m.settings.open = false;
     m.ssh.picker.open = false;
-    // the files may have changed since launch (or since the picker read them)
-    m.ssh.sources = resolve(detail::host_sources(m.cfg));
-    if (!m.cfg.demo) {
-        m.ssh.book = hosts_load(m.ssh.sources);
-        m.ssh.manager.imports = import_sources();   // PuTTY's registry and MobaXterm.ini: a few ms
-    }
+    // the files may have changed since launch (or since the picker read them):
+    // re-read with PuTTY's and MobaXterm's sessions; they land a moment later
+    m.ssh.sources = detail::host_sources(m);
     m.ssh.manager.ui.import_open = false;
     m.ssh.manager.ui.tab = 0;
     m.ssh.manager.open = true;
@@ -159,10 +156,11 @@ App::Cmd App::update(Model& m, ToggleManager) {
         for (std::size_t i = 0; i < m.ssh.book.hosts.size(); ++i)
             if (m.ssh.book.hosts[i].alias == m.tab().remote->alias) m.ssh.manager.ui.sel = static_cast<int>(i);
     if (m.ssh.manager.ui.sel < 0) {
-        const auto r = rank_hosts(hosts, "", unix_now());
+        const auto r = rank_hosts(hosts, "", unix_now(m));
         m.ssh.manager.ui.sel = r.empty() ? 0 : r.front();
     }
-    return update(m, TunnelProbe{});   // tunnel status from the first frame
+    Cmd load = m.cfg.demo ? Cmd{} : Cmd::run(fx::load_hosts, m.ssh.sources, true);
+    return Cmd::batch(std::move(load), update(m, TunnelProbe{}));   // tunnel status from the first frame
 }
 
 namespace {
@@ -179,12 +177,7 @@ App::Cmd list_files(Model& m, const Host& h, std::string path) {
     m.ssh.manager.files.loading = true;
     m.ssh.manager.files.error.clear();
     if (m.cfg.demo) return {};
-    return App::Cmd::task([](Sk out, Host host, HostBook book, std::string p) {
-        const auto l = sftp::list(host, book, p);
-        App::FilesListed r{host.alias, l.path.empty() ? p : l.path, {}, l.error};
-        for (const auto& e : l.entries) r.entries.push_back({e.name, e.when, e.target, e.dir, e.link, e.size});
-        out.send(App::Msg{std::move(r)});
-    }, h, m.ssh.book, std::move(path));
+    return App::Cmd::task(fx::list_remote_files, h, m.ssh.book, std::move(path));
 }
 std::string base_name(const std::string& p) {
     std::string s = p;
@@ -212,7 +205,7 @@ App::Cmd App::update(Model& m, Manager p) {
                 if (!known) break;
                 Host& h = m.ssh.book.hosts[static_cast<std::size_t>(a.host)];
                 h.pinned = !h.pinned;
-                if (!m.cfg.demo) hosts_set_pinned(m.ssh.sources, h, h.pinned);
+                if (!m.cfg.demo) cmds.push_back(Cmd::run(fx::set_pinned, m.ssh.sources, h, h.pinned));
                 break;
             }
             case A::Kind::copy_command: {
@@ -238,7 +231,7 @@ App::Cmd App::update(Model& m, Manager p) {
                 h.env_set = d.env != SshHost::Env::none;
                 if (!h.env_set) h.env = guess_env(h.alias, h.hostname);
                 h.tags = d.tags; h.forwards = d.forwards; h.command = d.command; h.folder = d.folder;
-                if (!m.cfg.demo) hosts_save(m.ssh.sources, h, a.old_alias);
+                if (!m.cfg.demo) cmds.push_back(Cmd::run(fx::save_host, m.ssh.sources, h, a.old_alias));
                 if (known) m.ssh.book.hosts[static_cast<std::size_t>(a.host)] = h;
                 else m.ssh.book.hosts.push_back(h);
                 // stay on it (a rename or a new host moves it in the list)
@@ -251,7 +244,7 @@ App::Cmd App::update(Model& m, Manager p) {
             case A::Kind::remove: {
                 if (!known) break;
                 const Host h = m.ssh.book.hosts[static_cast<std::size_t>(a.host)];
-                if (!m.cfg.demo) hosts_remove(m.ssh.sources, h.alias);
+                if (!m.cfg.demo) cmds.push_back(Cmd::run(fx::remove_host, m.ssh.sources, h.alias));
                 if (h.editable()) {
                     m.ssh.book.hosts.erase(m.ssh.book.hosts.begin() + a.host);
                     m.ssh.manager.ui.sel = std::min(m.ssh.manager.ui.sel, static_cast<int>(m.ssh.book.hosts.size()) - 1);
@@ -267,7 +260,7 @@ App::Cmd App::update(Model& m, Manager p) {
             }
             case A::Kind::save_folder: {
                 Folder f{a.folder.name, a.folder.user, a.folder.jump, a.folder.identity, a.folder.port};
-                if (!m.cfg.demo) folder_save(m.ssh.sources, f, a.old_alias);
+                if (!m.cfg.demo) cmds.push_back(Cmd::run(fx::save_folder, m.ssh.sources, f, a.old_alias));
                 std::erase_if(m.ssh.book.folders, [&](const Folder& x) { return x.name == f.name || (!a.old_alias.empty() && x.name == a.old_alias); });
                 m.ssh.book.folders.push_back(f);
                 if (!a.old_alias.empty() && a.old_alias != f.name)   // a rename moves its hosts
@@ -280,7 +273,7 @@ App::Cmd App::update(Model& m, Manager p) {
                 break;
             }
             case A::Kind::remove_folder:
-                if (!m.cfg.demo) folder_remove(m.ssh.sources, a.old_alias);
+                if (!m.cfg.demo) cmds.push_back(Cmd::run(fx::remove_folder, m.ssh.sources, a.old_alias));
                 std::erase_if(m.ssh.book.folders, [&](const Folder& x) { return x.name == a.old_alias; });
                 m.toast.card = Toast{.title = "folder settings removed", .body = a.old_alias + ": its hosts keep their own", .kind = Toast::Kind::info};
                 m.toast.at = m.time;
@@ -292,7 +285,7 @@ App::Cmd App::update(Model& m, Manager p) {
                 for (Host h : src.hosts) {
                     if (m.ssh.book.find(h.alias)) continue;   // already here (same name): theirs wins
                     h.env = guess_env(h.alias, h.hostname);
-                    if (!m.cfg.demo) hosts_save(m.ssh.sources, h, "");
+                    if (!m.cfg.demo) cmds.push_back(Cmd::run(fx::save_host, m.ssh.sources, h, std::string{}));
                     m.ssh.book.hosts.push_back(std::move(h));
                     ++added;
                 }
@@ -330,18 +323,12 @@ App::Cmd App::update(Model& m, Manager p) {
                 if (!known || m.cfg.demo) break;
                 const Host& h = m.ssh.book.hosts[static_cast<std::size_t>(a.host)];
                 m.ssh.manager.files.busy = "Downloading " + base_name(a.path) + "\u2026";
-                cmds.push_back(Cmd::task([](Sk out, Host host, HostBook book, std::string remote) {
-                    const std::string dir = proc::downloads_dir();
-                    const std::string err = sftp::get(host, book, {remote}, dir);
-                    out.send(App::Msg{App::FilesDone{host.alias, "", "Downloaded " + base_name(remote), err, dir + "/" + base_name(remote)}});
-                }, h, m.ssh.book, a.path));
+                cmds.push_back(Cmd::task(fx::download, h, m.ssh.book, a.path, base_name(a.path)));
                 break;
             }
             case A::Kind::files_put: {
                 if (!known || m.cfg.demo) break;
-                cmds.push_back(Cmd::task([](Sk out, std::string alias, std::string dir) {
-                    out.send(App::Msg{App::UploadPicked{alias, dir, proc::pick_files("Upload to " + dir)}});
-                }, m.ssh.book.hosts[static_cast<std::size_t>(a.host)].alias, a.path));
+                cmds.push_back(Cmd::task(fx::pick_upload, m.ssh.book.hosts[static_cast<std::size_t>(a.host)].alias, a.path));
                 break;
             }
             case A::Kind::files_mkdir:
@@ -384,27 +371,27 @@ App::Cmd App::update(Model& m, UploadPicked u) {
     if (!h) return {};
     if (m.ssh.manager.files.alias == u.alias) m.ssh.manager.files.busy = "Uploading " + std::to_string(u.files.size()) + (u.files.size() == 1 ? " file\u2026" : " files\u2026");
     if (m.pane.where == u.alias) m.pane.busy = "Uploading " + std::to_string(u.files.size()) + (u.files.size() == 1 ? " file\u2026" : " files\u2026");
-    return Cmd::task([](Sk out, Host host, HostBook book, std::string dir, std::vector<std::string> files) {
-        const std::string err = sftp::put(host, book, files, dir);
-        out.send(App::Msg{App::FilesDone{host.alias, dir, "Uploaded " + std::to_string(files.size()) + (files.size() == 1 ? " file" : " files"), err, ""}});
-    }, *h, m.ssh.book, u.dir, u.files);
+    return Cmd::task(fx::upload, *h, m.ssh.book, u.dir, u.files);
 }
 
 App::Cmd App::update(Model& m, TunnelProbe) {
     if (!m.ssh.manager.open || m.cfg.demo) return {};
-    return Cmd::task([](Sk out) {
-        bool known = true;
-        App::TunnelScan s;
-        for (const auto& l : proc::tcp_listeners(&known)) { s.ports.push_back(l.port); s.owners.push_back(l.process); }
-        s.known = known;
-        out.send(App::Msg{std::move(s)});
-    });
+    return Cmd::task(fx::tunnel_scan);
 }
 
 App::Cmd App::update(Model& m, TunnelScan s) {
     m.ssh.manager.ports = std::move(s.ports);
     m.ssh.manager.port_owners = std::move(s.owners);
     m.ssh.manager.ports_known = s.known;
+    return {};
+}
+
+App::Cmd App::update(Model& m, HostsLoaded h) {
+    m.ssh.book = std::move(h.book);
+    if (h.imports) m.ssh.manager.imports = std::move(*h.imports);
+    // keep the picker and the manager on sane rows of the new book
+    const int n = static_cast<int>(m.ssh.book.hosts.size());
+    m.ssh.manager.ui.sel = std::clamp(m.ssh.manager.ui.sel, 0, std::max(n - 1, 0));
     return {};
 }
 

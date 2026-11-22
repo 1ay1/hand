@@ -2,6 +2,7 @@
 // the blink, the 1 Hz clock, and frames only while something animates.
 
 #include "detail.hpp"
+#include "fx/fx.hpp"
 
 #include <hand/core/shell.hpp>
 
@@ -27,14 +28,14 @@ App::Sub App::subscribe(const Model& m) {
     // every tab's shell keeps running: one reader per session, keyed by its id
     for (std::size_t i = 0; i < m.tab_count(); ++i) {
         const Session& se = m.at(i);
-        if (se.pty) s.push_back(Sub::stream("pty." + std::to_string(se.sid.get()), read_pty, se.pty.share(), se.sid));
+        if (se.pty) s.push_back(Sub::stream("pty." + std::to_string(se.sid.get()), fx::read_pty, se.pty.share(), se.sid));
     }
-    if (m.tab_count() > 1) s.push_back(Sub::every(std::chrono::milliseconds(1000), Msg{Clock{}}));   // activity sparklines
+    if (m.tab_count() > 1) s.push_back(Sub::every(std::chrono::milliseconds(1000), Msg{Second{}}));   // activity sparklines
     // the host manager's live tunnel status: who listens on each -L / -D port
     if (m.ssh.manager.open) s.push_back(Sub::every(std::chrono::milliseconds(900), Msg{TunnelProbe{}}));
     // the file pane: re-read its folder (new and changed files glow), and follow `ssh` started in a tab
     if (m.pane.open && m.cfg.files_watch) s.push_back(Sub::every(std::chrono::milliseconds(m.pane.where.empty() ? 1500 : 5000), Msg{PaneWatch{}}));
-    if (m.pane.open && m.tab_count() < 2) s.push_back(Sub::every(std::chrono::milliseconds(1000), Msg{Clock{}}));
+    if (m.pane.open && m.tab_count() < 2) s.push_back(Sub::every(std::chrono::milliseconds(1000), Msg{Second{}}));
     if (m.focused && m.cfg.cursor_blink)
         s.push_back(Sub::every(std::chrono::milliseconds(static_cast<int>(m.cfg.blink_ms)), Msg{Blink{}}));
     const auto cur = m.tab().term->cursor();
@@ -58,7 +59,7 @@ App::Sub App::subscribe(const Model& m) {
                            m.tab().sticky_t != (sticky_of(m) ? 1.0f : 0.0f) || (m.tab().bell_at >= 0.0 && m.time - m.tab().bell_at < 0.2) || m.time - m.resized_at < 0.9 ||
                            (m.toast.card && m.time - m.toast.at < 3.2) || (m.tab().link.dropped && m.time - m.tab().link.dropped_at < 0.3);
     if (const auto st = sticky_of(m); st && st->ran && !st->finished)
-        s.push_back(Sub::every(std::chrono::milliseconds(1000), Msg{Clock{}}));
+        s.push_back(Sub::every(std::chrono::milliseconds(1000), Msg{Second{}}));
     if (animating) s.push_back(Sub::on_frame([](double dt) -> Msg { return Tick{dt}; }));
     return Sub::batch(std::move(s));
 }

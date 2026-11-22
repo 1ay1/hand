@@ -17,14 +17,15 @@ using namespace hand::detail;
 void ssh_overlays(const Ctx& c, const Model& m) {
     if (m.ssh.picker.open) {
         const auto hosts = picker_hosts(m);
-        ssh_hosts(c, "hosts", m.ssh.picker.query, hosts, rank_hosts(hosts, m.ssh.picker.query.text, unix_now()), m.ssh.picker.sel,
-                  SshHostsProps{.now = unix_now(), .source = m.ssh.book.config_label.empty() ? "~/.ssh/config" : m.ssh.book.config_label,
+        ssh_hosts(c, "hosts", m.ssh.picker.query, hosts, rank_hosts(hosts, m.ssh.picker.query.text, unix_now(m)), m.ssh.picker.sel,
+                  SshHostsProps{.now = unix_now(m), .source = m.ssh.book.config_label.empty() ? "~/.ssh/config" : m.ssh.book.config_label,
                                 .action = "new tab", .width = std::min(720.0f, m.win.x - 48.0f)});
     }
     if (m.ssh.manager.open || m.ssh.manager.t > 0.0f) {
         const float e = 1.0f - (1.0f - m.ssh.manager.t) * (1.0f - m.ssh.manager.t);   // ease-out
-        std::string store = (std::filesystem::path{m.ssh.sources.store}.filename()).string();
-        SshManagerProps mp{.now = unix_now(),
+        const std::string& sp = m.ssh.sources.store;   // hosts.vibe's file name
+        const std::string store = sp.substr(sp.find_last_of("/\\") == std::string::npos ? 0 : sp.find_last_of("/\\") + 1);
+        SshManagerProps mp{.now = unix_now(m),
                            .source = m.ssh.book.config_label.empty() ? "~/.ssh/config" : m.ssh.book.config_label,
                            .store = store.empty() ? "hosts.vibe" : store,
                            .width = std::min(1020.0f, m.win.x - 40.0f),

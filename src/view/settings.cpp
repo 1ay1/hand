@@ -45,8 +45,7 @@ Theme App::theme(const Model& m) {
 namespace view {
 
 SettingsPanelProps settings_props(const Ctx& c, const Model& m) {
-    std::string cfgp = config_path();
-    if (const char* hm = std::getenv("HOME"); hm && *hm && cfgp.rfind(hm, 0) == 0) cfgp = "~" + cfgp.substr(std::strlen(hm));
+    const std::string cfgp = detail::short_path(m, m.env.config_path);
     return SettingsPanelProps{.title = "hand", .subtitle = "terminal settings", .brand = "h",
                               .logo = hand_mark(c, 44.0f, {.cursor = m.cursor_on, .roundness = m.cfg.roundness}),
                               .footer = cfgp,

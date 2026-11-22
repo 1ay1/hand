@@ -43,9 +43,10 @@ void selection([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& 
     ev(mayag::MouseDown{at(2, 1), mayag::MouseButton::left, {}, 1});
     ev(mayag::MouseUp{at(2, 1), mayag::MouseButton::left, {}});
     for (int i = 0; i < 2; ++i) rt.tick();
-    ok(!rt.model().tab().term->has_selection() && rt.model().sel_chip.size.x == 0.0f,
-       "a single click selects nothing and shows no toolbar");
-    const auto none = [&] { return !rt.model().tab().term->has_selection() && rt.model().sel_chip.size.x == 0.0f; };
+    // the toolbar is in the drawn tree, or it is not shown
+    const auto chip = [&] { return rt.tree().find(mayag::dsl::node_id("sel")) != nullptr; };
+    ok(!rt.model().tab().term->has_selection() && !chip(), "a single click selects nothing and shows no toolbar");
+    const auto none = [&] { return !rt.model().tab().term->has_selection() && !chip(); };
     ev(mayag::MouseDown{at(30, 5), mayag::MouseButton::left, {}, 1});   // empty space below the prompt
     ev(mayag::MouseMove{at(36, 5), {}, {}});
     ev(mayag::MouseUp{at(36, 5), mayag::MouseButton::left, {}});
@@ -63,7 +64,7 @@ void selection([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& 
     ev(mayag::MouseMove{at(4, 1), {}, {}});
     ev(mayag::MouseUp{at(4, 1), mayag::MouseButton::left, {}});
     for (int i = 0; i < 2; ++i) rt.tick();
-    ok(rt.model().tab().term->selection_text() == "lpha" && rt.model().sel_chip.size.x > 0.0f,
+    ok(rt.model().tab().term->selection_text() == "lpha" && chip(),
        "a drag still selects, with its toolbar");
     rt.send(hand::App::Msg{E5{[](hand::App::Model& m2) { m2.tab().term->select_begin(0, 0, 1, true); m2.tab().term->select_extend(3, 2); m2.tab().selecting = false; }}});
     {
@@ -109,12 +110,12 @@ void selection([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& 
     ok(!rt.model().tab().copy.has_value(), "...then copy mode");
     // paste guard
     rt.send(hand::App::Msg{hand::App::Pasted{"rm -rf a\nrm -rf b\n"}});
-    ok(!rt.model().tab().pending_paste.empty(), "a multi-line paste waits for confirmation");
+    ok(rt.model().dialog.ask && !rt.model().dialog.ask->paste.empty(), "a multi-line paste waits for confirmation");
     rt.press_key(K::escape);
-    ok(rt.model().tab().pending_paste.empty(), "esc cancels it");
+    ok(!rt.model().dialog.ask, "esc cancels it");
     rt.send(hand::App::Msg{hand::App::Pasted{"echo one\necho two\n"}});
     rt.press_key(K::enter);
-    ok(rt.model().tab().pending_paste.empty() && !rt.model().dialog.ask,
+    ok(!rt.model().dialog.ask,
        "enter pastes it, and doesn't ask twice");
     rt.send(hand::App::Msg{hand::App::Pasted{"sudo true"}});
     ok((rt.model().dialog.ask && rt.model().dialog.ask->kind == hand::Ask::Kind::paste), "a single risky line asks too");
@@ -125,7 +126,7 @@ void selection([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& 
     rt.press_key(K::escape);
     rt.send(hand::App::Msg{E5{[](hand::App::Model& m2) { m2.cfg.paste_confirm = hand::PasteConfirm::unbracketed; }}});
     rt.send(hand::App::Msg{hand::App::Pasted{"a\nb"}});
-    ok(rt.model().tab().pending_paste.empty() && !rt.model().dialog.ask,
+    ok(!rt.model().dialog.ask,
        "unbracketed mode: a program that asked for bracketed paste gets it straight away");
     rt.send(hand::App::Msg{E5{[](hand::App::Model& m2) { m2.cfg.paste_confirm = hand::PasteConfirm::multiline; }}});
     rt.send(hand::App::Msg{hand::App::Output{std::string{"\x1b[?2004l"}}});

@@ -7,6 +7,7 @@
 //   repro.cpp      --repro-narrow[-fish], --repro-resize   resize repros, real shells
 //   selftest.cpp   --headless                    the self-test, `ok` / `FAIL` per check
 //   shots.cpp      --png --shot NAME, --bench, --flood     a frame to PNG, benchmarks
+//   env.cpp        the world a run starts in (App::Flags::env), read once
 
 #include <hand/app.hpp>
 
@@ -16,6 +17,10 @@
 #include <string>
 
 namespace hand::cli {
+
+/// $HOME, $EDITOR, $SHELL, the host name, the start directory, hand.vibe's
+/// path, the wall clock and a seed. `scripted`: a fixed seed (shots repeat).
+[[nodiscard]] Env read_env(bool scripted);
 
 /// The headless runtime every scripted mode drives.
 using Runtime = mayag::headless_app<App>;

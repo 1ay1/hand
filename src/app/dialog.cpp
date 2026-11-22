@@ -7,6 +7,7 @@
 //   RememberToggle ──▶ the "don't ask again" box
 
 #include "detail.hpp"
+#include "fx/fx.hpp"
 
 #include <utility>
 
@@ -21,15 +22,16 @@ enum class PasteAction : std::size_t { cancel = 0, one_line = 1, paste = 2 };
 
 /// Saving quits the app: hand.vibe first (a demo never writes it).
 App::Cmd save_and_quit(const Model& m) {
-    if (!m.cfg.demo) (void)config_save(m.cfg, config_path());
-    return App::Cmd::quit();
+    if (m.cfg.demo) return App::Cmd::quit();
+    return App::Cmd::batch(App::Cmd::run(fx::save_config, m.cfg, m.env.config_path), App::Cmd::quit());   // in order: saved, then gone
 }
 
 /// "Don't ask again": the next question of this kind is not asked.
-void remember(Model& m, Ask::Kind kind) {
+App::Cmd remember(Model& m, Ask::Kind kind) {
     if (kind == Ask::Kind::paste) m.cfg.paste_confirm = PasteConfirm::risky;
     else m.cfg.close_confirm = CloseConfirm::never;
-    if (!m.cfg.demo) (void)config_save(m.cfg, config_path());
+    if (m.cfg.demo) return {};
+    return App::Cmd::run(fx::save_config, m.cfg, m.env.config_path);
 }
 
 /// A paste as one line: newlines become spaces, nothing runs until enter.
@@ -47,7 +49,7 @@ std::string one_line(const std::string& text) {
 App::Cmd App::update(Model& m, RequestQuit) {
     if (m.cfg.close_confirm != CloseConfirm::never && !m.dialog.ask) {
         bool busy = false;
-        for (std::size_t i = 0; i < m.tab_count(); ++i) busy = busy || !busy_of(m.at(i), nullptr).empty();
+        for (std::size_t i = 0; i < m.tab_count(); ++i) busy = busy || !busy_of(m, m.at(i), nullptr).empty();
         if (busy || m.cfg.close_confirm == CloseConfirm::always) {
             m.dialog.ask = Ask{.kind = Ask::Kind::quit, .focus = 1};
             return {};
@@ -71,19 +73,22 @@ App::Cmd App::update(Model& m, DialogFocus f) {
 App::Cmd App::update(Model& m, Answer a) {
     if (!m.dialog.ask) return {};
     const Ask asked = *std::exchange(m.dialog.ask, std::nullopt);
+    m.dialog.was = asked;   // what fades out
     const auto* choice = std::get_if<Answer::Choose>(&a.pick);
     const std::size_t action = choice ? choice->action : 0;   // dismissing is cancelling
     const bool yes = action != 0;
-    if (yes && asked.remember) remember(m, asked.kind);
+    // "don't ask again": saved before whatever the answer does (a quit saves anyway)
+    Cmd saved = yes && asked.remember && asked.kind != Ask::Kind::quit ? remember(m, asked.kind) : Cmd{};
+    if (yes && asked.remember && asked.kind == Ask::Kind::quit) (void)remember(m, asked.kind);
     switch (asked.kind) {
         case Ask::Kind::paste: {
-            std::string text = std::exchange(m.tab().pending_paste, {});
+            std::string text = asked.paste;
             if (!yes) return {};
             if (action == std::to_underlying(PasteAction::one_line)) text = one_line(text);
-            return update(m, Pasted{std::move(text), Confirm::given});
+            return Cmd::batch(std::move(saved), update(m, Pasted{std::move(text), Confirm::given}));
         }
         case Ask::Kind::close_tab:
-            return yes ? update(m, CloseTab{asked.tab, Confirm::given}) : Cmd{};
+            return yes ? Cmd::batch(std::move(saved), update(m, CloseTab{asked.tab, Confirm::given})) : Cmd{};
         case Ask::Kind::quit:
             return yes ? save_and_quit(m) : Cmd{};
     }

@@ -44,11 +44,30 @@ class PtyRef {
     std::optional<mayag::CoOwned<Pty>> p_;
 };
 
+/// ssh to a host: what the effect needs to build its command line (which
+/// may create ssh's control-socket directory, so it is built there).
+struct SshTarget { Host host; HostBook book; SshFlags flags; };
+/// The program a session asks for: a shell (with hand's integration if
+/// asked; the effect resolves $SHELL), a `-e` command line, or ssh.
+struct Launch {
+    PtySpec                  spec;
+    bool                     integrate = false;
+    std::optional<SshTarget> ssh;
+};
+
 /// One tab: a shell on a pty, the screen toe keeps for it, and everything
 /// that animates over it. Lives in Tabs; the window never holds one itself.
 struct Session {
     SessionId               sid = kNoSession;     ///< stable id: routes pty output, keys the stream
     PtyRef                  pty;
+    // What this tab wants of its pty. update only SAYS it (append bytes, ask
+    // for a program, resize the term); App's root update turns the difference
+    // into effects after every step (App::drain, src/app/fx/ performs them),
+    // so no handler ever touches the pty itself.
+    std::string             input;                ///< bytes for the pty, written after this step
+    std::optional<Launch>   launch;               ///< start this (taken by the next drain)
+    bool                    starting = false;     ///< asked for; its pty has not arrived yet
+    int                     pty_cols = 0, pty_rows = 0;   ///< the size the pty was last told
     std::shared_ptr<Term>   term;
     std::string             title = "hand";       ///< OSC 0/2
     std::string             name;                 ///< a name the user gave the tab ("" = automatic)
@@ -80,23 +99,21 @@ struct Session {
     std::uint64_t           notified = 0;         ///< the last command reported on
     std::optional<CopyMode> copy;                 ///< engaged: copy mode is on
     double                  copy_flash_at = -10.0;
-    std::string             pending_paste;        ///< a paste waiting on the dialog
     std::optional<HintMode> hint;                 ///< engaged: hints are showing
     // what the tab strip shows while it is in the background
     bool                    unread = false;
     bool                    bell = false;
     std::size_t             bytes = 0;            ///< output since the last activity sample
     std::vector<float>      activity;             ///< output rate, one sample a second
-    mutable std::string     proc;                 ///< foreground process name, cached
-    mutable double          proc_at = -10.0;
+    // what runs in it, as the last probe found (Probe / Probed)
+    std::string             proc;                 ///< the foreground process ("fish", "nvim")
     // ssh: the destination (launched, or found by watching an `ssh host` you typed)
-    mutable std::optional<Host> remote;
-    mutable double          remote_at = -10.0;
+    std::optional<Host>     remote;
     Remote                  link;
     double                  opened_at = 0.0;      ///< the tab's own entrance animation
-    // snapshot cache (view is const; the grid only changes with the term)
-    mutable std::shared_ptr<const mayag::dsl::TermGrid> grid;
-    mutable std::uint64_t   grid_key = 0;
+    // snapshot cache: a pure function of the term and the decorations, keyed
+    mutable std::shared_ptr<const mayag::dsl::TermGrid> grid;   // memo: equals recomputing it
+    mutable std::uint64_t   grid_key = 0;                       // memo: what `grid` was made from
 };
 
 }  // namespace hand

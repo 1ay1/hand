@@ -153,12 +153,12 @@ int main(int argc, char** argv) {
             ac.font_loader = system_fonts ? +[] { return load_fonts(true); } : +[] { return load_fonts(false); };
             return mayag::run<hand::App>(std::move(ac), [cfg](std::shared_ptr<typo::FontStack> fonts) {
                 startup::mark("hand: fonts loaded");
-                return hand::App::Flags{cfg, std::move(fonts)};
+                return hand::App::Flags{cfg, std::move(fonts), hand::cli::read_env(false)};
             });
         case Mode::headless:
-            return hand::cli::run_scripted(std::move(ac), {cfg, scripted_fonts}, size, {});
+            return hand::cli::run_scripted(std::move(ac), {cfg, scripted_fonts, hand::cli::read_env(true)}, size, {});
         case Mode::png:
-            return hand::cli::run_scripted(std::move(ac), {cfg, scripted_fonts}, size, hand::cli::Shot{shot, out});
+            return hand::cli::run_scripted(std::move(ac), {cfg, scripted_fonts, hand::cli::read_env(true)}, size, hand::cli::Shot{shot, out});
     }
     return 0;
 }

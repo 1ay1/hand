@@ -17,11 +17,6 @@ using namespace hand::detail;
 
 namespace {
 
-/// "~/src/hand" for the strip's second line.
-std::string tilde(const std::string& p) {
-    if (const char* h = std::getenv("HOME"); h && *h && p.rfind(h, 0) == 0) return "~" + p.substr(std::strlen(h));
-    return p;
-}
 
 /// The title: your name for it > the running command > the program >
 /// the shell's own title > the folder (cfg.tab_title picks one source).
@@ -58,7 +53,7 @@ TermTabInfo tab_info(const Model& m, std::size_t i) {
     }
     const std::string running = last && !last->finished ? se.term->command_text(*last) : std::string{};
     ti.title = title_of(m, se, proc, cwd, running);
-    ti.cwd = tilde(cwd);
+    ti.cwd = short_path(m, cwd);
     ti.process = proc;
     if (const auto& r = remote_of(se)) {   // a remote tab: named for the machine, its second line the address
         if (se.name.empty() && m.cfg.tab_title != TabTitle::shell) ti.title = r->alias;
@@ -73,9 +68,9 @@ TermTabInfo tab_info(const Model& m, std::size_t i) {
         ti.running = !last->finished;
         if (last->finished) {
             ti.last_exit = last->exit_code;
-            ti.finished_ago = last->start_ms > 0 ? static_cast<double>(wall_ms() - last->start_ms - last->duration_ms) / 1000.0 : 99.0;
+            ti.finished_ago = last->start_ms > 0 ? static_cast<double>(m.wall_ms - last->start_ms - last->duration_ms) / 1000.0 : 99.0;
         } else if (last->start_ms > 0) {
-            ti.elapsed = static_cast<double>(wall_ms() - last->start_ms) / 1000.0;
+            ti.elapsed = static_cast<double>(m.wall_ms - last->start_ms) / 1000.0;
         }
     }
     return ti;

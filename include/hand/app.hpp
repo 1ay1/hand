@@ -27,13 +27,19 @@ struct App {
     using Session = hand::Session;
     using Model = hand::Model;
     using Msg = msg::Any;
-    using Cmd = mayag::Cmd<Msg, mayag::set_title, mayag::write_clipboard, mayag::read_clipboard, mayag::window_action>;
+    /// `run`: an effect on the loop thread after the step (a pty write, a
+    /// save); `task` (core): one that may block, on the pool.
+    using Cmd = mayag::Cmd<Msg, mayag::set_title, mayag::write_clipboard, mayag::read_clipboard, mayag::window_action,
+                           mayag::world>;
     using Sub = mayag::Sub<Msg>;
+    /// update is handed the step's time (jaal reads the clock, never hand).
+    using Clock = mayag::SteadyClock;
+    using Time = Clock::time_point;
     // every leaf message under its own name (App::NewTab{} reads well at call sites)
     using Output = msg::Output;         using Exited = msg::Exited;
     using NewTab = msg::NewTab;         using CloseTab = msg::CloseTab;     using SelectTab = msg::SelectTab;
     using StepTab = msg::StepTab;       using MoveTab = msg::MoveTab;
-    using Blink = msg::Blink;           using Tick = msg::Tick;             using Clock = msg::Clock;
+    using Blink = msg::Blink;           using Tick = msg::Tick;             using Second = msg::Clock;
     using Copy = msg::Copy;             using PasteReq = msg::PasteReq;     using Pasted = msg::Pasted;
     using CopyOutput = msg::CopyOutput; using CopyKey = msg::CopyKey;       using OpenUrl = msg::OpenUrl;
     using HintPick = msg::HintPick;     using HintUse = msg::HintUse;
@@ -67,23 +73,39 @@ struct App {
     using TogglePane = msg::TogglePane; using PaneOp = msg::PaneOp;         using PaneListed = msg::PaneListed;
     using PaneResize = msg::PaneResize; using PaneWatch = msg::PaneWatch;   using PanePreview = msg::PanePreview;
     using Notice = msg::Notice;
+    using Spawned = msg::Spawned;       using Probe = msg::Probe;           using Probed = msg::Probed;
+    using HostsLoaded = msg::HostsLoaded;
 
     /// What a run starts with (Elm's flags): the configuration main loaded
-    /// and the fonts mayag loaded. Data in, never a global.
+    /// and the fonts mayag loaded, and the world it started in. Data in,
+    /// never a global.
     struct Flags {
         Config                                  config;
         std::shared_ptr<const mayag::typo::FontStack> fonts;   ///< null: measure with a nominal 0.6 em cell
+        Env                                     env;
     };
     static Cmd init(Model& m, const Flags& f);
+
+    /// THE seam (Msg is handled as one group): stamp the step's time into the
+    /// model, dispatch to the leaf's update, then drain what the step asked of
+    /// the ptys (input, launches, sizes) into effects. Every handler below is
+    /// therefore a pure function of (Model, leaf).
+    static Cmd update(Model& m, Msg msg, Time now);
+    /// The same, for a caller with no clock (scripted edits in the self-test):
+    /// the model's own time stands.
+    static Cmd step(Model& m, Msg msg);
 
     // ── update: one overload per leaf, grouped by domain (jaal checks every leaf is here) ──
     // ShellMsg (src/app/session.cpp)
     static Cmd update(Model& m, Output o);
     static Cmd update(Model& m, Exited e);
+    static Cmd update(Model& m, Spawned s);
+    static Cmd update(Model& m, Probe);
+    static Cmd update(Model& m, Probed p);
     // ClockMsg (src/app/session.cpp)
     static Cmd update(Model& m, Blink);
     static Cmd update(Model& m, Tick t);
-    static Cmd update(Model& m, Clock);
+    static Cmd update(Model& m, Second);
     // DialogMsg (src/app/dialog.cpp)
     static Cmd update(Model& m, Answer a);
     static Cmd update(Model& m, RememberToggle);
@@ -158,6 +180,7 @@ struct App {
     static Cmd update(Model& m, ConnectHost c);
     static Cmd update(Model& m, ConnectTyped);
     static Cmd update(Model& m, Reconnect);
+    static Cmd update(Model& m, HostsLoaded h);
     static Cmd update(Model& m, ToggleManager);
     static Cmd update(Model& m, Manager);
     static Cmd update(Model& m, FilesListed);
@@ -201,12 +224,17 @@ struct App {
     static mayag::Node view(const Model& m);
 
     // src/app/session.cpp: shared mechanics
-    /// Start a shell in a new session (in `cwd`, "" = the current one).
+    /// A new session asking for a shell (in `cwd`, "" = the current one); the
+    /// drain after this step starts it.
     static Session spawn_session(Model& m, const std::string& cwd);
-    /// A session whose program is ssh to `h` (no shell around it).
+    /// A session asking for ssh to `h` (no shell around it).
     static Session spawn_ssh(Model& m, const Host& h);
-    /// Resize the grid (and the pty) to what the window holds.
+    /// Size the grid to what the window holds (the drain tells the ptys).
     static void fit(Model& m);
+    /// What the step asked of the ptys, as effects: launches, sizes, input.
+    static Cmd drain(Model& m);
+    /// Ask the ptys what runs in them, in a moment (at most one pending).
+    static Cmd probe_soon(Model& m);
     /// Smooth scrollback. scroll_by: move the goal by `rows` (+ = into
     /// history). settle_scroll: anything that moved toe's view directly
     /// (typing, prompt jumps, search, the minimap) becomes the new goal and

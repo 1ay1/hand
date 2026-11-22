@@ -77,7 +77,10 @@ std::optional<App::Msg> App::on(const Model& m, const MouseDown& e_win) {
     if (btn == 0) {
         const int vr = view_row(m, e.position.y);
         // the selection toolbar is a control, not text
-        if (m.sel_chip.size.x > 0.0f && m.sel_chip.contains(e.position)) return std::nullopt;
+        if (const auto hit = e_win.control; hit != 0 &&
+            (hit == node_id("sel") || hit == node_id("sel.copy") || hit == node_id("sel.find") || hit == node_id("sel.open") ||
+             hit == node_id("sel.clear")))
+            return std::nullopt;
         // shift+click: extend what is selected to here
         if (e.mods.shift && se.term->has_selection() && e.click_count == 1)
             return SelectExtend{col, vr, e.position, 0.0f, Extend::shift_click};

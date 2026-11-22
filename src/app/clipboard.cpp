@@ -1,6 +1,7 @@
 // hand::App — text in and out: copy, paste (with its guard), search, hints, copy mode.
 
 #include "detail.hpp"
+#include "fx/fx.hpp"
 
 #include <hand/app/copy_mode.hpp>
 
@@ -46,7 +47,7 @@ App::Cmd App::update(Model& m, HintPick h) {
     m.tab().hint.reset();
     m.tab().grid_key = 0;
     if (h.use == HintUse::insert) {   // type it at the prompt
-        if (m.tab().pty) m.tab().pty->write(m.tab().term->encode_paste(hint.text));
+        if (m.tab().pty) m.tab().input += m.tab().term->encode_paste(hint.text);
         return {};
     }
     if (hint.kind == Term::Hint::Kind::url) return update(m, OpenUrl{hint.text});
@@ -146,15 +147,14 @@ App::Cmd App::update(Model& m, Pasted p) {
             case PasteConfirm::unbracketed: ask = (multi || risky) && !se.term->bracketed(); break;
         }
         if (ask) {
-            se.pending_paste = p.text;
-            m.dialog.ask = Ask{.kind = Ask::Kind::paste, .focus = 2};
+            m.dialog.ask = Ask{.kind = Ask::Kind::paste, .focus = 2, .paste = p.text};
             return {};
         }
     }
     if (!se.pty) return {};
     se.term->select_clear();
     se.term->scroll_to_bottom();
-    se.pty->write(se.term->encode_paste(p.text));
+    se.input += se.term->encode_paste(p.text);
     settle_scroll(m);
     return {};
 }
@@ -193,8 +193,8 @@ App::Cmd App::update(Model& m, OpenUrl u) {
     if (u.url.empty()) return {};
     std::string url = u.url;
     if (url.rfind("www.", 0) == 0) url = "https://" + url;
-    if (!m.cfg.demo) spawn_detached({m.cfg.url_launcher, url});
-    return {};
+    if (m.cfg.demo) return {};
+    return Cmd::run(fx::open_detached, std::vector<std::string>{m.cfg.url_launcher, url});
 }
 
 App::Cmd App::update(Model&, PasteReq) {

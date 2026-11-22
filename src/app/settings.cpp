@@ -1,6 +1,7 @@
 // hand::App — settings: the panel over the terminal, and its edits.
 
 #include "detail.hpp"
+#include "fx/fx.hpp"
 
 #include <hand/core/shell.hpp>
 
@@ -26,7 +27,7 @@ App::Cmd App::update(Model& m, ToggleSettings) {
     m.settings.ui.filtering = false;
     if (m.settings.ui.menu >= 0) dsl::settings_ops::close_menu(m.settings.ui, true);
     for (auto& e : std::exchange(m.settings.ui.out, {})) { const Config before = m.cfg; if (setting_apply(m.cfg, e)) apply(m, before); }
-    if (!m.settings.open && !m.cfg.demo) (void)config_save(m.cfg, config_path());   // closing is "done"
+    if (!m.settings.open && !m.cfg.demo) return Cmd::run(fx::save_config, m.cfg, m.env.config_path);   // closing is "done"
     return {};
 }
 

@@ -16,11 +16,10 @@ using namespace hand::detail;
 namespace {
 
 /// The paste guard: what is about to be pasted, risky lines flagged.
-TermDialogSpec paste_dialog(const Ctx& c, const Model& m) {
-    const Session& se = m.tab();
+TermDialogSpec paste_dialog(const Ctx& c, const Model& m, const Ask& a) {
     using T = DialogAction::Tone;
     TermDialogSpec d;
-    std::string body = se.pending_paste;
+    std::string body = a.paste;
     while (!body.empty() && (body.back() == '\n' || body.back() == '\r')) body.pop_back();
     const auto lines = split_lines(body);
     int flagged = 0;
@@ -36,9 +35,9 @@ TermDialogSpec paste_dialog(const Ctx& c, const Model& m) {
     d.title = "Paste " + std::to_string(lines.size()) + (lines.size() == 1 ? " line" : " lines") +
               (proc.empty() ? std::string{"?"} : " into " + proc + "?");
     d.body = flagged ? std::to_string(flagged) + (flagged == 1 ? " line looks" : " lines look") + " dangerous \u2014 read before it runs."
-           : se.term->bracketed() ? proc + " will hold it for editing; nothing runs until you press enter."
+           : m.tab().term->bracketed() ? proc + " will hold it for editing; nothing runs until you press enter."
                                  : "This program did not ask for bracketed paste: each line runs as it lands.";
-    d.meta = std::to_string(lines.size()) + "L \u00B7 " + std::to_string(se.pending_paste.size()) + " bytes";
+    d.meta = std::to_string(lines.size()) + "L \u00B7 " + std::to_string(a.paste.size()) + " bytes";
     d.actions = {{"cancel", "esc", T::normal}, {"one line", "\u21E7\u23CE", T::normal},
                  {"paste", "\u23CE", flagged ? T::danger : T::primary}};
     d.remember = m.cfg.paste_confirm == PasteConfirm::multiline ? "only ask for risky pastes" : "";
@@ -56,7 +55,7 @@ TermDialogSpec close_dialog(const Ctx& c, const Model& m, const Ask& a) {
     int busy = 0;
     for (std::size_t i : which) {
         std::string el;
-        const std::string what = busy_of(m.at(i), &el);
+        const std::string what = busy_of(m, m.at(i), &el);
         if (what.empty() && quit) continue;
         busy += what.empty() ? 0 : 1;
         d.preview.push_back({"tab " + std::to_string(i + 1) + "  " + (what.empty() ? std::string{"(idle)"} : "\u276F " + what), false, el});
@@ -76,16 +75,13 @@ TermDialogSpec close_dialog(const Ctx& c, const Model& m, const Ask& a) {
 }  // namespace
 
 void dialog(const Ctx& c, const Model& m) {
-    if (m.dialog.ask) {
-        TermDialogSpec d = m.dialog.ask->kind == Ask::Kind::paste ? paste_dialog(c, m) : close_dialog(c, m, *m.dialog.ask);
-        d.focused = static_cast<int>(m.dialog.ask->focus);
-        d.remember_on = m.dialog.ask->remember;
-        d.time = m.time;
-        d.width = std::min(600.0f, m.size.x - 40.0f);
-        m.dialog.last = std::move(d);
-    }
     if (m.dialog.t <= 0.0f) return;
-    TermDialogSpec d = m.dialog.last;
+    const Ask& a = m.dialog.ask ? *m.dialog.ask : m.dialog.was;   // closing: the last question fades out
+    TermDialogSpec d = a.kind == Ask::Kind::paste ? paste_dialog(c, m, a) : close_dialog(c, m, a);
+    d.focused = static_cast<int>(a.focus);
+    d.remember_on = a.remember;
+    d.time = m.time;
+    d.width = std::min(600.0f, m.size.x - 40.0f);
     d.appear = m.dialog.t;
     c.overlay(Overlay{.content = term_dialog(c, "ask", d), .id = part_id("ask", part_menu),
                       .placement = Placement::centered, .dismiss = Dismiss::never, .layer = 40,

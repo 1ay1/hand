@@ -417,8 +417,8 @@ if (shot == "select" || shot == "copymode" || shot == "paste" || shot == "quit")
             m.tab().term->select_abs(r0 + 1, 0, r0 + 3, 6, 2);
         }
         if (which == "paste") {
-            m.tab().pending_paste = "sudo pacman -Syu\nrm -rf build\ncmake --build build\n";
-            m.dialog.ask = hand::Ask{.kind = hand::Ask::Kind::paste, .focus = 2}; m.dialog.t = 1.0f;
+            m.dialog.ask = hand::Ask{.kind = hand::Ask::Kind::paste, .focus = 2, .paste = "sudo pacman -Syu\nrm -rf build\ncmake --build build\n"};
+            m.dialog.t = 1.0f;
         }
         if (which == "quit") { m.dialog.ask = hand::Ask{.kind = hand::Ask::Kind::quit, .focus = 1}; m.dialog.t = 1.0f; }
     }}});

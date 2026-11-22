@@ -1,6 +1,7 @@
 // hand::App — the shells (spawn, output, exit) and the clocks.
 
 #include "detail.hpp"
+#include "fx/fx.hpp"
 
 #include <hand/core/shell.hpp>
 
@@ -47,8 +48,7 @@ void App::fit(Model& m) {
     for (std::size_t i = 0; i < m.tab_count(); ++i) {
         Session& se = m.at(i);
         if (!se.term || (cols == se.term->cols() && rows == se.term->rows())) continue;
-        se.term->resize(cols, rows);
-        if (se.pty) se.pty->resize(cols, rows, static_cast<int>(m.size.x), static_cast<int>(m.size.y));
+        se.term->resize(cols, rows);   // the pty is told by the drain after this step
         se.grid_key = 0;
     }
 }
@@ -108,20 +108,18 @@ App::Session App::spawn_session(Model& m, const std::string& cwd) {
     se.sid = m.session_ids.next();
     se.opened_at = m.time;
     se.term = std::make_shared<Term>(std::max(m.metrics.fit_cols, 2), std::max(m.metrics.fit_rows, 1), m.palette,
-                                     static_cast<int>(m.cfg.scrollback));
+                                     static_cast<int>(m.cfg.scrollback), m.env.entropy ^ se.sid.get());
     if (m.cfg.demo) return se;
     // `-e CMD`: a bare program runs as is; a command line (arguments, pipes)
     // goes through sh -c, the way every terminal's -e behaves
     const bool cmdline = !m.cfg.shell_cli.empty() && m.cfg.shell_cli.find_first_of(" \t|;&<>$'\"") != std::string::npos;
-    const std::string shell = cmdline ? std::string{"/bin/sh"}
-                                      : Pty::resolve_shell(m.cfg.shell_cli.empty() ? m.cfg.shell : m.cfg.shell_cli);
-    ShellLaunch si = m.cfg.shell_integration && !cmdline ? shell_integration(shell) : ShellLaunch{};
-    if (cmdline) si.args = {"-c", m.cfg.shell_cli};
-    if (!cwd.empty()) si.env.emplace_back("PWD", cwd);
-    se.term->set_prompt_protect(!si.reflow_aware);
-    se.pty = PtyRef::make({.cols = m.metrics.fit_cols, .rows = m.metrics.fit_rows, .shell = shell,
-                           .env = si.env, .args = si.args, .cwd = cwd});
-    if (!se.pty) (void)se.term->feed("\x1b[31mhand: could not start a shell\x1b[0m\r\n");
+    Launch l{.spec = {.cols = m.metrics.fit_cols, .rows = m.metrics.fit_rows,
+                      .shell = cmdline ? std::string{"/bin/sh"} : m.cfg.shell_cli.empty() ? m.cfg.shell : m.cfg.shell_cli,
+                      .cwd = cwd},
+             .integrate = m.cfg.shell_integration && !cmdline};
+    if (cmdline) l.spec.args = {"-c", m.cfg.shell_cli};
+    if (!cwd.empty()) l.spec.env.emplace_back("PWD", cwd);
+    se.launch = std::move(l);   // the drain after this step starts it (fx::spawn)
     return se;
 }
 
@@ -130,7 +128,7 @@ App::Session App::spawn_ssh(Model& m, const Host& h) {
     se.sid = m.session_ids.next();
     se.opened_at = m.time;
     se.term = std::make_shared<Term>(std::max(m.metrics.fit_cols, 2), std::max(m.metrics.fit_rows, 1), m.palette,
-                                     static_cast<int>(m.cfg.scrollback));
+                                     static_cast<int>(m.cfg.scrollback), m.env.entropy ^ se.sid.get());
     se.link.launched = true;
     se.remote = h;
     // what is about to happen, dimmed, so a slow handshake is not a blank screen
@@ -140,9 +138,10 @@ App::Session App::spawn_ssh(Model& m, const Host& h) {
 }
 
 App::Cmd App::init(Model& m, const Flags& f) {
-    startup::mark("hand: init");
     m.cfg = f.config;
+    m.env = f.env;
     m.fonts = f.fonts;
+    m.wall_ms = m.env.wall_epoch_ms;
     // the monospace families mayag attached (custom_family(0), (1), ...):
     // the choices font.family offers on this machine
     m.cfg.fonts.clear();
@@ -160,22 +159,18 @@ App::Cmd App::init(Model& m, const Flags& f) {
     m.font_size = m.cfg.font_size;
     m.strip.t = m.cfg.strip_always() ? 1.0f : 0.0f;
     fit(m);
-    // the host book: prod detection on tabs needs it before the picker ever opens
-    if (!m.cfg.demo) {
-        m.ssh.sources = resolve(detail::host_sources(m.cfg));
-        m.ssh.book = hosts_load(m.ssh.sources);
-    }
-    startup::mark("hand: init: host book");
+    m.ssh.sources = detail::host_sources(m);
     m.tab() = spawn_session(m, "");   // Tabs starts with one empty session: the shell goes in it
-    startup::mark("hand: init: shell spawned");
+    std::vector<Cmd> cmds;
+    cmds.push_back(SetTitle{"hand"});
+    // the host book (prod detection on tabs needs it before the picker ever opens)
+    if (!m.cfg.demo) cmds.push_back(Cmd::run(fx::load_hosts, m.ssh.sources, false));
     if (m.cfg.files_open) {
-        std::vector<Cmd> cmds;
-        cmds.push_back(SetTitle{"hand"});
         cmds.push_back(update(m, TogglePane{}));
         m.pane.ui.focused = false;   // the shell has the keyboard at start
-        return Cmd::batch(std::move(cmds));
     }
-    return SetTitle{"hand"};
+    cmds.push_back(drain(m));   // the first shell starts with the first step
+    return Cmd::batch(std::move(cmds));
 }
 
 namespace {
@@ -183,8 +178,8 @@ namespace {
 /// command finishing there is announced, naming the tab.
 void feed_background(Model& m, std::size_t i, const std::string& bytes) {
     Session& se = m.at(i);
-    const Effects fx = se.term->feed(bytes);
-    if (!fx.reply.empty() && se.pty) se.pty->write(fx.reply);
+    const Effects fx = se.term->feed(bytes, m.wall_ms);
+    se.input += fx.reply;   // query answers go back to the program
     if (fx.title_set) se.title = fx.title.empty() ? "hand" : fx.title;
     if (fx.bell) se.bell = true;
     se.unread = true;
@@ -212,11 +207,11 @@ App::Cmd App::update(Model& m, Output o) {
     } give_back{o.credit};
     if (o.sid != kNoSession && o.sid != m.tab().sid) {   // a background tab (or a shell already gone)
         if (const auto i = m.tabs.find(o.sid)) feed_background(m, *i, o.bytes);
-        return {};
+        return probe_soon(m);
     }
     m.tab().bytes += o.bytes.size();
     const int off0 = m.tab().term->scroll_offset(), hist0 = m.tab().term->history();
-    const Effects fx = m.tab().term->feed(o.bytes);
+    const Effects fx = m.tab().term->feed(o.bytes, m.wall_ms);
     {   // toe keeps a scrolled-back view still by bumping its offset: follow it
         const int off1 = m.tab().term->scroll_offset();
         if (off0 > 0 && off1 != off0) {
@@ -249,7 +244,7 @@ App::Cmd App::update(Model& m, Output o) {
         }
         if (off1 > 0) m.tab().new_below += std::max(m.tab().term->history() - hist0, 0);
     }
-    if (!fx.reply.empty() && m.tab().pty) m.tab().pty->write(fx.reply);
+    m.tab().input += fx.reply;   // query answers go back to the program
     if (fx.bell && (m.cfg.visual_bell || m.cfg.bell_shake)) m.tab().bell_at = m.time;
     m.cursor_on = true;   // output resets the blink, like foot
     m.tab().cur_a = 1.0f;
@@ -272,12 +267,14 @@ App::Cmd App::update(Model& m, Output o) {
         const std::string title = c.exit_code == 0 ? "\u2713 done in " + std::string{took}
                                                    : "\u2717 failed (" + std::to_string(c.exit_code) + ") after " + took;
         if (!m.focused && !m.cfg.demo)
-            spawn_detached({"notify-send", "-a", "hand", "-u", c.exit_code == 0 ? "normal" : "critical", title,
-                            cmd.empty() ? "command finished" : cmd});
+            cmds.push_back(Cmd::run(fx::open_detached, std::vector<std::string>{"notify-send", "-a", "hand", "-u",
+                                                                               c.exit_code == 0 ? "normal" : "critical", title,
+                                                                               cmd.empty() ? "command finished" : cmd}));
         m.toast.card = Toast{.title = title, .body = cmd, .kind = c.exit_code == 0 ? Toast::Kind::success : Toast::Kind::error};
         m.toast.at = m.time;
     }
     if (m.pane.open) cmds.push_back(pane_sync(m));   // a cd lands in the output (OSC 7)
+    cmds.push_back(probe_soon(m));                   // what runs there may have changed
     return Cmd::batch(std::move(cmds));
 }
 
@@ -308,7 +305,102 @@ App::Cmd App::update(Model& m, Exited e) {
     return {};
 }
 
-App::Cmd App::update(Model& m, Clock) {
+// ── the seam ──────────────────────────────────────────────────────────────────
+
+App::Cmd App::update(Model& m, Msg msg, Time now) {
+    // the step's time: jaal read the clock once, every handler agrees on it
+    if (m.began == Time{}) m.began = now;
+    m.now = now;
+    m.wall_ms = m.env.wall_epoch_ms + std::chrono::duration_cast<std::chrono::milliseconds>(now - m.began).count();
+    return step(m, std::move(msg));
+}
+
+App::Cmd App::step(Model& m, Msg msg) {
+    Cmd c = std::visit([&](auto&& domain) -> Cmd {
+        if constexpr (requires { update(m, std::move(domain)); }) {
+            return update(m, std::move(domain));   // Edit: a leaf at the root
+        } else {
+            return std::visit([&](auto&& leaf) -> Cmd { return update(m, std::move(leaf)); }, std::move(domain));
+        }
+    }, static_cast<msg::AnyBase&&>(msg));
+    return Cmd::batch(std::move(c), drain(m));
+}
+
+App::Cmd App::drain(Model& m) {
+    std::vector<Cmd> cmds;
+    for (std::size_t i = 0; i < m.tab_count(); ++i) {
+        Session& se = m.at(i);
+        if (auto l = std::exchange(se.launch, std::nullopt)) {
+            // a new program for this session: whatever it had is gone with its sid
+            se.pty.reset();
+            se.starting = true;
+            se.pty_cols = l->spec.cols;
+            se.pty_rows = l->spec.rows;
+            cmds.push_back(Cmd::run(fx::spawn, se.sid, std::move(*l)));
+        }
+        if (!se.pty) {   // nobody to tell yet: keys typed while it starts wait for it; with no program, they go nowhere
+            if (!se.starting) se.input.clear();
+            continue;
+        }
+        if (se.term && (se.term->cols() != se.pty_cols || se.term->rows() != se.pty_rows)) {
+            se.pty_cols = se.term->cols();
+            se.pty_rows = se.term->rows();
+            cmds.push_back(Cmd::run(fx::pty_resize, se.pty.share(), se.pty_cols, se.pty_rows,
+                                    static_cast<int>(m.size.x), static_cast<int>(m.size.y)));
+        }
+        if (!se.input.empty()) cmds.push_back(Cmd::run(fx::pty_write, se.pty.share(), std::exchange(se.input, {})));
+    }
+    return Cmd::batch(std::move(cmds));
+}
+
+App::Cmd App::update(Model& m, Spawned s) {
+    const auto i = m.tabs.find(s.sid);
+    if (!i) return {};   // closed while it started (its pty dies with this message)
+    Session& se = m.at(*i);
+    se.starting = false;
+    if (!s.pty) {
+        (void)se.term->feed(se.link.launched ? "\x1b[31mhand: could not start ssh\x1b[0m\r\n"
+                                             : "\x1b[31mhand: could not start a shell\x1b[0m\r\n", m.wall_ms);
+        se.grid_key = 0;
+        return {};
+    }
+    se.pty = PtyRef{std::move(*s.pty)};
+    if (!se.link.launched) se.term->set_prompt_protect(!s.reflow_aware);
+    return probe_soon(m);   // the drain after this step sends what was typed meanwhile, and any new size
+}
+
+App::Cmd App::probe_soon(Model& m) {
+    // throttled, not debounced: a firehose (`yes`) still gets a probe every 400 ms
+    if (m.probe_due || m.cfg.demo) return {};
+    m.probe_due = true;
+    return Cmd::after(std::chrono::milliseconds(400), Msg{Probe{}});
+}
+
+App::Cmd App::update(Model& m, Probe) {
+    m.probe_due = false;
+    if (m.cfg.demo) return {};
+    std::vector<fx::ProbeTab> tabs;
+    for (std::size_t i = 0; i < m.tab_count(); ++i) {
+        const Session& se = m.at(i);
+        fx::ProbeTab t{.sid = se.sid, .was = se.proc, .watch_ssh = !se.link.launched, .had_remote = se.remote.has_value()};
+        if (se.pty) t.pty = se.pty.share();
+        tabs.push_back(std::move(t));
+    }
+    return Cmd::run(fx::probe, std::move(tabs));
+}
+
+App::Cmd App::update(Model& m, Probed p) {
+    for (auto& t : p.tabs) {
+        const auto i = m.tabs.find(t.sid);
+        if (!i) continue;
+        Session& se = m.at(*i);
+        se.proc = std::move(t.proc);
+        if (!se.link.launched) se.remote = std::move(t.remote);   // a launched tab knows its host
+    }
+    return {};
+}
+
+App::Cmd App::update(Model& m, Second) {
     ++m.clock;
     m.tab().grid_key = 0;
     // one activity sample a second per tab: bytes in, as a 0..1 rate

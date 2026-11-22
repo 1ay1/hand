@@ -79,7 +79,7 @@ std::optional<App::Msg> App::on(const Model& m, const KeyEvent& k_in) {
     if (cs && k.key == Key::h) return ToggleManager{};
     if (m.ssh.manager.open) {   // the host manager has the keyboard
         if (k.key == Key::ctrl || k.key == Key::shift || k.key == Key::alt || k.key == Key::super) return std::nullopt;
-        if (auto op = ssh_manager_key(m.ssh.manager.ui, picker_hosts(m), unix_now(), k.key, md, &m.ssh.manager.files)) return Manager{std::move(*op)};
+        if (auto op = ssh_manager_key(m.ssh.manager.ui, picker_hosts(m), unix_now(m), k.key, md, &m.ssh.manager.files)) return Manager{std::move(*op)};
         return Swallow{};   // never to the shell underneath
     }
     if (m.ssh.picker.open) {   // the host picker has the keyboard
@@ -188,7 +188,7 @@ std::optional<App::Msg> App::on(const Model& m, const ComposeEndEvent&) {
 std::optional<App::Msg> App::on(const Model& m, const TextEvent& t) {
     const Session& se = m.tab();
     if (m.ssh.manager.open) {
-        if (auto op = ssh_manager_text(m.ssh.manager.ui, picker_hosts(m), unix_now(), t.text)) return Manager{std::move(*op)};
+        if (auto op = ssh_manager_text(m.ssh.manager.ui, picker_hosts(m), unix_now(m), t.text)) return Manager{std::move(*op)};
         return Swallow{};
     }
     if (m.ssh.picker.open)

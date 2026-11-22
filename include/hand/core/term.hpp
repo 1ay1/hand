@@ -35,7 +35,8 @@ struct Effects {
 
 class Term {
   public:
-    Term(int cols, int rows, const Palette& pal, int scrollback = 10000);
+    /// `entropy` seeds the DEC 2034 tokens (toe never reads the OS).
+    Term(int cols, int rows, const Palette& pal, int scrollback = 10000, std::uint64_t entropy = 0);
     ~Term();
     Term(Term&&) noexcept;
     Term& operator=(Term&&) noexcept;
@@ -44,7 +45,9 @@ class Term {
     [[nodiscard]] int rows() const;
 
     /// Fold pty output into the model.
-    Effects feed(std::string_view bytes);
+    /// Fold output in. `now_ms`: when it arrived on the wall clock (unix
+    /// ms), the time OSC 133 command blocks are stamped with.
+    Effects feed(std::string_view bytes, std::int64_t now_ms = 0);
     void resize(int cols, int rows);
     /// Swap the colour scheme live (keeps colours the app set via OSC 4).
     void set_palette(const Palette& p);

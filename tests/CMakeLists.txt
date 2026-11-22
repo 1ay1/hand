@@ -2,6 +2,8 @@
 #
 #   app_headless                 the self-test: a real shell in a headless window (hand --headless)
 #   layering                     hand -> mayag (public) -> jaal, and hand's own layers (tests/layering.cmake)
+#   purity                       update / input / view never reach the world: effects live in src/app/fx
+#                                (tests/purity.cmake)
 #   concurrency                  jaal's banlist over hand: no raw thread / mutex / atomic / detach /
 #                                thread_local / future / const_cast outside tests/allow_raw.txt
 #   concurrency_allowlist_tight  every grant in tests/allow_raw.txt is still used (the list cannot rot)
@@ -14,6 +16,7 @@ set(_MAYAG     ${PROJECT_SOURCE_DIR}/external/mayag)
 
 add_test(NAME app_headless COMMAND hand --headless --last-resort)
 add_test(NAME layering COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/layering.cmake)
+add_test(NAME purity COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/purity.cmake)
 
 # jaal's banlist takes one root; hand's sources and headers are two
 foreach(part src include/hand)
@@ -35,6 +38,6 @@ add_test(NAME mayag_concurrency
                  -DALLOW=${_MAYAG}/tests/lint/allow_include.txt -P ${_JAAL_LINT}/banlist.cmake)
 add_test(NAME jaal_upward
          COMMAND ${CMAKE_COMMAND} -DROOT=${_MAYAG}/third_party/jaal -P ${_JAAL_LINT}/layering.cmake)
-set_tests_properties(layering concurrency_src concurrency_include_hand concurrency_allowlist_tight_src
+set_tests_properties(layering purity concurrency_src concurrency_include_hand concurrency_allowlist_tight_src
                      concurrency_allowlist_tight_include_hand mayag_layering mayag_uses_jaal_public_api
                      mayag_concurrency jaal_upward PROPERTIES LABELS "static")

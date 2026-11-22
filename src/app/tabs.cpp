@@ -1,6 +1,7 @@
 // hand::App — tabs: open, close, switch, reorder.
 
 #include "detail.hpp"
+#include "fx/fx.hpp"
 
 #include <hand/core/shell.hpp>
 
@@ -37,14 +38,14 @@ App::Cmd App::update(Model& m, CloseTab c) {
     const std::size_t i = c.tab.get();
     if (i >= m.tab_count()) return {};
     if (c.confirm == Confirm::asking && m.cfg.close_confirm != CloseConfirm::never && !m.dialog.ask) {
-        const bool busy = !busy_of(m.at(i), nullptr).empty();
+        const bool busy = !busy_of(m, m.at(i), nullptr).empty();
         if (busy || m.cfg.close_confirm == CloseConfirm::always) {
             m.dialog.ask = Ask{.kind = m.tab_count() == 1 ? Ask::Kind::quit : Ask::Kind::close_tab, .tab = c.tab, .focus = 1};
             return {};
         }
     }
     if (m.tab_count() == 1) {   // the last one: like foot, the window goes with it
-        if (!m.cfg.demo) (void)config_save(m.cfg, config_path());
+        if (!m.cfg.demo) return Cmd::batch(Cmd::run(fx::save_config, m.cfg, m.env.config_path), Cmd::quit());
         return Cmd::quit();
     }
     if (i == m.active()) {

@@ -22,12 +22,10 @@ inline constexpr float kMinimapRest = 14.0f, kMinimapOpen = 96.0f;
 
 struct Risk { bool flag = false; std::string note; };
 
-/// Where hosts come from: ~/.ssh, and hosts.vibe beside hand.vibe.
-HostSources host_sources(const Config& c);
-/// Seconds on the wall clock (unix), for "3h ago".
-std::int64_t unix_now();
-/// Milliseconds on the wall clock, for command timings.
-std::int64_t wall_ms();
+/// Where hosts come from: ~/.ssh under the run's home, and hosts.vibe beside hand.vibe.
+HostSources host_sources(const Model& m);
+/// This step on the wall clock, in seconds (unix): "3h ago".
+std::int64_t unix_now(const Model& m);
 /// Where the terminal starts (the strip may sit above it or below it).
 float term_top(const Model& m);
 /// Where the terminal starts across (the file pane may dock on the left).
@@ -37,12 +35,10 @@ bool in_pane(const Model& m, float x);
 /// Something in the file pane is still glowing (it changed a moment ago).
 bool pane_glowing(const Model& m);
 bool in_strip(const Model& m, float y);
-/// A clock for caches that must refresh even while the frame clock is idle.
-double mono_s();
-/// The foreground process of a session's shell (cached ~0.5 s, on the wall clock).
-std::string fg_process(const Session& se);
+/// The foreground process of a session's shell, as the last probe found it.
+const std::string& fg_process(const Session& se);
 /// The machine a tab talks to: the host hand launched it on, else the
-/// destination of an `ssh ...` you typed at its shell (cached ~1 s).
+/// destination of an `ssh ...` you typed at its shell (the probe watches).
 const std::optional<Host>& remote_of(const Session& se);
 /// A remote's environment: what hosts.vibe says, else what its name suggests.
 HostEnv remote_env(const Model& m, const Host& h);
@@ -57,13 +53,13 @@ std::optional<Term::Command> sticky_of(const Model& m);
 /// "12.3s", "4m05s", "1h02m"
 std::string pretty_ms(std::int64_t ms);
 /// A path for a header: $HOME as ~, long ones keep their last two parts.
-std::string short_path(std::string p);
+std::string short_path(const Model& m, std::string p);
 /// Does this pasted line deserve a second look?
 Risk risk_of(const std::string& l);
 std::vector<std::string> split_lines(const std::string& text);
 bool is_shell(const std::string& p);
 /// What a tab is busy with ("" = just a prompt), and for how long.
-std::string busy_of(const Session& se, std::string* elapsed);
+std::string busy_of(const Model& m, const Session& se, std::string* elapsed);
 bool minimap_on(const Model& m);
 /// The width the minimap (scrollbar) owns at the right edge right now (0 = none).
 float minimap_w(const Model& m);
@@ -75,13 +71,6 @@ mayag::dsl::CornerControlsProps corner_props(const Model& m);
 bool in_corner(const Model& m, mayag::Vec2 p);
 /// The live tail shows while you read history and the live prompt is off screen.
 bool tail_wanted(const Model& m);
-/// The pty reader: a background stream for as long as the shell lives.
-/// Coalesces bursts (cat of a big file) into one Output per wakeup, and keeps
-/// ONE in flight: it reads on only once the UI has fed the last chunk (the
-/// Output carries an OutputCredit; update gives it back). So a firehose (`yes`) is throttled by the kernel's pty buffer
-/// -- the producer blocks -- instead of piling gigabytes into the mailbox,
-/// starving frames and parking ctrl-C behind seconds of queued output.
-void read_pty(Sink<App::Msg> out, std::stop_token st, mayag::CoOwned<Pty> pty, SessionId sid);
 /// How far below its row the grid is drawn (0..1): a scroll glide between rows
 /// plus the glide of a freshly arrived line at the live prompt.
 float draw_frac(const Model& m);

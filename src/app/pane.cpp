@@ -8,20 +8,13 @@
 // network share or a slow link never stalls a frame.
 
 #include "detail.hpp"
+#include "fx/fx.hpp"
 
-#include <hand/core/proc.hpp>
-#include <hand/core/pty.hpp>
-#include <hand/ssh/sftp.hpp>
 
 #include <mayag/widget/toast.hpp>
 
 #include <algorithm>
 #include <cctype>
-#include <chrono>
-#include <ctime>
-#include <filesystem>
-#include <fstream>
-#include <map>
 
 namespace hand {
 
@@ -31,18 +24,15 @@ using namespace hand::detail;
 
 namespace {
 
-namespace fs = std::filesystem;
-using Sk = Sink<App::Msg>;
-
 std::string lower(std::string s) {
     for (char& ch : s) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
     return s;
 }
 
 /// Is `host` (from OSC 7) this machine?
-bool is_here(const std::string& host) {
+bool is_here(const Model& m, const std::string& host) {
     if (host.empty() || host == "localhost") return true;
-    static const std::string me = lower(proc::host_name());
+    const std::string me = lower(m.env.host_name);
     const std::string h = lower(host);
     return h == me || h.rfind(me + ".", 0) == 0;
 }
@@ -65,176 +55,24 @@ Place place_of(const Model& m) {
         p.where = r->alias;
         p.host = m.ssh.book.find(r->alias) ? *m.ssh.book.find(r->alias) : *r;
         // a remote shell's OSC 7 names its own host; a stale local one does not count
-        if (!osc_dir.empty() && !is_here(osc_host)) p.dir = osc_dir;
+        if (!osc_dir.empty() && !is_here(m, osc_host)) p.dir = osc_dir;
         else p.note = "The remote shell does not report its directory: showing where you log in. Add OSC 7 to its prompt to follow cd.";
         return p;
     }
-    if (!osc_dir.empty() && is_here(osc_host)) p.dir = osc_dir;
+    if (!osc_dir.empty() && is_here(m, osc_host)) p.dir = osc_dir;
     else {
-        std::error_code ec;
-        p.dir = fs::current_path(ec).generic_string();
+        p.dir = m.env.cwd;
         p.note = "This shell does not report its directory (fish, zsh, bash and PowerShell do with shell integration): showing where it started.";
     }
     return p;
 }
 
-std::int64_t unix_of(fs::file_time_type t) {
-    const auto sys = std::chrono::clock_cast<std::chrono::system_clock>(t);
-    return static_cast<std::int64_t>(std::chrono::system_clock::to_time_t(sys));
-}
-
-std::string when_of(std::int64_t epoch_s) {   // not `unix`: a predefined macro in GNU mode
-    const std::time_t tt = static_cast<std::time_t>(epoch_s);
-    std::tm tm{};
-#if defined(_WIN32)
-    localtime_s(&tm, &tt);
-#else
-    localtime_r(&tt, &tm);
-#endif
-    char b[32];
-    std::strftime(b, sizeof b, "%Y-%m-%d %H:%M", &tm);
-    return b;
-}
-
-/// git's view of `dir`'s entries: a file's own status, a folder's the
-/// loudest of what is inside it (conflict > modified > added > deleted >
-/// renamed > untracked). Nothing when `dir` is not in a work tree or git
-/// is not installed.
-void git_marks(const std::string& dir, std::vector<FileEntry>& es) {
-    const auto pre = proc::run({"git", "-C", dir, "rev-parse", "--show-prefix"}, {}, 1500);
-    if (!pre.started || pre.code != 0) return;
-    std::string prefix = pre.out;
-    while (!prefix.empty() && (prefix.back() == '\n' || prefix.back() == '\r')) prefix.pop_back();
-    const auto st = proc::run({"git", "-C", dir, "--no-optional-locks", "status", "--porcelain=v1", "-z", "--untracked-files=normal", "--", "."}, {}, 4000);
-    if (!st.started || st.code != 0) return;
-    const auto rank = [](char g) {
-        switch (g) { case 'U': return 6; case 'M': return 5; case 'A': return 4; case 'D': return 3; case 'R': return 2; case '?': return 1; default: return 0; }
-    };
-    std::map<std::string, char> mark;
-    std::size_t i = 0;
-    const std::string& o = st.out;
-    while (i < o.size()) {
-        const auto end = o.find('\0', i);
-        const std::string rec = o.substr(i, end == std::string::npos ? std::string::npos : end - i);
-        i = end == std::string::npos ? o.size() : end + 1;
-        if (rec.size() < 4) continue;
-        const char x = rec[0], y = rec[1];
-        if (x == 'R' || x == 'C') {   // the original name follows as its own record
-            const auto e2 = o.find('\0', i);
-            i = e2 == std::string::npos ? o.size() : e2 + 1;
-        }
-        char code;
-        if (x == '?') code = '?';
-        else if (x == 'U' || y == 'U' || (x == 'A' && y == 'A') || (x == 'D' && y == 'D')) code = 'U';
-        else {
-            code = y != ' ' ? y : x;
-            if (code == 'T') code = 'M';
-            if (code == 'C') code = 'A';
-        }
-        const std::string path = rec.substr(3);
-        if (path.compare(0, prefix.size(), prefix) != 0) continue;
-        const std::string rel = path.substr(prefix.size());
-        const std::string first = rel.substr(0, rel.find('/'));
-        if (first.empty()) continue;
-        char& m = mark[first];
-        if (rank(code) > rank(m)) m = code;
-    }
-    for (auto& e : es)
-        if (const auto it = mark.find(e.name); it != mark.end()) e.git = it->second;
-}
-
-App::PaneListed list_local(std::uint64_t token, const std::string& dir, bool git) {
-    App::PaneListed r{token, dir, {}, {}};
-    std::error_code ec;
-    fs::directory_iterator it{fs::path{dir}, fs::directory_options::skip_permission_denied, ec};
-    if (ec) { r.error = ec.message(); return r; }
-    for (; it != fs::directory_iterator{}; it.increment(ec)) {
-        if (ec) break;
-        FileEntry e;
-        e.name = it->path().filename().string();
-        std::error_code e2;
-        e.link = it->is_symlink(e2);
-        e.dir = it->is_directory(e2);
-        if (!e.dir) e.size = it->file_size(e2);
-        if (const auto t = it->last_write_time(e2); !e2) {
-            e.mtime = unix_of(t);
-            e.when = when_of(e.mtime);
-        }
-        if (e.link) e.target = fs::read_symlink(it->path(), e2).generic_string();
-        r.entries.push_back(std::move(e));
-    }
-    std::stable_sort(r.entries.begin(), r.entries.end(), [](const FileEntry& a, const FileEntry& b) {
-        if (a.dir != b.dir) return a.dir;
-        return lower(a.name) < lower(b.name);
-    });
-    if (git) git_marks(dir, r.entries);
-    return r;
-}
-
-/// The head of a file (its first lines, made printable), or a folder's
-/// first entries. Binary files say so instead.
-std::optional<FilePreview> read_preview(const std::string& path, int max_lines) {
-    namespace d = file_pane_detail;
-    max_lines = std::clamp(max_lines, 1, 40);
-    FilePreview pv;
-    const fs::path fp{path};
-    pv.name = fp.filename().string();
-    std::error_code ec;
-    if (fs::is_directory(fp, ec)) {
-        std::vector<std::pair<bool, std::string>> kids;
-        std::size_t n = 0;
-        for (fs::directory_iterator it{fp, fs::directory_options::skip_permission_denied, ec}; !ec && it != fs::directory_iterator{}; it.increment(ec)) {
-            ++n;
-            std::error_code e2;
-            if (kids.size() < 400) kids.push_back({it->is_directory(e2), it->path().filename().string()});
-        }
-        std::sort(kids.begin(), kids.end(), [](const auto& a, const auto& b) {
-            if (a.first != b.first) return a.first;
-            return lower(a.second) < lower(b.second);
-        });
-        for (const auto& [dir, name] : kids) {
-            if (static_cast<int>(pv.lines.size()) >= max_lines) break;
-            pv.lines.push_back(dir ? name + "/" : name);
-        }
-        pv.note = n == 1 ? "1 item" : std::to_string(n) + " items";
-        return pv;
-    }
-    std::ifstream f(fp, std::ios::binary);
-    if (!f) return std::nullopt;
-    const auto size = fs::file_size(fp, ec);
-    std::string buf(16384, '\0');
-    f.read(buf.data(), static_cast<std::streamsize>(buf.size()));
-    buf.resize(static_cast<std::size_t>(f.gcount()));
-    if (buf.find('\0') != std::string::npos) {
-        pv.note = "binary \u00B7 " + d::human(ec ? 0 : size);
-        return pv;
-    }
-    pv.note = d::human(ec ? 0 : size);
-    std::string cur;
-    const auto push = [&] {
-        if (cur.size() > 180) {   // cut on a character boundary
-            std::size_t k = 180;
-            while (k > 0 && (static_cast<unsigned char>(cur[k]) & 0xC0) == 0x80) --k;
-            cur.resize(k);
-        }
-        pv.lines.push_back(std::move(cur));
-        cur.clear();
-    };
-    for (std::size_t i = 0; i < buf.size() && static_cast<int>(pv.lines.size()) < max_lines; ++i) {
-        const char ch = buf[i];
-        if (ch == '\n') push();
-        else if (ch == '\t') cur.append(4 - cur.size() % 4, ' ');
-        else if (static_cast<unsigned char>(ch) >= 0x20 || ch < 0) cur.push_back(ch);
-    }
-    if (!cur.empty() && static_cast<int>(pv.lines.size()) < max_lines) push();
-    return pv;
-}
 
 /// The path as a shell argument: PowerShell, cmd and POSIX quote differently.
 std::string shell_quote(const Model& m, const std::string& path) {
     if (m.pane.where.empty()) {
 #if defined(_WIN32)
-        const std::string sh = lower(Pty::resolve_shell(m.cfg.shell));
+        const std::string sh = lower((m.cfg.shell.empty() ? m.env.shell : m.cfg.shell));
         if (sh.find("cmd") != std::string::npos) return "\"" + path + "\"";
         std::string q = "'";   // PowerShell: '' is a quote
         for (char ch : path) q += ch == '\'' ? std::string{"''"} : std::string(1, ch);
@@ -248,7 +86,7 @@ std::string shell_quote(const Model& m, const std::string& path) {
 
 std::string cd_command(const Model& m, const std::string& path) {
 #if defined(_WIN32)
-    if (m.pane.where.empty() && lower(Pty::resolve_shell(m.cfg.shell)).find("cmd") != std::string::npos)
+    if (m.pane.where.empty() && lower((m.cfg.shell.empty() ? m.env.shell : m.cfg.shell)).find("cmd") != std::string::npos)
         return "cd /d " + shell_quote(m, path);
 #endif
     return "cd " + shell_quote(m, path);
@@ -273,7 +111,7 @@ FilePaneProps pane_props(const Model& m) {
     p.note = m.pane.note;
     p.width = m.pane.width;
     p.left = m.cfg.files_left;
-    p.now = unix_now();
+    p.now = unix_now(m);
     p.dirs_first = m.cfg.files_dirs_first;
     p.git = m.cfg.files_git;
     p.size_bars = m.cfg.files_size_bars;
@@ -283,12 +121,7 @@ FilePaneProps pane_props(const Model& m) {
     if (m.cfg.files_preview && m.pane.preview && !m.pane.preview_path.empty()) p.preview = m.pane.preview;
     std::string shown = m.pane.path;
     if (m.pane.where.empty()) {   // ~ for home, as the shell writes it
-        std::string home;
-#if defined(_WIN32)
-        if (const char* u = std::getenv("USERPROFILE"); u && *u) home = u;
-#else
-        if (const char* u = std::getenv("HOME"); u && *u) home = u;
-#endif
+        std::string home = m.env.home;
         for (char& ch : home) if (ch == '\\') ch = '/';
         while (home.size() > 1 && home.back() == '/') home.pop_back();
         p.home = home;
@@ -320,22 +153,9 @@ static App::Cmd pane_list(Model& m, std::string dir, bool quiet = false) {
     }
     const std::uint64_t token = ++m.pane.token;
     if (m.pane.where.empty())   // read-only, so even demo shots list for real
-        return App::Cmd::task([](Sk out, std::uint64_t tk, std::string d, bool git, bool q) {
-            auto r = list_local(tk, d, git);
-            r.notice = q ? App::Notice::quiet : App::Notice::loud;
-            out.send(App::Msg{std::move(r)});
-        }, token, std::move(dir), m.cfg.files_git, quiet);
+        return App::Cmd::task(fx::list_local, token, std::move(dir), m.cfg.files_git, quiet);
     if (!m.pane.host || m.cfg.demo) return {};
-    return App::Cmd::task([](Sk out, std::uint64_t tk, Host h, HostBook book, std::string d, bool q) {
-        const auto l = sftp::list(h, book, d);
-        App::PaneListed r{tk, l.path.empty() ? d : l.path, {}, l.error, q ? App::Notice::quiet : App::Notice::loud};
-        for (const auto& e : l.entries) {
-            FileEntry f;
-            f.name = e.name; f.dir = e.dir; f.link = e.link; f.size = e.size; f.when = e.when; f.target = e.target;
-            r.entries.push_back(std::move(f));
-        }
-        out.send(App::Msg{std::move(r)});
-    }, token, *m.pane.host, m.ssh.book, std::move(dir), quiet);
+    return App::Cmd::task(fx::list_remote_pane, token, *m.pane.host, m.ssh.book, std::move(dir), quiet);
 }
 
 /// The selection's preview: read it (a task) when the selection moved.
@@ -350,8 +170,7 @@ static App::Cmd pane_preview(Model& m) {
     const std::string path = file_pane_detail::join(m.pane.path, e.name, '/');
     if (path == m.pane.preview_path) return {};
     m.pane.preview_path = path;
-    return App::Cmd::task([](Sk out, std::string p, int n) { out.send(App::Msg{App::PanePreview{p, read_preview(p, n)}}); },
-                          path, static_cast<int>(m.cfg.files_preview_lines));
+    return App::Cmd::task(fx::preview_local, path, static_cast<int>(m.cfg.files_preview_lines));
 }
 
 App::Cmd App::update(Model& m, PanePreview p) {
@@ -483,7 +302,7 @@ App::Cmd App::update(Model& m, PaneOp p) {
             }
             case A::Kind::cd:
                 if (!at_prompt()) break;
-                m.tab().pty->write(cd_command(m, a.path) + "\r");
+                m.tab().input += cd_command(m, a.path) + "\r";
                 m.pane.follow = true;   // the shell goes there; the pane goes with it
                 m.pane.followed = a.path;
                 if (m.pane.path != a.path) cmds.push_back(pane_list(m, a.path));
@@ -491,7 +310,7 @@ App::Cmd App::update(Model& m, PaneOp p) {
                 break;
             case A::Kind::paste:
                 if (!at_prompt()) break;
-                m.tab().pty->write(shell_quote(m, a.path) + " ");
+                m.tab().input += shell_quote(m, a.path) + " ";
                 m.pane.ui.focused = false;
                 break;
             case A::Kind::copy_path:
@@ -499,11 +318,11 @@ App::Cmd App::update(Model& m, PaneOp p) {
                 cmds.push_back(WriteClipboard{a.path});
                 break;
             case A::Kind::reveal:
-                if (m.pane.where.empty() && !m.cfg.demo) proc::reveal(a.path);
+                if (m.pane.where.empty() && !m.cfg.demo) cmds.push_back(Cmd::run(fx::reveal, a.path));
                 break;
             case A::Kind::open:
                 if (m.pane.where.empty()) {
-                    if (!m.cfg.demo) proc::open_path(a.path);
+                    if (!m.cfg.demo) cmds.push_back(Cmd::run(fx::open_path, a.path));
                     break;
                 }
                 [[fallthrough]];
@@ -511,18 +330,12 @@ App::Cmd App::update(Model& m, PaneOp p) {
                 if (m.pane.where.empty() || !m.pane.host || m.cfg.demo) break;
                 const std::string name = a.path.substr(a.path.find_last_of('/') + 1);
                 m.pane.busy = "Downloading " + name + "\u2026";
-                cmds.push_back(Cmd::task([](Sk out, Host h, HostBook book, std::string remote, std::string nm) {
-                    const std::string dir = proc::downloads_dir();
-                    const std::string err = sftp::get(h, book, {remote}, dir);
-                    out.send(App::Msg{App::FilesDone{h.alias, "", "Downloaded " + nm, err, dir + "/" + nm}});
-                }, *m.pane.host, m.ssh.book, a.path, name));
+                cmds.push_back(Cmd::task(fx::download, *m.pane.host, m.ssh.book, a.path, name));
                 break;
             }
             case A::Kind::upload:
                 if (m.pane.where.empty() || m.cfg.demo) break;
-                cmds.push_back(Cmd::task([](Sk out, std::string alias, std::string dir) {
-                    out.send(App::Msg{App::UploadPicked{alias, dir, proc::pick_files("Upload to " + dir)}});
-                }, m.pane.where, a.path));
+                cmds.push_back(Cmd::task(fx::pick_upload, m.pane.where, a.path));
                 break;
             case A::Kind::close:
                 m.pane.open = false;
