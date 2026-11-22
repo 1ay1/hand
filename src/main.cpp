@@ -79,24 +79,26 @@ std::shared_ptr<typo::FontStack> load_fonts(bool system) {
         startup::mark("  fonts: default stack");
         (void)typo::system::attach_family(*s, FontFamily::mono, mono);
         startup::mark("  fonts: mono family");
-        // the platform's UI face (SF Pro, Segoe, Inter, Cantarell...) for window
-        // chrome that reads as an app, not a terminal: the settings window
-        {
-            std::vector<std::string_view> ui{"Inter", "Inter Variable"};
-            for (auto f : typo::system::ui_font_families()) ui.push_back(f);
-            for (auto f : {"Noto Sans", "Cantarell", "DejaVu Sans"}) ui.push_back(f);
-            (void)typo::system::attach_family(*s, FontFamily::display, ui);
-        }
-        startup::mark("  fonts: display family");
         // every installed candidate into its own role (config.hpp), once per
-        // family: the choices font.family and font.ui offer
+        // DESIGN: the choices font.family and font.ui offer. A menu of fonts is
+        // a menu of looks, so it leaves out what isn't one: a second build of
+        // a face already listed ("Inter Variable" after "Inter") and the
+        // metric-compatible stand-ins distros install so documents keep their
+        // layout (Liberation, Nimbus, Free*: Arial and Courier clones).
+        const auto offered = [](std::string_view fam, const std::vector<std::string>& got) {
+            for (std::string_view clone : {"Liberation ", "Nimbus ", "FreeMono", "FreeSans", "Arimo", "Cousine", "Tinos"})
+                if (fam.starts_with(clone)) return false;
+            for (const auto& g : got)   // the same design under another build name
+                if (fam.size() > g.size() && fam.starts_with(g) && fam[g.size()] == ' ') return false;
+            return true;
+        };
         const auto preload = [&](std::span<const std::string_view> cands, std::size_t cap, auto role) {
             const auto& db = typo::system::Database::instance();
             std::vector<std::string> got;
             for (auto cand : cands) {
                 if (got.size() >= cap) break;
                 const typo::system::FontEntry* e = db.first_available(std::array{cand});
-                if (e == nullptr || std::find(got.begin(), got.end(), e->family) != got.end()) continue;
+                if (e == nullptr || std::find(got.begin(), got.end(), e->family) != got.end() || !offered(e->family, got)) continue;
                 const std::array<std::string_view, 1> one{cand};
                 if (auto a = typo::system::attach_family(*s, role(got.size()), one)) got.push_back(a->name);
             }
