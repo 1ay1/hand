@@ -135,6 +135,14 @@ if (shot == "flood") {   // a real shell running a firehose: frames keep coming,
                 frames, secs, frames / secs, worst, mbps, rss_mb(), stop_ms);
     return (worst < 100.0 && rss_mb() < 400.0 && stop_ms < 1000.0) ? 0 : 1;
 }
+if (shot == "rows") {   // where glyphs sit in their cells: inverse video makes each cell's box visible
+    rt.send(hand::App::Msg{hand::App::Output{"\x1b[2J\x1b[H\x1b[7mHxgM\x1b[0m \x1b[7m|_^Ag\x1b[0m\r\n\x1b[7mHHHH\x1b[0m\r\n"}});
+    for (int i = 0; i < 4; ++i) rt.tick();
+    const auto& mt = rt.model().metrics;
+    std::printf("rows: cell %.3f x %.3f  origin %.3f,%.3f  top %.3f  left %.3f  font %.2f  line_height %.2f (scale 2)\n",
+                mt.cell_w, mt.cell_h, mt.origin_x, mt.origin_y, hand::detail::term_top(rt.model()),
+                hand::detail::term_left(rt.model()), rt.model().font_size, rt.model().cfg.line_height);
+}
 if (shot == "corner") {   // tabs.always off: the window's buttons alone in the corner
     rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) {
         m.cfg.tabs_always = false; m.strip.t = 0.0f; hand::App::fit(m); }}});

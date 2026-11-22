@@ -10,6 +10,7 @@
 #   mayag_*                      mayag's own walls, run from here so a hand build checks every layer:
 #                                its layers, its public use of jaal, and jaal's banlist over mayag
 #   jaal_upward                  jaal names nothing above it
+#   mayag_one_look               mayag's graphics are one source on every platform
 
 set(_JAAL_LINT ${PROJECT_SOURCE_DIR}/external/mayag/third_party/jaal/tests/lint)
 set(_MAYAG     ${PROJECT_SOURCE_DIR}/external/mayag)
@@ -38,6 +39,9 @@ add_test(NAME mayag_concurrency
                  -DALLOW=${_MAYAG}/tests/lint/allow_include.txt -P ${_JAAL_LINT}/banlist.cmake)
 add_test(NAME jaal_upward
          COMMAND ${CMAKE_COMMAND} -DROOT=${_MAYAG}/third_party/jaal -P ${_JAAL_LINT}/layering.cmake)
+add_test(NAME mayag_one_look
+         COMMAND ${CMAKE_COMMAND} -DROOT=${_MAYAG}/include/mayag -DALLOW=${_MAYAG}/tests/lint/allow_one_look.txt
+                 -P ${_MAYAG}/tests/lint/one_look.cmake)
 set_tests_properties(layering purity concurrency_src concurrency_include_hand concurrency_allowlist_tight_src
                      concurrency_allowlist_tight_include_hand mayag_layering mayag_uses_jaal_public_api
-                     mayag_concurrency jaal_upward PROPERTIES LABELS "static")
+                     mayag_concurrency jaal_upward mayag_one_look PROPERTIES LABELS "static")
