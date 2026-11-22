@@ -168,6 +168,7 @@ Msg ─┬─ ShellMsg    Output Exited Spawned Probe Probed
      ├─ SshMsg      OpenHosts HostsKey ConnectHost ConnectTyped Reconnect HostsLoaded
      ├─ ManagerMsg  ToggleManager Manager FilesListed FilesDone UploadPicked TunnelProbe TunnelScan
      ├─ PaneMsg     TogglePane PaneOp PaneListed PaneResize PaneWatch PanePreview
+     ├─ EditorMsg   OpenFile FileLoaded EditorOp FileSaved EditorPasted   (a file in a tab)
      └─ Edit        a direct model edit -- the self-test and shots only
 ```
 
@@ -228,6 +229,7 @@ domain's file.
 | Panel, ToggleSettings | `src/app/settings.cpp` |
 | SshMsg, ManagerMsg | `src/app/ssh.cpp` |
 | PaneMsg    | `src/app/pane.cpp`      |
+| EditorMsg  | `src/app/editor.cpp` — files in tabs (mayag `text_editor`; view in `src/view/editor.cpp`) |
 | (input: keys) | `src/app/input_keys.cpp` — chords, text, the input method → Msg |
 | (input: pointer) | `src/app/input_pointer.cpp` — wheel, press/move/release → Msg |
 | (input: widgets) | `src/app/input_widgets.cpp` — resize, focus, gestures on nodes → Msg |
