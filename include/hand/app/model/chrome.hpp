@@ -22,7 +22,8 @@ struct StripModel {
     float  switch_t = 1.0f;                ///< the content's slide on a tab switch, 0..1
     int    switch_dir = 0;                 ///< -1 came from the right, +1 from the left
     int    drag_tab = -1;                  ///< a tab being dragged to reorder (-1: none)
-    float  drag_dx = 0.0f;
+    float  drag_dx = 0.0f;                 ///< the pointer's offset from the dragged tab's slot
+    float  drag_shift = 0.0f;              ///< slots the tab moved this drag, in px (travel - shift = drag_dx)
     bool   show_numbers = false;           ///< alt held: alt+N hints on the tabs
     double numbers_at = -10.0;
 };

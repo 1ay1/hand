@@ -28,8 +28,6 @@ float App::Model::strip_h() const noexcept {
 }
 
 void App::fit(Model& m) {
-    // a re-wrap of at most this many cells (~2.5 ms) is done live during a drag
-    constexpr std::int64_t kLiveReflowCells = 300'000;
     // the file pane takes the right side; the terminal keeps at least ~320 px
     if (m.pane.open) m.pane.width = std::clamp(m.pane.width, 220.0f, std::max(220.0f, std::min(640.0f, m.win.x - 320.0f)));
     const float side = m.pane.open ? m.pane.width : 0.0f;
@@ -50,12 +48,14 @@ void App::fit(Model& m) {
     // The grids follow too when that is cheap -- a re-wrap costs ~8 ns a cell
     // of history, so a tab with a few thousand lines re-wraps live, like
     // kitty or foot. A big one (10k lines: ~14 ms) would drop frames under
-    // the pointer: it keeps its size, drawn clipped or short, and fits once
-    // the drag pauses (PaneSettle). Background tabs always wait.
+    // the pointer: it keeps its size, drawn clipped or short, and fits when
+    // the grip is released. Background tabs always wait. The budget is
+    // kFrameReflowCells; the pane_drag self-test holds every frame to it.
     if (m.pane.dragging) {
         Session& se = m.tab();
-        const std::int64_t cells = static_cast<std::int64_t>(se.term ? se.term->history() + rows : 0) * cols;
-        if (se.term && cells <= kLiveReflowCells && (cols != se.term->cols() || rows != se.term->rows())) {
+        const auto cells = static_cast<std::uint64_t>(se.term ? se.term->history() + se.term->rows() : 0) *
+                           static_cast<std::uint64_t>(se.term ? se.term->cols() : 0);
+        if (se.term && cells <= kFrameReflowCells && (cols != se.term->cols() || rows != se.term->rows())) {
             se.term->resize(cols, rows);
             se.grid_key = 0;
         }

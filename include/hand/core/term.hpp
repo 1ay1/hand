@@ -49,6 +49,9 @@ class Term {
     /// ms), the time OSC 133 command blocks are stamped with.
     Effects feed(std::string_view bytes, std::int64_t now_ms = 0);
     void resize(int cols, int rows);
+    /// Cells moved by re-wraps so far (history + screen, per resize): the
+    /// cost a caller must keep out of interactive frames.
+    [[nodiscard]] std::uint64_t reflowed_cells() const noexcept { return reflowed_cells_; }
     /// Swap the colour scheme live (keeps colours the app set via OSC 4).
     void set_palette(const Palette& p);
     /// Change scrollback capacity (drops history beyond it).
@@ -187,6 +190,7 @@ class Term {
     mutable std::uint64_t mm_key_ = 0;
     std::uint64_t         epoch_ = 1;
     std::uint64_t         content_epoch_ = 1;   ///< output / resize / palette only (not scrolling)
+    std::uint64_t         reflowed_cells_ = 0;  ///< see reflowed_cells()
 };
 
 }  // namespace hand

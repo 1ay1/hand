@@ -71,7 +71,7 @@ struct App {
     using FilesListed = msg::FilesListed; using FilesDone = msg::FilesDone; using UploadPicked = msg::UploadPicked;
     using TunnelProbe = msg::TunnelProbe; using TunnelScan = msg::TunnelScan;
     using TogglePane = msg::TogglePane; using PaneOp = msg::PaneOp;         using PaneListed = msg::PaneListed;
-    using PaneResize = msg::PaneResize; using PaneSettle = msg::PaneSettle; using PaneWatch = msg::PaneWatch;   using PanePreview = msg::PanePreview;
+    using PaneResize = msg::PaneResize; using PaneWatch = msg::PaneWatch;   using PanePreview = msg::PanePreview;
     using Notice = msg::Notice;
     using Spawned = msg::Spawned;       using Probe = msg::Probe;           using Probed = msg::Probed;
     using HostsLoaded = msg::HostsLoaded;
@@ -193,7 +193,6 @@ struct App {
     static Cmd update(Model& m, PaneOp);
     static Cmd update(Model& m, PaneListed);
     static Cmd update(Model& m, PaneResize);
-    static Cmd update(Model& m, PaneSettle);
     static Cmd update(Model& m, PaneWatch);
     static Cmd update(Model& m, PanePreview);
     /// The pane follows the active tab's directory: list it if it moved.
@@ -232,6 +231,10 @@ struct App {
     static Session spawn_ssh(Model& m, const Host& h);
     /// Size the grid to what the window holds (the drain tells the ptys).
     static void fit(Model& m);
+    /// The most cells one interactive frame may re-wrap (~2.5 ms of moving
+    /// cells). A drag that would re-wrap more defers it to the drag's end;
+    /// the pane_drag self-test holds every frame of a drag to this.
+    static constexpr std::uint64_t kFrameReflowCells = 300'000;
     /// What the step asked of the ptys, as effects: launches, sizes, input.
     static Cmd drain(Model& m);
     /// Ask the ptys what runs in them, in a moment (at most one pending).

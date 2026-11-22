@@ -90,20 +90,25 @@ App::Cmd App::update(Model& m, MoveTab mv) {
 App::Cmd App::update(Model& m, TabPress p) {
     (void)update(m, SelectTab{p.tab});   // instantly, like a browser
     m.strip.drag_tab = static_cast<int>(m.active());
-    m.strip.drag_dx = 0.0f;
+    m.strip.drag_dx = m.strip.drag_shift = 0.0f;
     return {};
 }
 
 App::Cmd App::update(Model& m, TabDrag d) {
     if (m.strip.drag_tab < 0) return {};
-    m.strip.drag_dx += d.dx;
-    // past half a tab: swap with the neighbour (the pill slides after it)
+    // by position: the pointer's travel since the press, less the slots the
+    // tab has already moved (so the tab stays under the pointer)
     const float tab_w = std::clamp(m.win.x / static_cast<float>(m.tab_count()), 96.0f, 236.0f);
-    if (m.strip.drag_dx > tab_w * 0.5f && m.active() + 1 < m.tab_count()) {
+    m.strip.drag_dx = d.travel.x() - m.strip.drag_shift;
+    // past half a tab: swap with the neighbour (the pill slides after it)
+    while (m.strip.drag_dx > tab_w * 0.5f && m.active() + 1 < m.tab_count()) {
         (void)update(m, MoveTab{Step::forward});
+        m.strip.drag_shift += tab_w;
         m.strip.drag_dx -= tab_w;
-    } else if (m.strip.drag_dx < -tab_w * 0.5f && m.active() > 0) {
+    }
+    while (m.strip.drag_dx < -tab_w * 0.5f && m.active() > 0) {
         (void)update(m, MoveTab{Step::backward});
+        m.strip.drag_shift -= tab_w;
         m.strip.drag_dx += tab_w;
     }
     m.strip.drag_tab = static_cast<int>(m.active());
@@ -112,7 +117,7 @@ App::Cmd App::update(Model& m, TabDrag d) {
 
 App::Cmd App::update(Model& m, TabRelease) {
     m.strip.drag_tab = -1;
-    m.strip.drag_dx = 0.0f;
+    m.strip.drag_dx = m.strip.drag_shift = 0.0f;
     return {};
 }
 

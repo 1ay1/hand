@@ -52,7 +52,7 @@ std::optional<App::Msg> App::on(const Model& m, const Pressed& p) {
 
 std::optional<App::Msg> App::on(const Model& m, const Dragged& d) {
     if (m.strip.drag_tab < 0) return std::nullopt;
-    return TabDrag{d.delta.x};
+    return TabDrag{d.travel};
 }
 
 std::optional<App::Msg> App::on(const Model& m, const Released&) {

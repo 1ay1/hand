@@ -62,7 +62,7 @@ struct SelectTab { TabIndex tab; };
 struct StepTab { Step step; };                                     ///< focus the neighbour
 struct MoveTab { Step step; };                                     ///< reorder the active tab
 struct TabPress { TabIndex tab; };                                 ///< pressed on the strip: select it, start a drag
-struct TabDrag { float dx = 0.0f; };                               ///< the pressed tab dragged by dx px
+struct TabDrag { mayag::DragTravel travel; };                     ///< the pressed tab, dragged this far since the press
 struct TabRelease {};                                              ///< the drag ends
 using TabMsg = std::variant<NewTab, CloseTab, SelectTab, StepTab, MoveTab, TabPress, TabDrag, TabRelease>;
 
@@ -208,11 +208,9 @@ struct PaneListed { std::uint64_t token = 0; std::string path; std::vector<mayag
 /// The pane's edge, dragged. `begin`: pressed (the width now is the base);
 /// then `grow`: the pointer's travel since the press (px wider than the base).
 struct PaneResize { bool begin = false; float grow = 0.0f; bool end = false; };
-/// A pane drag paused (or ended): fit the terminal grids to the new size.
-struct PaneSettle {};
 struct PaneWatch {};                                               ///< re-read the pane's folder (files.watch)
 struct PanePreview { std::string path; std::optional<mayag::dsl::FilePreview> preview; };
-using PaneMsg = std::variant<TogglePane, PaneOp, PaneListed, PaneResize, PaneWatch, PanePreview, PaneSettle>;
+using PaneMsg = std::variant<TogglePane, PaneOp, PaneListed, PaneResize, PaneWatch, PanePreview>;
 
 // ── the root ───────────────────────────────────────────────────────────────
 /// A direct model edit. For the self-test and scripted shots only: the app

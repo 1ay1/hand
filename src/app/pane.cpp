@@ -228,18 +228,15 @@ App::Cmd App::update(Model& m, PaneResize r) {
     // By position: the width at the press plus the pointer's travel since,
     // so the edge stays under the pointer (fit() clamps; summing deltas would
     // carry the clamped-away pixels and drift).
+    // `dragging` is exactly "the grip is held": set by the press, cleared by
+    // the release, by nothing else. (A pause timer used to clear it, so a
+    // pause mid-drag re-wrapped a 10k-line history -- 863k cells, ~14 ms --
+    // under a pointer still held, and the next move dropped the frame.)
     if (r.begin) { m.pane.grab_width = m.pane.width; m.pane.dragging = true; return {}; }
-    if (r.end) return update(m, PaneSettle{});
+    if (r.end) { m.pane.dragging = false; fit(m); return {}; }   // released: every grid fits now
     m.pane.width = m.pane.grab_width + r.grow;
-    fit(m);   // the layout follows the pointer this frame; the grids wait (see fit)
+    fit(m);   // the layout follows the pointer; grids within the frame budget too (see fit)
     m.cfg.files_width = m.pane.width;   // remembered (saved with the settings)
-    // ...until the drag pauses: then the grids fit and the shells redraw once
-    return Cmd::after(mayag::TaskKey{"pane.settle"}, std::chrono::milliseconds(60), Msg{PaneSettle{}});
-}
-
-App::Cmd App::update(Model& m, PaneSettle) {
-    m.pane.dragging = false;
-    fit(m);
     return {};
 }
 
