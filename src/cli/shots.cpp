@@ -357,6 +357,24 @@ if (shot.rfind("files", 0) == 0) {   // the file pane beside a shell in this rep
         rt.settle([](const auto&) { return false; }, std::chrono::milliseconds(20));
         rt.tick();
     }
+    if (shot == "files-narrow" || shot == "files-hover") {   // a narrow pane: long names, a crowded toolbar
+        const float w = shot == "files-hover" ? 190.0f : 240.0f;
+        rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[w](hand::App::Model& m) { m.pane.width = w; m.cfg.files_width = w; }}});
+        for (int i = 0; i < 4; ++i) rt.tick();
+        if (shot == "files-hover") {   // the pointer on the longest name
+            const auto& es = rt.model().pane.entries;
+            std::size_t best = 0, at = 0;
+            const auto vis = mayag::dsl::file_pane_view(es, rt.model().pane.ui, rt.model().cfg.files_dirs_first);
+            for (std::size_t q = 0; q < vis.size(); ++q)
+                if (es[vis[q].i].name.size() > best) { best = es[vis[q].i].name.size(); at = q; }
+            rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[at](hand::App::Model& m) {
+                m.pane.ui.scroll.offset.y = std::max(0.0f, static_cast<float>(at) * 31.0f - 120.0f);
+            }}});
+            for (int i = 0; i < 4; ++i) rt.tick();
+            if (const auto r = rt.node_rect(mayag::dsl::part_id("files.row", at))) rt.window().move_to(r->center());
+            for (int i = 0; i < 8; ++i) rt.tick();
+        }
+    }
 }
 if (shot == "tabs") {
     using E3 = mayag::Edit<hand::App::Model>;

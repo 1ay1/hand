@@ -69,13 +69,13 @@ const std::vector<Row>& rows() {
          GET(c.font_size), SET(c.font_size = v)},
         {"font", "line_height", "row height as a multiple of the size", Kind::number, 1.0f, 2.0f, 0.05f, 2, "\u00D7", 1, none,
          GET(c.line_height), SET(c.line_height = v)},
-        {"font", "files_size", "the file pane's names; auto (all the way left) follows the terminal, zoom included", Kind::number, 7, 24, 0.5f, 1, "px", 1, none,
-         GET(c.files_text_size > 0.0f ? c.files_text_size : 7.0f), SET(c.files_text_size = v < 7.5f ? 0.0f : v)},
         {"font", "ui", "the face of tabs, panels and dialogs (found on this machine)", Kind::cycle, 0, 0, 0, 0, "", 1,
          [](const Config& c) { return c.ui_fonts.empty() ? std::vector<std::string>{"default"} : c.ui_fonts; },
          GET(c.ui_font), SET(c.ui_font = static_cast<int>(v))},
         {"font", "ui_size", "tabs, panels, menus and dialogs, px (ctrl+shift +/- / 0)", Kind::number, 9, 20, 0.5f, 1, "px", 1, none,
          GET(c.ui_font_size), SET(c.ui_font_size = v)},
+        {"font", "ui_follows", "ctrl +/- zooms the interface too, like a browser", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+         GET(c.ui_follows), SET(c.ui_follows = v > 0.5f)},
 
         {"colors", "scheme", "913 schemes from iTerm2-Color-Schemes", Kind::cycle, 0, 0, 0, 0, "", 1, scheme_names,
          GET(scheme_index(c)), SET(c.scheme = static_cast<std::size_t>(v) == default_scheme() ? -1 : static_cast<int>(v))},
@@ -312,12 +312,7 @@ dsl::SettingSpec spec_of(const Row& r, const Config& c, const Config& d) {
     if (sec == "font" && std::string_view{r.key} == "ui_size") s.label = "Interface size";
     if (sec == "font" && std::string_view{r.key} == "family") s.label = "Terminal font";
     if (sec == "font" && std::string_view{r.key} == "size") s.label = "Terminal size";
-    if (sec == "font" && std::string_view{r.key} == "files_size") {
-        s.label = "File list size";
-        char b[32];
-        std::snprintf(b, sizeof b, "auto %.4g", static_cast<double>(c.font_size));   // what it follows, shown
-        s.zero_label = b;
-    }
+    if (sec == "font" && std::string_view{r.key} == "ui_follows") s.label = "Scale interface with terminal";
     s.hint = r.hint;
     s.kind = r.kind;
     s.value = r.get(c);
@@ -522,8 +517,6 @@ std::string config_load(Config& c, const std::string& path) {
                     break;
                 }
                 default: {
-                    // a size that follows another reads "auto" in the file
-                    if (sec == "font" && key == "files_size" && vibe_is_string(x) && std::string_view{vibe_value_string(x)} == "auto") { c.files_text_size = 0.0f; continue; }
                     double d = 0.0;
                     if (vibe_is_integer(x)) d = static_cast<double>(vibe_value_int(x));
                     else if (vibe_is_float(x)) d = vibe_value_float(x);
@@ -559,9 +552,7 @@ bool config_save(const Config& c, const std::string& path) {
                 break;
             }
             default:
-                if (std::string_view{r.section} == "font" && std::string_view{r.key} == "files_size" && c.files_text_size <= 0.0f)
-                    vibe_object_set_string(so, r.key, "auto");
-                else if (integral(r)) vibe_object_set_int(so, r.key, static_cast<std::int64_t>(std::lround(v)));
+                if (integral(r)) vibe_object_set_int(so, r.key, static_cast<std::int64_t>(std::lround(v)));
                 else vibe_object_set_float(so, r.key, std::round(static_cast<double>(v) * 1000.0) / 1000.0);
         }
     }

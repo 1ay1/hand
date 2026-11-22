@@ -61,36 +61,23 @@ void config_roundtrip([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, 
         ok(hand::App::theme(m).font_family == hand::ui_family_of(m.cfg) && hand::App::theme(m).font_size == m.ui_font_size,
            "the theme carries font.ui and font.ui_size to every widget");
     }
-    {   // three sizes: the terminal, the file list (auto: the terminal's), the interface
-        hand::Config a;
-        a.files_text_size = 0.0f;
-        (void)hand::config_save(a, path);
-        std::string body;
-        if (std::FILE* f = std::fopen(path.c_str(), "r")) { char buf[4096]; std::size_t n; while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) body.append(buf, n); std::fclose(f); }
-        hand::Config a2;
-        a2.files_text_size = 9.0f;
-        const std::string pa = hand::config_load(a2, path);
-        ::unlink(path.c_str());
-        const auto at = body.find("files_size");
-        const bool says_auto = at != std::string::npos && body.find("auto", at) < body.find('\n', at);
-        ok(says_auto && pa.empty() && a2.files_text_size == 0.0f,
-           "font.files_size is saved as \"auto\" and read back as auto");
+    {   // two sizes: the terminal (the file list is terminal text) and the interface
         using E = mayag::Edit<hand::App::Model>;
-        rt.send(hand::App::Msg{E{[](hand::App::Model& mm) { mm.cfg.files_text_size = 0.0f; }}});
         const float t0 = rt.model().font_size, u0 = rt.model().ui_font_size;
         rt.press_key(mayag::Key::equal, mayag::Mods{.ctrl = true});
         const auto pp = hand::detail::pane_props(rt.model());
-        ok(rt.model().font_size > t0 && rt.model().ui_font_size == u0 && pp.text_size == rt.model().font_size,
-           "ctrl+= zooms the terminal, and an auto file list with it; the interface stays");
+        ok(rt.model().font_size > t0 && hand::App::theme(rt.model()).font_size == u0 && pp.text_size == rt.model().font_size &&
+               pp.family == hand::detail::family_of(rt.model().cfg),
+           "ctrl+= zooms the terminal and the file list (terminal text) with it; the interface stays");
+        rt.send(hand::App::Msg{E{[](hand::App::Model& mm) { mm.cfg.ui_follows = true; }}});
+        ok(hand::App::theme(rt.model()).font_size > u0, "Scale interface with terminal: the interface zooms with it");
+        rt.send(hand::App::Msg{E{[](hand::App::Model& mm) { mm.cfg.ui_follows = false; }}});
         rt.press_key(mayag::Key::equal, mayag::Mods{.shift = true, .ctrl = true});
         ok(rt.model().ui_font_size > u0 && hand::App::theme(rt.model()).font_size == rt.model().ui_font_size,
-           "ctrl+shift+= zooms the interface");
+           "ctrl+shift+= zooms the interface on its own");
         rt.press_key(mayag::Key::n0, mayag::Mods{.ctrl = true});
         rt.press_key(mayag::Key::n0, mayag::Mods{.shift = true, .ctrl = true});
         ok(rt.model().font_size == t0 && rt.model().ui_font_size == u0, "ctrl+0 / ctrl+shift+0 put each back");
-        rt.send(hand::App::Msg{E{[](hand::App::Model& mm) { mm.cfg.files_text_size = 15.0f; }}});
-        ok(hand::detail::pane_props(rt.model()).text_size == 15.0f, "a set file list size is its own");
-        rt.send(hand::App::Msg{E{[](hand::App::Model& mm) { mm.cfg.files_text_size = 0.0f; }}});
     }
     // a broken or partial file is reported, never fatal
     const std::string bad = path + ".bad";

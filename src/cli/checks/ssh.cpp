@@ -287,6 +287,12 @@ void ssh([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& ok) {
             if (auto t1 = fp::file_pane_text(fs2, "/")) (*t1)(fs2);   // the / that began it
             if (auto t2 = fp::file_pane_text(fs2, "rea")) (*t2)(fs2);
             ok(fs2.filtering && fs2.filter == "rea", "file pane: / starts a filter, typing narrows it");
+            struct Estimate {};   // no font: 0.6 em a byte
+            const std::string mid = mayag::dsl::detail::fit_middle(Estimate{}, "compile_commands.json", 10.0f * 0.6f * 14.0f, 10.0f);
+            ok(mid.size() < std::string{"compile_commands.json"}.size() && mid.find("\u2026") != std::string::npos &&
+                   mid.rfind(".json") == mid.size() - 5 && mid.rfind("comp", 0) == 0,
+               ("file pane: a long name is cut in the middle, its start and extension kept (" + mid + ")").c_str());
+            ok(mayag::dsl::detail::fit_middle(Estimate{}, "a.txt", 200.0f, 10.0f) == "a.txt", "file pane: a name that fits is left alone");
         }
     }
     ok(!rt.model().ssh.picker.open, "esc closes the picker");
