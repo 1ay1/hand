@@ -113,7 +113,15 @@ struct Term::Impl {
 };
 
 Term::Term(int cols, int rows, const Palette& pal, int scrollback, std::uint64_t entropy)
-    : p_(std::make_unique<Impl>(std::max(cols, 2), std::max(rows, 1), pal, scrollback, entropy)) {}
+    : p_(std::make_unique<Impl>(std::max(cols, 2), std::max(rows, 1), pal, scrollback, entropy)) {
+    // Two tabs' toe row versions count from the same start: mix in who we
+    // are (the session's entropy, and Impl's address, stable across moves)
+    // so row 3 of one tab never passes for row 3 of another.
+    std::uint64_t z = entropy ^ (reinterpret_cast<std::uintptr_t>(p_.get()) * 0x9E3779B97F4A7C15ull);
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+    id_ = z ^ (z >> 31);
+}
 Term::~Term() = default;
 Term::Term(Term&&) noexcept = default;
 Term& Term::operator=(Term&&) noexcept = default;
@@ -155,7 +163,7 @@ void Term::set_palette(const Palette& pal) {
     s.set_default_palette_colors(rgb_of(pal.fg), rgb_of(pal.bg));
     p_->m.cfg.default_fg = rgb_of(pal.fg);
     p_->m.cfg.default_bg = rgb_of(pal.bg);
-    ++epoch_; ++content_epoch_;
+    ++epoch_; ++content_epoch_; ++palette_epoch_;
 }
 
 void Term::set_prompt_protect(bool on) { p_->m.cfg.protect_prompt_on_resize = on; }
@@ -477,14 +485,38 @@ const std::vector<dsl::ScrollbackRun>& Term::minimap(int buckets) const {
     const std::uint64_t key = (static_cast<std::uint64_t>(content_epoch_) * 1000003u) ^
                               (static_cast<std::uint64_t>(s.total_rows()) << 20) ^ static_cast<std::uint64_t>(buckets);
     if (key == mm_key_) return mm_;
-    mm_key_ = key;
-    mm_.clear();
     const std::int64_t total = s.total_rows();
-    if (total <= 0 || buckets <= 0) return mm_;
+    if (total <= 0 || buckets <= 0) { mm_.clear(); mm_key_ = key; mm_hist_key_ = 0; ++mm_version_; return mm_; }
+    // Typing changes the live rows, never the history (toe's history_epoch
+    // holds still until a line scrolls in -- property-tested in toe's
+    // damage_test). So only the buckets that sample a live row are re-binned;
+    // the rest, the whole of a 10k-line history, stays as it was.
+    const std::int64_t hist = s.history_rows();
+    const std::uint64_t hist_key = (s.history_epoch() * 0x9E3779B97F4A7C15ull) ^ (palette_epoch_ << 48) ^
+                                   (s.palette_epoch() << 32) ^ (static_cast<std::uint64_t>(total) << 8) ^
+                                   static_cast<std::uint64_t>(buckets) ^ (static_cast<std::uint64_t>(s.size().cols) << 40);
+    int from = 0;
+    std::vector<dsl::ScrollbackRun> old_tail;
+    if (hist_key == mm_hist_key_) {
+        from = mm_live_bucket_;
+        old_tail.assign(mm_.begin() + static_cast<std::ptrdiff_t>(mm_hist_runs_), mm_.end());
+        mm_.resize(mm_hist_runs_);
+    } else {
+        mm_.clear();
+        mm_hist_key_ = hist_key;
+        // the first bucket whose sampled lines (up to three from its start) reach a live row
+        mm_live_bucket_ = buckets;
+        for (int b = 0; b < buckets; ++b) {
+            const std::int64_t l0 = total * b / buckets, l1 = std::max(total * (b + 1) / buckets, l0 + 1);
+            if (std::min(l1, l0 + 3) > hist) { mm_live_bucket_ = b; break; }
+        }
+    }
+    mm_key_ = key;
     const auto& pal = s.palette();
     const std::uint32_t def = u32(pal.default_fg());
     const float cols = static_cast<float>(std::max(s.size().cols, 1));
-    for (int b = 0; b < buckets; ++b) {
+    for (int b = from; b < buckets; ++b) {
+        if (b == mm_live_bucket_) mm_hist_runs_ = mm_.size();
         // the densest of up to three lines in the bucket stands for it
         const std::int64_t l0 = total * b / buckets, l1 = std::max(total * (b + 1) / buckets, l0 + 1);
         std::span<const toe::term::Cell> best;
@@ -513,6 +545,14 @@ const std::vector<dsl::ScrollbackRun>& Term::minimap(int buckets) const {
         }
         flush(static_cast<int>(best.size()));
     }
+    if (from == 0 && mm_live_bucket_ >= buckets) mm_hist_runs_ = mm_.size();
+    // the live tail drew the same runs as before (a keystroke on a row the
+    // minimap doesn't sample): same version, so the bar's run layer is reused
+    const bool same_tail = from > 0 && std::equal(mm_.begin() + static_cast<std::ptrdiff_t>(mm_hist_runs_), mm_.end(), old_tail.begin(), old_tail.end(),
+                               [](const dsl::ScrollbackRun& a, const dsl::ScrollbackRun& b) {
+                                   return a.row == b.row && a.x0 == b.x0 && a.x1 == b.x1 && a.rgb == b.rgb;
+                               });
+    if (!same_tail) ++mm_version_;
     return mm_;
 }
 
@@ -683,6 +723,15 @@ dsl::TermGrid Term::snapshot(bool above) const {
         }
         if (sel_start >= 0) g.selection.push_back({r, sel_start, g.cols - sel_start});
         if (hit_start >= 0) g.matches.push_back({r, hit_start, g.cols - hit_start});
+        // toe's row_version changes whenever the row's cells do (toe's
+        // damage_test proves it), so the view keys this row on it instead of
+        // hashing every cell; cells also depend on the palette, and versions
+        // only mean something within one Term. 0 (scrolled back): hash.
+        if (const std::uint64_t v = s.row_version(vrow); v != 0) {
+            std::uint64_t z = v ^ id_ ^ (palette_epoch_ << 40) ^ (s.palette_epoch() << 20);
+            z = (z ^ (z >> 31)) * 0x7FB5D329728EA185ull;
+            g.lines[static_cast<std::size_t>(r)].version = (z ^ (z >> 27)) | 1u;
+        }
     };
     if (above) { s.scroll(1); emit(0, 0); s.scroll(-1); }
     for (int r = 0; r < s.size().rows; ++r) emit(r, r + shift);

@@ -58,6 +58,7 @@ if (shot == "bench") {
     for (int i = 0; i < 20; ++i) rt.tick();
     using clk = std::chrono::steady_clock;
     const auto run = [&](const char* what, auto&& poke) {
+        if (const char* only = std::getenv("HAND_BENCH_ONLY"); only && !std::string_view{what}.starts_with(only)) return;
         static const int N = std::getenv("HAND_BENCH_LOOP") ? std::atoi(std::getenv("HAND_BENCH_LOOP")) : 120;
         double view = 0, cascade = 0, layout = 0, paint = 0, render = 0, fold = 0;
         const auto t0 = clk::now();
@@ -176,6 +177,39 @@ if (shot == "flood") {   // a real shell running a firehose: frames keep coming,
     std::printf("flood: %d frames in %.1fs (%.0f fps), worst frame %.1f ms, %.0f MB/s through toe, peak rss %.0f MB, ctrl-C quiet after %.0f ms\n",
                 frames, secs, frames / secs, worst, mbps, rss_mb(), stop_ms);
     return (worst < 100.0 && rss_mb() < 400.0 && stop_ms < 1000.0) ? 0 : 1;
+}
+if (shot == "echo") {   // keystroke -> pty -> echo -> parsed -> frame drawn: hand's whole share of input-to-photon
+    using clk = std::chrono::steady_clock;
+    // wait for the program to come up and go quiet
+    rt.settle([](const auto& m) { return static_cast<bool>(m.tab().pty); }, std::chrono::seconds(3));
+    for (int i = 0; i < 20; ++i) { rt.settle([](const auto&) { return false; }, std::chrono::milliseconds(5)); rt.tick(); }
+    const int n = std::getenv("HAND_ECHO_N") ? std::atoi(std::getenv("HAND_ECHO_N")) : 200;
+    std::vector<double> lat;
+    lat.reserve(static_cast<std::size_t>(n));
+    int lost = 0;
+    double trip = 0, frame = 0, keyframe = 0;
+    for (int i = 0; i < n; ++i) {
+        const std::uint64_t before = rt.model().tab().bytes;
+        const auto a = clk::now();
+        rt.type(std::string(1, static_cast<char>('a' + i % 26)));   // the key, as the window delivers it
+        keyframe += std::chrono::duration<double, std::milli>(clk::now() - a).count();
+        if (std::getenv("HAND_ECHO_DIAG") && i < 4) { const auto& f = rt.host().latency().last(); std::printf("  key frame: view %.3f cascade %.3f layout %.3f paint %.3f raster %.3f\n", f.view_ms, f.cascade_ms, f.layout_ms, f.paint_ms, f.render_ms); }
+        const bool back = rt.settle([before](const auto& m) { return m.tab().bytes > before; }, std::chrono::milliseconds(500));
+        const auto b = clk::now();
+        rt.tick();                                                   // the frame that shows it
+        if (!back) { ++lost; continue; }
+        trip += std::chrono::duration<double, std::milli>(b - a).count();
+        frame += std::chrono::duration<double, std::milli>(clk::now() - b).count();
+        lat.push_back(std::chrono::duration<double, std::milli>(clk::now() - a).count());
+        if (i % 32 == 31) { rt.press_key(mayag::Key::enter); rt.settle([](const auto&) { return false; }, std::chrono::milliseconds(5)); rt.tick(); }
+    }
+    std::sort(lat.begin(), lat.end());
+    const auto pct = [&](double p) { return lat.empty() ? 0.0 : lat[std::min(lat.size() - 1, static_cast<std::size_t>(p * static_cast<double>(lat.size())))]; };
+    std::printf("echo: %zu keys  p50 %.2f ms  p95 %.2f ms  max %.2f ms  min %.2f ms  lost %d  (key fold+frame %.2f, ->echo parsed %.2f, echo frame %.2f)\n", lat.size(), pct(0.5), pct(0.95),
+                lat.empty() ? 0.0 : lat.back(), lat.empty() ? 0.0 : lat.front(), lost, keyframe / std::max<double>(1, lat.size()), trip / std::max<double>(1, lat.size()), frame / std::max<double>(1, lat.size()));
+    // the gate: an order of magnitude over the baseline, so a regression trips it and noise doesn't
+    const double p50_max = std::getenv("HAND_ECHO_P50") ? std::atof(std::getenv("HAND_ECHO_P50")) : 8.0;
+    return (lost == 0 && pct(0.5) < p50_max) ? 0 : 1;
 }
 if (shot == "rows") {   // where glyphs sit in their cells: inverse video makes each cell's box visible
     rt.send(hand::App::Msg{hand::App::Output{"\x1b[2J\x1b[H\x1b[7mHxgM\x1b[0m \x1b[7m|_^Ag\x1b[0m\r\n\x1b[7mHHHH\x1b[0m\r\n"}});

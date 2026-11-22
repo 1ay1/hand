@@ -149,7 +149,7 @@ class Term {
     /// bucket, as coloured runs (cached until the content changes).
     [[nodiscard]] const std::vector<mayag::dsl::ScrollbackRun>& minimap(int buckets) const;
     /// Identifies what the last minimap() returned (changes with it).
-    [[nodiscard]] std::uint64_t minimap_version() const noexcept { return mm_key_ | 1u; }
+    [[nodiscard]] std::uint64_t minimap_version() const noexcept { return ((mm_version_ << 1) | 1u) ^ (id_ << 1); }
     void scroll_to_line(int first);
 
     // ── cursor (viewport cell; visible = false when off screen / hidden) ──
@@ -191,6 +191,12 @@ class Term {
     std::uint64_t         epoch_ = 1;
     std::uint64_t         content_epoch_ = 1;   ///< output / resize / palette only (not scrolling)
     std::uint64_t         reflowed_cells_ = 0;  ///< see reflowed_cells()
+    std::uint64_t         palette_epoch_ = 1;   ///< set_palette()s
+    std::uint64_t         id_ = 0;              ///< tells this Term's row versions from another's
+    mutable std::uint64_t mm_hist_key_ = 0;     ///< what the minimap's history bins were made from
+    mutable std::size_t   mm_hist_runs_ = 0;    ///< runs [0, this) bin history rows only
+    mutable int           mm_live_bucket_ = 0;  ///< first bucket that samples a live row
+    mutable std::uint64_t mm_version_ = 0;      ///< bumps when the runs change
 };
 
 }  // namespace hand

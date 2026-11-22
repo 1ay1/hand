@@ -11,11 +11,18 @@
 #                                its layers, its public use of jaal, and jaal's banlist over mayag
 #   jaal_upward                  jaal names nothing above it
 #   mayag_one_look               mayag's graphics are one source on every platform
+#   mayag_no_byte_hash           cache keys are values, never an object's padded bytes
+#   echo_latency                 keystroke -> pty -> echo -> frame, through the real loop (hand --echo):
+#                                fails if the median passes 8 ms (baseline ~1 ms release, ~2.3 ms dev)
 
 set(_JAAL_LINT ${PROJECT_SOURCE_DIR}/external/mayag/third_party/jaal/tests/lint)
 set(_MAYAG     ${PROJECT_SOURCE_DIR}/external/mayag)
 
 add_test(NAME app_headless COMMAND hand --headless --last-resort)
+if(NOT WIN32)   # `cat` is the echo program
+    add_test(NAME echo_latency COMMAND hand --echo --last-resort)
+    set_tests_properties(echo_latency PROPERTIES RUN_SERIAL TRUE TIMEOUT 60 LABELS "perf")
+endif()
 add_test(NAME layering COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/layering.cmake)
 add_test(NAME purity COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/purity.cmake)
 
@@ -42,6 +49,8 @@ add_test(NAME jaal_upward
 add_test(NAME mayag_one_look
          COMMAND ${CMAKE_COMMAND} -DROOT=${_MAYAG}/include/mayag -DALLOW=${_MAYAG}/tests/lint/allow_one_look.txt
                  -P ${_MAYAG}/tests/lint/one_look.cmake)
+add_test(NAME mayag_no_byte_hash
+         COMMAND ${CMAKE_COMMAND} -DROOT=${_MAYAG}/include/mayag -P ${_MAYAG}/tests/lint/no_byte_hash.cmake)
 set_tests_properties(layering purity concurrency_src concurrency_include_hand concurrency_allowlist_tight_src
                      concurrency_allowlist_tight_include_hand mayag_layering mayag_uses_jaal_public_api
-                     mayag_concurrency jaal_upward mayag_one_look PROPERTIES LABELS "static")
+                     mayag_concurrency jaal_upward mayag_one_look mayag_no_byte_hash PROPERTIES LABELS "static")

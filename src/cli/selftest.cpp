@@ -24,8 +24,9 @@ int selftest(Runtime& rt, Vec2 size) {
         ok(rt.model().tab().term->cols() < g.cols, "a resize reflows the grid");
     }
     // order matters: later suites start from the state earlier ones leave
-    static constexpr std::array<checks::Suite, 17> suites{
+    static constexpr std::array<checks::Suite, 18> suites{
         checks::pty,
+        checks::caches_exact,
         checks::settings_panel,
         checks::every_setting,
         checks::visual_settings,
