@@ -35,6 +35,15 @@ App::Cmd App::update(Model& m, ModifierDown d) {
 }
 
 App::Cmd App::update(Model& m, FontZoom z) {
+    if (z.ui) {   // the interface: tabs, panels, menus, the pane's header
+        switch (z.zoom) {
+            case Zoom::in: m.ui_font_size = std::min(m.ui_font_size + 0.5f, 20.0f); break;
+            case Zoom::out: m.ui_font_size = std::max(m.ui_font_size - 0.5f, 9.0f); break;
+            case Zoom::reset: m.ui_font_size = m.cfg.ui_font_size; break;
+        }
+        fit(m);
+        return {};
+    }
     switch (z.zoom) {
         case Zoom::in: m.font_size = std::min(m.font_size + 1.0f, 48.0f); break;
         case Zoom::out: m.font_size = std::max(m.font_size - 1.0f, 6.0f); break;

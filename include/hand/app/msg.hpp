@@ -134,7 +134,7 @@ enum class Zoom : std::uint8_t { in, out, reset };
 struct Typed { std::string bytes; };                               ///< to the active pty (snaps the view live)
 struct Swallow {};                                                 ///< taken, nothing to do (never reaches the shell)
 struct ModifierDown { Modifier mod; };
-struct FontZoom { Zoom zoom; };
+struct FontZoom { Zoom zoom; bool ui = false; };   ///< ctrl +/-/0: the terminal; with shift: the interface
 struct Compose { std::string preedit; };                           ///< the input method's text so far
 struct ComposeEnd {};
 struct Focused { bool focused = false; std::string report; };      ///< report: the focus event for the app (mode 1004)

@@ -74,6 +74,7 @@ void App::apply(Model& m, const Config& before) {
     Session& se = m.tab();
     const Config& c = m.cfg;
     if (c.font_size != before.font_size) m.font_size = c.font_size;
+    if (c.ui_font_size != before.ui_font_size) m.ui_font_size = c.ui_font_size;
     if (m.pane.open) {   // the file pane's settings take effect now
         if (c.files_width != before.files_width) m.pane.width = c.files_width;
         if (c.files_sort != before.files_sort) m.pane.ui.sort = static_cast<mayag::dsl::FileSort>(std::clamp(c.files_sort, 0, 3));
@@ -178,6 +179,7 @@ App::Cmd App::init(Model& m, const Flags& f) {
     }
     m.palette = palette_of(m.cfg);
     m.font_size = m.cfg.font_size;
+    m.ui_font_size = m.cfg.ui_font_size;
     m.strip.t = m.cfg.strip_always() ? 1.0f : 0.0f;
     fit(m);
     m.ssh.sources = detail::host_sources(m);

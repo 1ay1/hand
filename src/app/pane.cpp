@@ -118,6 +118,10 @@ FilePaneProps pane_props(const Model& m) {
     p.age = m.cfg.files_age;
     p.type_colors = m.cfg.files_type_colors;
     p.preview_lines = static_cast<int>(m.cfg.files_preview_lines);
+    // the list is terminal text -- the same face, the same size (zoom too) --
+    // unless font.files_size sets its own; the pane's header is interface text
+    p.text_size = m.cfg.files_text_size > 0.0f ? m.cfg.files_text_size : m.font_size;
+    p.family = family_of(m.cfg);
     if (m.cfg.files_preview && m.pane.preview && !m.pane.preview_path.empty()) p.preview = m.pane.preview;
     std::string shown = m.pane.path;
     if (m.pane.where.empty()) {   // ~ for home, as the shell writes it

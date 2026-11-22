@@ -529,7 +529,7 @@ if (shot == "settings-ui-font") {   // the interface font switched live, its men
         if (m.cfg.ui_fonts.size() > 1) m.cfg.ui_font = 1;
     }}});
     rt.tick();
-    for (int i = 0; i < 3; ++i) rt.press_key(mayag::Key::down);
+    for (int i = 0; i < 4; ++i) rt.press_key(mayag::Key::down);
     rt.press_key(mayag::Key::enter);
 }
 if (shot == "settings-menu") {

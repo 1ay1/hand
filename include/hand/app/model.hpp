@@ -60,6 +60,7 @@ struct Model {
     mayag::Vec2             win{800, 540};        ///< the window
     mayag::Vec2             size{800, 500};       ///< the terminal area (the window below the tab strip)
     float                   font_size = 13.0f;    ///< cfg.font_size, or zoomed
+    float                   ui_font_size = 12.5f; ///< cfg.ui_font_size, or zoomed (ctrl+shift +/-)
     bool                    focused = true;
     std::string             preedit;              ///< the input method's composition, drawn at the cursor (not yet typed)
     bool                    cursor_on = true;

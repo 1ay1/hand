@@ -43,7 +43,7 @@ static std::optional<KeyEvent> mac_chord(const KeyEvent& k) {
         case Key::g: return as(md.shift ? Key::up : Key::enter, {});   // find next / previous (in the find bar)
         case Key::comma: return as(Key::comma, c);                // settings
         case Key::equal: case Key::minus: case Key::n0:
-            return as(k.key, c);                                  // zoom
+            return as(k.key, {.shift = md.shift, .ctrl = true});  // zoom (⇧: the interface)
         case Key::bracket_left: case Key::bracket_right:
             if (md.shift) return as(Key::tab, k.key == Key::bracket_left ? cs : c);   // ⌘⇧[ / ]: previous / next tab
             return as(k.key == Key::bracket_left ? Key::z : Key::x, cs);              // ⌘[ / ]: previous / next prompt
@@ -158,8 +158,8 @@ std::optional<App::Msg> App::on(const Model& m, const KeyEvent& k_in) {
     // foot's bindings
     if (cs && k.key == Key::c) return Copy{};
     if ((cs && k.key == Key::v) || (md.shift && !md.ctrl && k.key == Key::insert)) return PasteReq{};
-    if (md.ctrl && !md.alt && !md.shift && (k.key == Key::equal || k.key == Key::minus || k.key == Key::n0))
-        return FontZoom{k.key == Key::equal ? Zoom::in : k.key == Key::minus ? Zoom::out : Zoom::reset};
+    if (md.ctrl && !md.alt && (k.key == Key::equal || k.key == Key::minus || k.key == Key::n0))
+        return FontZoom{k.key == Key::equal ? Zoom::in : k.key == Key::minus ? Zoom::out : Zoom::reset, md.shift};
     if (md.shift && !md.ctrl && (k.key == Key::page_up || k.key == Key::page_down) && !se.term->alt_screen()) {
         return ScrollBy{static_cast<float>((k.key == Key::page_up ? 1 : -1) * std::max(se.term->rows() - 2, 1))};
     }

@@ -62,6 +62,7 @@ struct Config {
     std::string ui_font_wanted;            ///< font.ui as hand.vibe names it (resolved at start)
     float ui_font_size = 12.5f;            ///< chrome text size, px
     float font_size = 13.0f;
+    float files_text_size = 0.0f;          ///< file list text, px; 0 = the terminal's size (zoom included)
     float line_height = 1.2f;
     // colors
     int   scheme = -1;              ///< index into the catalogue; -1 = default (One Dark)
