@@ -35,6 +35,7 @@ namespace hand {
 /// The window: config, its tabs, and what sits over and beside them.
 struct Model {
     Config                  cfg;
+    std::shared_ptr<const mayag::typo::FontStack> fonts;   ///< from Flags: what cells are measured with
     Palette                 palette;
     mayag::Vec2             win{800, 540};        ///< the window
     mayag::Vec2             size{800, 500};       ///< the terminal area (the window below the tab strip)

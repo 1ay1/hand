@@ -92,6 +92,8 @@ int view_row(const Model& m, float y);
 float edge_speed(const Model& m, float y);
 int cell_of(float v, float origin, float size, int max);
 FontFamily family_of(const Config& c);
+/// Advance of one terminal cell at `size` px, in the configured family.
+float cell_width(const Model& m, float size);
 
 // mechanics shared by several update files
 /// Run ssh to `h` as `se`'s program (its terminal keeps whatever it shows).

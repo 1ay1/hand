@@ -36,7 +36,14 @@ enum class CloseConfirm : std::uint8_t { never, running, always };
 
 struct Config {
     // font
-    int   font_family = 0;          ///< index into font_names()
+    int   font_family = 0;          ///< index into `fonts`
+    /// The monospace families found on this machine, in preference order --
+    /// the choices for font.family. Filled at start from the loaded fonts
+    /// (App::Flags); never saved.
+    std::vector<std::string> fonts;
+    /// font.family as hand.vibe names it, read before the fonts are known;
+    /// matched against `fonts` at start (resolve_font_family). Never saved.
+    std::string font_family_wanted;
     float font_size = 13.0f;
     float line_height = 1.2f;
     // colors
@@ -137,10 +144,9 @@ bool setting_apply(Config& c, const mayag::dsl::SettingEdit& e);
 [[nodiscard]] Palette palette_of(const Config& c);
 [[nodiscard]] std::size_t scheme_count();
 /// Monospace faces found at startup (main sets them; family index → name).
-void set_font_names(std::vector<std::string> names);
-[[nodiscard]] const std::vector<std::string>& font_names();
-/// Apply a font.family that hand.vibe named before the faces were known
-/// (they are found on a worker during startup). Returns a problem, or "".
+
+/// Match font_family_wanted (from hand.vibe) against `fonts` (found on this
+/// machine), setting font_family. Returns a problem, or "".
 std::string resolve_font_family(Config& c);
 
 // ── the file ───────────────────────────────────────────────────────────────

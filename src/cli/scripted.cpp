@@ -22,8 +22,8 @@ constexpr std::string_view kDemo =
     "\x1b[1;34m❯\x1b[0m ";
 }  // namespace
 
-int run_scripted(mayag::AppConfig ac, mayag::Vec2 size, std::optional<Shot> shot) {
-    return mayag::run_headless<App>(std::move(ac), [&](auto& rt) {
+int run_scripted(mayag::AppConfig ac, App::Flags flags, mayag::Vec2 size, std::optional<Shot> shot) {
+    return mayag::run_headless<App>(std::move(ac), std::move(flags), [&](auto& rt) {
         rt.send(App::Msg{App::Output{std::string{kDemo}}});
         rt.tick();
         if (!shot) return selftest(rt, size);

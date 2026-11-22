@@ -31,7 +31,7 @@ void App::fit(Model& m) {
     if (m.pane.open) m.pane.width = std::clamp(m.pane.width, 220.0f, std::max(220.0f, std::min(640.0f, m.win.x - 320.0f)));
     const float side = m.pane.open ? m.pane.width : 0.0f;
     m.size = Vec2{std::max(m.win.x - side, 1.0f), std::max(m.win.y - m.strip_h(), 1.0f)};
-    const float cw = cell_width(m.font_size, m.cfg.font_family);
+    const float cw = detail::cell_width(m, m.font_size);
     const float ch = std::round(m.font_size * m.cfg.line_height);
     const float pad = m.cfg.padding;
     const float gutter = m.cfg.shell_marks ? 10.0f : 0.0f;   // terminal_view's mark margin
@@ -139,9 +139,23 @@ App::Session App::spawn_ssh(Model& m, const Host& h) {
     return se;
 }
 
-App::Cmd App::init(Model& m) {
+App::Cmd App::init(Model& m, const Flags& f) {
     startup::mark("hand: init");
-    m.cfg = config;
+    m.cfg = f.config;
+    m.fonts = f.fonts;
+    // the monospace families mayag attached (custom_family(0), (1), ...):
+    // the choices font.family offers on this machine
+    m.cfg.fonts.clear();
+    if (m.fonts)
+        for (std::size_t i = 0; i < mayag::custom_family_count; ++i) {
+            const std::string& name = m.fonts->family_name(mayag::custom_family(i));
+            if (name.empty() || std::ranges::find(m.cfg.fonts, name) != m.cfg.fonts.end()) break;
+            m.cfg.fonts.push_back(name);
+        }
+    if (std::string p = resolve_font_family(m.cfg); !p.empty()) {   // hand.vibe named a face this machine lacks
+        m.toast.card = Toast{.title = "hand.vibe", .body = std::move(p), .kind = Toast::Kind::error};
+        m.toast.at = m.time;
+    }
     m.palette = palette_of(m.cfg);
     m.font_size = m.cfg.font_size;
     m.strip.t = m.cfg.strip_always() ? 1.0f : 0.0f;

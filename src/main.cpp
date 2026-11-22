@@ -59,8 +59,6 @@ std::vector<std::string_view> mono_candidates() {
     return v;
 }
 
-std::shared_ptr<typo::FontStack> g_stack;
-
 /// The font stack: the first mono face leads (the chrome is mono too), and
 /// every installed candidate becomes custom_family(i) so font.family switches
 /// live without reading a file on the UI thread.
@@ -97,8 +95,7 @@ std::shared_ptr<typo::FontStack> load_fonts(bool system) {
                 if (std::find(names.begin(), names.end(), got->name) == names.end()) names.push_back(got->name);
         }
     }
-    hand::set_font_names(std::move(names));
-    return s;
+    return s;   // the family names live on the stack (family_name): App::init reads them
 }
 
 /// A screen exercising colours, attributes and wide glyphs, for --png/--headless.
@@ -132,9 +129,10 @@ int main(int argc, char** argv) {
     if (mode == Mode::window) mayag::gpu_prestart();   // ~100 ms of device bring-up, overlapped with all below
     // The window (GPU, fonts) path loads fonts on mayag's worker while the
     // window opens and the GPU comes up; scripted runs need them now.
-    static bool s_system_fonts;   // read by the captureless loader below
-    s_system_fonts = system_fonts;
-    if (mode != Mode::window) g_stack = load_fonts(system_fonts);
+    // Scripted runs load fonts now; a window loads them on mayag's worker
+    // while it opens (each mode gets its fonts as data, see App::Flags).
+    std::shared_ptr<typo::FontStack> scripted_fonts;
+    if (mode != Mode::window) scripted_fonts = load_fonts(system_fonts);
     if (mode == Mode::window) {
         // the user's hand.vibe; scripted runs use defaults so they are reproducible
         const std::string problems = hand::config_load(cfg, hand::config_path());
@@ -146,33 +144,21 @@ int main(int argc, char** argv) {
     if (const char* sch = std::getenv("HAND_SCHEME"); sch && *sch && mode != Mode::window)
         for (std::size_t k = 0; k < hand::presets::all.size(); ++k)
             if (hand::presets::all[k].name == sch) { cfg.scheme = static_cast<int>(k); break; }
-    hand::App::config = cfg;
 
-    hand::App::cell_width = [](float s, int family) {
-        // g_stack is set by the time the app measures (run() collects the
-        // font worker before init); bound on first use.
-        static typo::StackMeasurer measurer{*g_stack};
-        TextStyle st; st.size = s;
-        st.family = hand::font_names().empty() ? FontFamily::mono
-                  : custom_family(static_cast<std::size_t>(std::clamp(family, 0, static_cast<int>(hand::font_names().size()) - 1)));
-        const float w = measurer.advance("MMMMMMMMMM", st) / 10.0f;
-        return w > 0.0f ? w : s * 0.6f;
-    };
-
-    AppConfig ac{.title = "hand", .size = size, .decorated = cfg.decorations, .transparent = true, .option_as_alt = cfg.option_as_alt, .theme_morph = false, .fonts = g_stack, .log_renderer = false};
-    if (mode == Mode::window)
-        ac.font_loader = [] {
-            g_stack = load_fonts(s_system_fonts);
-            // App::config is read only once run() has collected this job
-            const std::string p = hand::resolve_font_family(hand::App::config);
-            if (!p.empty()) std::fprintf(stderr, "hand: %s:\n%s", hand::config_path().c_str(), p.c_str());
-            startup::mark("hand: fonts loaded (worker)");
-            return g_stack;
-        };
+    AppConfig ac{.title = "hand", .size = size, .decorated = cfg.decorations, .transparent = true, .option_as_alt = cfg.option_as_alt, .theme_morph = false, .fonts = scripted_fonts, .log_renderer = false};
     switch (mode) {
-        case Mode::window: return mayag::run<hand::App>(std::move(ac));
-        case Mode::headless: return hand::cli::run_scripted(std::move(ac), size, {});
-        case Mode::png: return hand::cli::run_scripted(std::move(ac), size, hand::cli::Shot{shot, out});
+        case Mode::window:
+            // the fonts load on mayag's worker while the window opens; the
+            // App starts from the configuration and those fonts (its Flags)
+            ac.font_loader = system_fonts ? +[] { return load_fonts(true); } : +[] { return load_fonts(false); };
+            return mayag::run<hand::App>(std::move(ac), [cfg](std::shared_ptr<typo::FontStack> fonts) {
+                startup::mark("hand: fonts loaded");
+                return hand::App::Flags{cfg, std::move(fonts)};
+            });
+        case Mode::headless:
+            return hand::cli::run_scripted(std::move(ac), {cfg, scripted_fonts}, size, {});
+        case Mode::png:
+            return hand::cli::run_scripted(std::move(ac), {cfg, scripted_fonts}, size, hand::cli::Shot{shot, out});
     }
     return 0;
 }

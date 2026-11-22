@@ -20,8 +20,6 @@ using Kind = dsl::SettingSpec::Kind;
 
 namespace {
 
-std::vector<std::string> g_fonts;
-std::string g_pending_family;   ///< font.family from hand.vibe, before the faces are known
 
 std::size_t default_scheme() {
     static const std::size_t i = [] {
@@ -36,7 +34,7 @@ std::size_t scheme_index(const Config& c) {
                                                                                        : static_cast<std::size_t>(c.scheme);
 }
 
-std::vector<std::string> scheme_names() {
+std::vector<std::string> scheme_names(const Config& = {}) {
     std::vector<std::string> v;
     v.reserve(presets::all.size());
     for (const auto& p : presets::all) v.emplace_back(p.name);
@@ -52,20 +50,20 @@ struct Row {
     int         decimals;
     const char* unit;
     float       scale;
-    std::vector<std::string> (*options)();
+    std::vector<std::string> (*options)(const Config&);
     float (*get)(const Config&);
     void (*set)(Config&, float);
 };
 
 #define GET(expr) [](const Config& c) -> float { return static_cast<float>(expr); }
 #define SET(stmt) [](Config& c, float v) { (void)v; stmt; }
-using Opts = std::vector<std::string> (*)();
+using Opts = std::vector<std::string> (*)(const Config&);
 constexpr Opts none = nullptr;
 
 const std::vector<Row>& rows() {
     static const std::vector<Row> r = {
         {"font", "family", "the monospace face (found on this machine)", Kind::cycle, 0, 0, 0, 0, "", 1,
-         [] { return g_fonts.empty() ? std::vector<std::string>{"default"} : g_fonts; },
+         [](const Config& c) { return c.fonts.empty() ? std::vector<std::string>{"default"} : c.fonts; },
          GET(c.font_family), SET(c.font_family = static_cast<int>(v))},
         {"font", "size", "text size in points (ctrl +/- / 0)", Kind::number, 6, 32, 0.5f, 1, "pt", 1, none,
          GET(c.font_size), SET(c.font_size = v)},
@@ -87,7 +85,7 @@ const std::vector<Row>& rows() {
          GET(c.opacity), SET(c.opacity = v)},
 
         {"cursor", "style", "the default shape (apps may change it)", Kind::choice, 0, 2, 1, 0, "", 1,
-         [] { return std::vector<std::string>{"block", "beam", "underline"}; },
+         [](const Config&) { return std::vector<std::string>{"block", "beam", "underline"}; },
          GET(static_cast<int>(c.cursor)), SET(c.cursor = static_cast<CursorShape>(std::clamp(static_cast<int>(v), 0, 2)))},
         {"cursor", "blink", "blink while the window is focused", Kind::toggle, 0, 1, 1, 0, "", 1, none,
          GET(c.cursor_blink), SET(c.cursor_blink = v > 0.5f)},
@@ -97,15 +95,15 @@ const std::vector<Row>& rows() {
          GET(c.cursor_glow), SET(c.cursor_glow = v > 0.5f)},
 
         {"motion", "cursor", "how the cursor travels: glide, spring (overshoots), smear (stretches)", Kind::choice, 0, 3, 1, 0, "", 1,
-         [] { return std::vector<std::string>{"none", "glide", "spring", "smear"}; },
+         [](const Config&) { return std::vector<std::string>{"none", "glide", "spring", "smear"}; },
          GET(static_cast<int>(c.cursor_anim)), SET(c.cursor_anim = static_cast<CursorAnim>(std::clamp(static_cast<int>(v), 0, 3)))},
         {"motion", "effect", "a little show at the cursor as you type (fireworks: on Enter)", Kind::cycle, 0, 0, 0, 0, "", 1,
-         [] { return std::vector<std::string>{"none", "ripple", "sonicboom", "wireframe", "pixiedust", "railgun", "torpedo", "fireworks"}; },
+         [](const Config&) { return std::vector<std::string>{"none", "ripple", "sonicboom", "wireframe", "pixiedust", "railgun", "torpedo", "fireworks"}; },
          GET(static_cast<int>(c.cursor_fx)), SET(c.cursor_fx = static_cast<CursorFx>(std::clamp(static_cast<int>(v), 0, 7)))},
         {"motion", "trail", "how long the cursor's tail is -- 0 none, 4 a long comet", Kind::number, 0.0f, 4.0f, 0.1f, 1, "\u00D7", 1, none,
          GET(c.cursor_trail), SET(c.cursor_trail = v)},
         {"motion", "blink", "how the cursor blinks", Kind::choice, 0, 2, 1, 0, "", 1,
-         [] { return std::vector<std::string>{"hard", "fade", "breathe"}; },
+         [](const Config&) { return std::vector<std::string>{"hard", "fade", "breathe"}; },
          GET(static_cast<int>(c.blink_style)), SET(c.blink_style = static_cast<BlinkStyle>(std::clamp(static_cast<int>(v), 0, 2)))},
         {"motion", "speed", "how fast every animation runs", Kind::number, 0.25f, 3.0f, 0.05f, 2, "\u00D7", 1, none,
          GET(c.motion_speed), SET(c.motion_speed = v)},
@@ -139,16 +137,16 @@ const std::vector<Row>& rows() {
         {"tabs", "always", "show the tab strip even with a single tab (ctrl+shift+t opens a tab)", Kind::toggle, 0, 1, 1, 0, "", 1, none,
          GET(c.tabs_always), SET(c.tabs_always = v > 0.5f)},
         {"tabs", "style", "line: compact mono cells, tmux-like; pill: a lifted card; underline: a sliding bar; flat: a filled block", Kind::choice, 0, 3, 1, 0, "", 1,
-         [] { return std::vector<std::string>{"pill", "underline", "flat", "line"}; },
+         [](const Config&) { return std::vector<std::string>{"pill", "underline", "flat", "line"}; },
          GET(static_cast<int>(c.tab_style)), SET(c.tab_style = static_cast<TabStyle>(std::clamp(static_cast<int>(v), 0, 3)))},
         {"tabs", "animation", "how the active marker moves: stretch (elastic), slide, instant", Kind::choice, 0, 2, 1, 0, "", 1,
-         [] { return std::vector<std::string>{"stretch", "slide", "instant"}; },
+         [](const Config&) { return std::vector<std::string>{"stretch", "slide", "instant"}; },
          GET(static_cast<int>(c.tab_anim)), SET(c.tab_anim = static_cast<TabAnim>(std::clamp(static_cast<int>(v), 0, 2)))},
         {"tabs", "position", "the strip above or below the terminal", Kind::choice, 0, 1, 1, 0, "", 1,
-         [] { return std::vector<std::string>{"top", "bottom"}; },
+         [](const Config&) { return std::vector<std::string>{"top", "bottom"}; },
          GET(c.tab_bottom ? 1 : 0), SET(c.tab_bottom = v > 0.5f)},
         {"tabs", "title", "what a tab is named after (smart: the running command, else the program, else the folder)", Kind::choice, 0, 3, 1, 0, "", 1,
-         [] { return std::vector<std::string>{"smart", "folder", "program", "shell"}; },
+         [](const Config&) { return std::vector<std::string>{"smart", "folder", "program", "shell"}; },
          GET(static_cast<int>(c.tab_title)), SET(c.tab_title = static_cast<TabTitle>(std::clamp(static_cast<int>(v), 0, 3)))},
         {"tabs", "height", "the strip's height (line: ~26, pill: ~40)", Kind::number, 22, 60, 1, 0, "px", 1, none,
          GET(c.tab_height), SET(c.tab_height = v)},
@@ -157,7 +155,7 @@ const std::vector<Row>& rows() {
         {"tabs", "corners", "tab corner radius (-1: follow window.roundness)", Kind::number, -1, 20, 1, 0, "px", 1, none,
          GET(c.tab_radius), SET(c.tab_radius = v)},
         {"tabs", "close_button", "when a tab shows its close button", Kind::choice, 0, 2, 1, 0, "", 1,
-         [] { return std::vector<std::string>{"hover", "always", "never"}; },
+         [](const Config&) { return std::vector<std::string>{"hover", "always", "never"}; },
          GET(static_cast<int>(c.tab_close)), SET(c.tab_close = static_cast<TabClose>(std::clamp(static_cast<int>(v), 0, 2)))},
         {"tabs", "icon", "the program icon, with a ring that spins while a command runs", Kind::toggle, 0, 1, 1, 0, "", 1, none,
          GET(c.tab_icon), SET(c.tab_icon = v > 0.5f)},
@@ -176,10 +174,10 @@ const std::vector<Row>& rows() {
          GET(c.sel_flash), SET(c.sel_flash = v > 0.5f)},
 
         {"confirm", "paste", "ask before pasting: never, risky (sudo, rm -rf, curl|sh, control chars), any multi-line, or only into programs without bracketed paste", Kind::choice, 0, 3, 1, 0, "", 1,
-         [] { return std::vector<std::string>{"never", "risky", "multiline", "unbracketed"}; },
+         [](const Config&) { return std::vector<std::string>{"never", "risky", "multiline", "unbracketed"}; },
          GET(static_cast<int>(c.paste_confirm)), SET(c.paste_confirm = static_cast<PasteConfirm>(std::clamp(static_cast<int>(v), 0, 3)))},
         {"confirm", "close", "ask before closing a tab or the window: never, while something runs, always", Kind::choice, 0, 2, 1, 0, "", 1,
-         [] { return std::vector<std::string>{"never", "running", "always"}; },
+         [](const Config&) { return std::vector<std::string>{"never", "running", "always"}; },
          GET(static_cast<int>(c.close_confirm)), SET(c.close_confirm = static_cast<CloseConfirm>(std::clamp(static_cast<int>(v), 0, 2)))},
 
         {"mouse", "copy_on_select", "selecting text copies it", Kind::toggle, 0, 1, 1, 0, "", 1, none,
@@ -204,7 +202,7 @@ const std::vector<Row>& rows() {
          GET(c.ssh_reconnect), SET(c.ssh_reconnect = v > 0.5f)},
 
         {"files", "side", "which side of the terminal the file pane docks on (ctrl+shift+e)", Kind::choice, 0, 1, 1, 0, "", 1,
-         [] { return std::vector<std::string>{"left", "right"}; },
+         [](const Config&) { return std::vector<std::string>{"left", "right"}; },
          GET(c.files_left ? 0 : 1), SET(c.files_left = v < 0.5f)},
         {"files", "width", "the pane's width (or drag its edge)", Kind::number, 220, 640, 10, 0, "px", 1, none,
          GET(c.files_width), SET(c.files_width = v)},
@@ -213,7 +211,7 @@ const std::vector<Row>& rows() {
         {"files", "follow", "move with the shell's cd (f brings it back after you browse away)", Kind::toggle, 0, 1, 1, 0, "", 1, none,
          GET(c.files_follow), SET(c.files_follow = v > 0.5f)},
         {"files", "sort", "the order of the list (s cycles it)", Kind::choice, 0, 3, 1, 0, "", 1,
-         [] { return std::vector<std::string>{"name", "modified", "size", "type"}; },
+         [](const Config&) { return std::vector<std::string>{"name", "modified", "size", "type"}; },
          GET(c.files_sort), SET(c.files_sort = std::clamp(static_cast<int>(v + 0.5f), 0, 3))},
         {"files", "dirs_first", "folders above files", Kind::toggle, 0, 1, 1, 0, "", 1, none,
          GET(c.files_dirs_first), SET(c.files_dirs_first = v > 0.5f)},
@@ -239,8 +237,8 @@ const std::vector<Row>& rows() {
 #undef GET
 #undef SET
 
-const char* icon_of(std::string_view section) {
-    const bool nerd = !g_fonts.empty() && g_fonts.front().find("Nerd") != std::string::npos;
+const char* icon_of(std::string_view section, const Config& c) {
+    const bool nerd = !c.fonts.empty() && c.fonts.front().find("Nerd") != std::string::npos;
     if (!nerd) {   // plain glyphs every mono face has
         if (section == "font") return "Aa";
         if (section == "colors") return "\u25D0";
@@ -288,7 +286,7 @@ const std::vector<std::array<std::uint32_t, 8>>& scheme_swatches() {
 dsl::SettingSpec spec_of(const Row& r, const Config& c, const Config& d) {
     dsl::SettingSpec s;
     s.section = r.section;
-    s.section_icon = icon_of(r.section);
+    s.section_icon = icon_of(r.section, c);
     // five pages, like a preferences window: what you change most comes first
     const std::string_view sec = r.section;
     using I = dsl::Icon;
@@ -310,11 +308,11 @@ dsl::SettingSpec spec_of(const Row& r, const Config& c, const Config& d) {
     s.decimals = r.decimals;
     s.unit = r.unit;
     s.scale = r.scale;
-    if (r.options) s.options = r.options();
+    if (r.options) s.options = r.options(c);
     const std::string_view key = r.key;
     if (key == "scheme") s.option_swatches = scheme_swatches();
     if (std::string_view{r.section} == "font" && key == "family")
-        for (std::size_t i = 0; i < g_fonts.size(); ++i) s.option_families.push_back(mayag::custom_family(i));
+        for (std::size_t i = 0; i < c.fonts.size(); ++i) s.option_families.push_back(mayag::custom_family(i));
     s.modified = std::fabs(r.get(c) - r.get(d)) > 1e-4f;
     return s;
 }
@@ -337,6 +335,7 @@ bool setting_apply(Config& c, const dsl::SettingEdit& e) {
     if (e.op == Op::reset_all) {
         Config d{};
         d.shell = c.shell; d.shell_cli = c.shell_cli; d.demo = c.demo; d.url_launcher = c.url_launcher;
+        d.fonts = c.fonts;   // what this machine has: not a setting
         c = d;
         return true;
     }
@@ -364,16 +363,13 @@ Palette palette_of(const Config& c) {
 }
 
 std::size_t scheme_count() { return presets::all.size(); }
-void set_font_names(std::vector<std::string> names) { g_fonts = std::move(names); }
-const std::vector<std::string>& font_names() { return g_fonts; }
 
 std::string resolve_font_family(Config& c) {
-    if (g_pending_family.empty()) return {};
-    std::string val = std::move(g_pending_family);
-    g_pending_family.clear();
-    const auto f = std::find(g_fonts.begin(), g_fonts.end(), val);
-    if (f == g_fonts.end()) return "font.family: no option \"" + val + "\"\n";
-    c.font_family = static_cast<int>(f - g_fonts.begin());
+    if (c.font_family_wanted.empty()) return {};
+    const std::string val = std::exchange(c.font_family_wanted, {});
+    const auto f = std::find(c.fonts.begin(), c.fonts.end(), val);
+    if (f == c.fonts.end()) return "font.family: no option \"" + val + "\"\n";
+    c.font_family = static_cast<int>(f - c.fonts.begin());
     return {};
 }
 
@@ -465,12 +461,12 @@ std::string config_load(Config& c, const std::string& path) {
                     break;
                 case Kind::choice: case Kind::cycle: {
                     if (!vibe_is_string(x)) { problems += name + ": expected a name\n"; continue; }
-                    const auto o = r.options ? r.options() : std::vector<std::string>{};
+                    const auto o = r.options ? r.options(c) : std::vector<std::string>{};
                     const std::string val = vibe_value_string(x);
                     // font.family names a face, and the faces are discovered
                     // on a worker while the window opens: keep the name and
                     // resolve it once they are known (resolve_font_family).
-                    if (sec == "font" && key == "family" && g_fonts.empty()) { g_pending_family = val; continue; }
+                    if (sec == "font" && key == "family" && c.fonts.empty()) { c.font_family_wanted = val; continue; }
                     const auto f = std::find(o.begin(), o.end(), val);
                     if (f == o.end()) { problems += name + ": no option \"" + val + "\"\n"; continue; }
                     r.set(c, static_cast<float>(f - o.begin()));
@@ -506,7 +502,7 @@ bool config_save(const Config& c, const std::string& path) {
         switch (r.kind) {
             case Kind::toggle: vibe_object_set_bool(so, r.key, v > 0.5f); break;
             case Kind::choice: case Kind::cycle: {
-                const auto o = r.options ? r.options() : std::vector<std::string>{};
+                const auto o = r.options ? r.options(c) : std::vector<std::string>{};
                 const auto i = static_cast<std::size_t>(std::max(v, 0.0f));
                 vibe_object_set_string(so, r.key, i < o.size() ? o[i].c_str() : "");
                 break;

@@ -68,11 +68,13 @@ struct App {
     using PaneResize = msg::PaneResize; using PaneWatch = msg::PaneWatch;   using PanePreview = msg::PanePreview;
     using Notice = msg::Notice;
 
-    static inline Config config{};   ///< set by main() before run
-    /// Advance of one mono cell at `size` pt in face `family` (main binds the font stack).
-    static inline float (*cell_width)(float size, int family) = [](float size, int) { return size * 0.6f; };
-
-    static Cmd init(Model& m);
+    /// What a run starts with (Elm's flags): the configuration main loaded
+    /// and the fonts mayag loaded. Data in, never a global.
+    struct Flags {
+        Config                                  config;
+        std::shared_ptr<const mayag::typo::FontStack> fonts;   ///< null: measure with a nominal 0.6 em cell
+    };
+    static Cmd init(Model& m, const Flags& f);
 
     // ── update: one overload per leaf, grouped by domain (jaal checks every leaf is here) ──
     // ShellMsg (src/app/session.cpp)

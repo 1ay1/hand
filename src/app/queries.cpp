@@ -357,8 +357,18 @@ int cell_of(float v, float origin, float size, int max) {
 }
 
 FontFamily family_of(const Config& c) {
-    return font_names().empty() ? FontFamily::mono
-                                : custom_family(static_cast<std::size_t>(std::clamp(c.font_family, 0, static_cast<int>(font_names().size()) - 1)));
+    return c.fonts.empty() ? FontFamily::mono
+                           : custom_family(static_cast<std::size_t>(std::clamp(c.font_family, 0, static_cast<int>(c.fonts.size()) - 1)));
+}
+
+float cell_width(const Model& m, float size) {
+    if (!m.fonts) return size * 0.6f;
+    const typo::StackMeasurer measurer{*m.fonts};
+    TextStyle st;
+    st.size = size;
+    st.family = family_of(m.cfg);
+    const float w = measurer.advance("MMMMMMMMMM", st) / 10.0f;
+    return w > 0.0f ? w : size * 0.6f;
 }
 
 

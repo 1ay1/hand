@@ -33,7 +33,7 @@ using Runtime = mayag::headless_app<App>;
 struct Shot { std::string name; std::string out; };
 /// The scripted modes on a headless runtime showing the demo screen: the
 /// self-test (no shot) or one shot. Returns the exit code.
-[[nodiscard]] int run_scripted(mayag::AppConfig ac, mayag::Vec2 size, std::optional<Shot> shot);
+[[nodiscard]] int run_scripted(mayag::AppConfig ac, App::Flags flags, mayag::Vec2 size, std::optional<Shot> shot);
 
 /// Has the cursor's motion (and its particles) come to rest?
 [[nodiscard]] inline bool motion_settled(const App::Model& m) { return motion::tail_settled(m.tab().fx, m.tab().cur_x, m.tab().cur_y); }

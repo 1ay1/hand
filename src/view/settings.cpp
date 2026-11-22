@@ -35,7 +35,7 @@ Theme App::theme(const Model& m) {
     t.info = rgb_of(p.ansi[6]);
     t.font_size = 12.5f;
     // Nerd icons only when the lead face carries them; otherwise plain glyphs (no tofu)
-    t.icons = !font_names().empty() && font_names().front().find("Nerd") != std::string::npos ? IconSet::nerd : IconSet::letters;
+    t.icons = !m.cfg.fonts.empty() && m.cfg.fonts.front().find("Nerd") != std::string::npos ? IconSet::nerd : IconSet::letters;
     t.motion_scale = 0.0f;   // a terminal never animates its chrome
     // window.opacity: the window is CLEARED to the paper at this alpha
     t.window_opacity = m.cfg.opacity;
