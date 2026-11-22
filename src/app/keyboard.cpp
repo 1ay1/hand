@@ -41,6 +41,11 @@ App::Cmd App::update(Model& m, FontZoom z) {
         case Zoom::reset: m.font_size = m.cfg.font_size; break;
     }
     fit(m);
+    // the cursor is the size of the new cells: show it, don't leave the
+    // answer to the next blink (an empty screen in the blink's off phase
+    // drew the same frame, measured as 200 ms zooms)
+    m.cursor_on = true;
+    m.tab().cur_a = 1.0f;
     return {};
 }
 

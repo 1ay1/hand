@@ -38,6 +38,7 @@ void selection(Runtime& rt, mayag::Vec2 size, Check& ok);   ///< selection, copy
 void tab_list(Runtime& rt, mayag::Vec2 size, Check& ok);   ///< Tabs keeps its invariants
 void tabs(Runtime& rt, mayag::Vec2 size, Check& ok);   ///< tabs: open, switch, move, drag, close, background output
 void caches_exact(Runtime& rt, mayag::Vec2 size, Check& ok);   ///< every cache draws what a fresh frame draws
+void keystroke(Runtime& rt, mayag::Vec2 size, Check& ok);   ///< a typed key's echo leaves nothing animating
 void tui_mouse(Runtime& rt, mayag::Vec2 size, Check& ok);   ///< the mouse in a TUI: hover (1003) and drags (1002)
 void pane_drag(Runtime& rt, mayag::Vec2 size, Check& ok);   ///< the file pane's edge follows the pointer; grids wait for the drag
 void mac(Runtime& rt, mayag::Vec2 size, Check& ok);   ///< the Mac: command shortcuts, the input method

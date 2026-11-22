@@ -195,6 +195,24 @@ App::Cmd App::init(Model& m, const Flags& f) {
 }
 
 namespace {
+/// The echo of a keystroke: the cursor stepped a cell or two along its row,
+/// just after you typed. It is THERE at once -- no glide, no tail. A glide
+/// between keys keeps a frame drawing every refresh, and a compositor busy
+/// with that frame shows the echo a whole refresh later (measured on
+/// Hyprland: typing p50 15 ms gliding, 3.3 ms not). Bigger jumps -- an
+/// editor's motions, a new prompt -- still travel.
+void settle_typed_cursor(const Model& m, Session& se) {
+    if (m.cfg.cursor_anim == CursorAnim::none || !se.cur_known || m.time - se.fx.typed_at > 0.35) return;
+    const auto cur = se.term->cursor();
+    const float tx = static_cast<float>(cur.col), ty = static_cast<float>(cur.row);
+    if (ty != se.cur_y || std::fabs(tx - se.cur_x) > 2.5f) return;
+    se.cur_x = tx;
+    se.cur_y = ty;
+    se.fx.vx = se.fx.vy = 0.0f;
+    se.fx.tx = tx;
+    se.fx.ty = ty;
+}
+
 /// Output for a tab that is not in front: fed and marked unread, and a long
 /// command finishing there is announced, naming the tab.
 void feed_background(Model& m, std::size_t i, const std::string& bytes) {
@@ -233,6 +251,7 @@ App::Cmd App::update(Model& m, Output o) {
     m.tab().bytes += o.bytes.size();
     const int off0 = m.tab().term->scroll_offset(), hist0 = m.tab().term->history();
     const Effects fx = m.tab().term->feed(o.bytes, m.wall_ms);
+    settle_typed_cursor(m, m.tab());
     {   // toe keeps a scrolled-back view still by bumping its offset: follow it
         const int off1 = m.tab().term->scroll_offset();
         if (off0 > 0 && off1 != off0) {

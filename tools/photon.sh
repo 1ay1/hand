@@ -51,7 +51,7 @@ case "$SCEN" in scroll|select) PROG="seq 1 20000; exec cat" ;; esac
 HOME_WS=$(hyprctl activeworkspace -j | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
 trap 'hyprctl eval "hl.dispatch(hl.dsp.focus({ workspace = \"$HOME_WS\" }))" >/dev/null 2>&1' EXIT
 hyprctl eval 'hl.dispatch(hl.dsp.focus({ workspace = "77" }))' >/dev/null   # the name: a number is ignored
-env MAYAG_PHOTON=2 HAND_CONFIG="$DIR/hand.vibe" "$@" setsid "$HAND" -e "$PROG" </dev/null >"$DIR/out.log" 2>&1 &
+env MAYAG_PHOTON=${PHOTON_TRACE:-2} HAND_CONFIG="$DIR/hand.vibe" "$@" setsid "$HAND" -e "$PROG" </dev/null >"$DIR/out.log" 2>&1 &
 PID=$!
 i=0
 while [ $i -lt 50 ]; do   # up to 5 s for the window
@@ -63,7 +63,7 @@ done
 set -- $GEO
 ADDR=$1; WX=$2; WY=$3; WW=$4; WH=$5
 hyprctl dispatch focuswindow "address:$ADDR" >/dev/null
-hyprctl eval 'hl.dispatch(hl.dsp.window.fullscreen({ mode = "fullscreen" }))' >/dev/null
+[ -z "${PHOTON_WINDOWED:-}" ] && hyprctl eval 'hl.dispatch(hl.dsp.window.fullscreen({ mode = "fullscreen" }))' >/dev/null
 sleep 0.6
 set -- $(hyprctl clients -j | python3 -c "import json,sys; c=next(c for c in json.load(sys.stdin) if c['pid']==$PID); print(c['at'][0],c['at'][1],c['size'][0],c['size'][1])")
 WX=$1; WY=$2; WW=$3; WH=$4
@@ -82,23 +82,29 @@ case "$SCEN" in drag|select|scroll) ;;   # pointer input goes to the surface und
     *) if [ "$FOCUS" != "$PID" ]; then echo "photon: hand did not get the focus; not driving it"; kill $PID; exit 1; fi ;; esac
 
 key()   { wtype "$@"; sleep 0.03; }
+# A modified chord. wtype gives the FIRST keysym it sends keycode 9, and the
+# compositor matches its binds against the real keymap, where 9 is Escape:
+# `wtype -M ctrl -M shift -k e` is ctrl+shift+Escape to Hyprland (a btop
+# window per press). So a bare Shift_L goes first, unmodified, to take keycode 9 (plain
+# Escape is no bind; hand ignores a lone modifier), and the chord's key gets keycode 10.
+chord() { wtype -k Shift_L "$@"; sleep 0.03; }
 mouse() { "$VMOUSE" $SCREEN; }
 TABS=1
 k=0
 case "$SCEN" in
     type)     while [ $k -lt "$N" ]; do key -d 1 a; k=$((k+1)); done ;;
-    settings) while [ $k -lt "$N" ]; do key -M ctrl -k comma -m ctrl; k=$((k+1)); done
-              [ $((N % 2)) = 1 ] && key -M ctrl -k comma -m ctrl ;;
+    settings) while [ $k -lt "$N" ]; do chord -M ctrl -k comma -m ctrl; k=$((k+1)); done
+              [ $((N % 2)) = 1 ] && chord -M ctrl -k comma -m ctrl ;;
     zoom)     while [ $k -lt "$N" ]; do
-                  if [ $((k % 2)) = 0 ]; then key -M ctrl -k equal -m ctrl; else key -M ctrl -k minus -m ctrl; fi
+                  if [ $((k % 2)) = 0 ]; then chord -M ctrl -k equal -m ctrl; else chord -M ctrl -k minus -m ctrl; fi
                   k=$((k+1))
               done ;;
-    pane)     while [ $k -lt "$N" ]; do key -M ctrl -M shift -k e -m shift -m ctrl; k=$((k+1)); done
-              [ $((N % 2)) = 1 ] && key -M ctrl -M shift -k e -m shift -m ctrl ;;
-    tabs)     key -M ctrl -M shift -k t -m shift -m ctrl; key -M ctrl -M shift -k t -m shift -m ctrl
-              key -M ctrl -M shift -k t -m shift -m ctrl; TABS=4; sleep 0.5
-              while [ $k -lt "$N" ]; do key -M ctrl -k Tab -m ctrl; k=$((k+1)); done ;;
-    drag)     key -M ctrl -M shift -k e -m shift -m ctrl; sleep 0.5
+    pane)     while [ $k -lt "$N" ]; do chord -M ctrl -M shift -k e -m shift -m ctrl; k=$((k+1)); done
+              [ $((N % 2)) = 1 ] && chord -M ctrl -M shift -k e -m shift -m ctrl ;;
+    tabs)     chord -M ctrl -M shift -k t -m shift -m ctrl; chord -M ctrl -M shift -k t -m shift -m ctrl
+              chord -M ctrl -M shift -k t -m shift -m ctrl; TABS=4; sleep 0.5
+              while [ $k -lt "$N" ]; do chord -M ctrl -k Tab -m ctrl; k=$((k+1)); done ;;
+    drag)     chord -M ctrl -M shift -k e -m shift -m ctrl; sleep 0.5
               GX=$((WX + 300 - 2)); GY=$((WY + WH / 2))
               { echo "m $GX $GY"; echo "s 80"; echo d; echo "s 40"
                 while [ $k -lt "$N" ]; do echo "m $((GX + (k % 20) * 10)) $GY"; echo "s 30"; k=$((k+1)); done
@@ -117,7 +123,7 @@ sleep 0.4
 t=0   # end it from inside: each tab's cat ends, the last tab closes, hand quits
 # never Escape here: with a modifier still latched it is a compositor binding
 # (ctrl+shift+Escape opened 129 btop windows). The drag left the pane open.
-while [ $t -lt $TABS ]; do wtype -k Return; sleep 0.05; wtype -M ctrl d -m ctrl; sleep 0.15; t=$((t+1)); done
+while [ $t -lt $TABS ]; do wtype -k Return; sleep 0.05; wtype -k Shift_L -M ctrl d -m ctrl; sleep 0.15; t=$((t+1)); done
 i=0; while kill -0 $PID 2>/dev/null && [ $i -lt 50 ]; do i=$((i+1)); sleep 0.1; done
 if kill -0 $PID 2>/dev/null; then
     echo "photon: hand did not exit"
@@ -129,7 +135,8 @@ python3 - "$DIR/out.log" <<'PY' || echo "photon: no measurement"
 import sys
 r=[l.split() for l in open(sys.argv[1]) if l.startswith('photon ')]
 if not r: sys.exit(1)
-tot=sorted(float(x[10]) for x in r); n=len(tot)
+# photon T  to-us A  in-us B  compositor C  =  TOTAL ms  (period P)
+tot=sorted(float(x[x.index('=')+1]) for x in r); n=len(tot)
 st=[sum(float(x[i]) for x in r)/n for i in (3,5,7)]
 print("mayag: input->photon  best %.2f  p50 %.2f  mean %.2f  p95 %.2f  worst %.2f ms  (%d frames)" % (tot[0], tot[n//2], sum(tot)/n, tot[min(n-1,int(n*.95))], tot[-1], n))
 print("  stages (mean): to us %.2f  in us %.2f  compositor %.2f ms" % tuple(st))

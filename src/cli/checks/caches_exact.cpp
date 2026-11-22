@@ -72,6 +72,25 @@ void caches_exact([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Chec
     same("back from the alternate screen", "\x1b[?1049l");
     same("clearing the scrollback", "\x1b[3J");
     same("a full reset", "\x1b" "c");
+    // zoom: every glyph re-laid at a new size, the grid re-fitted
+    out("zoom me\r\n");
+    for (int i = 0; i < 6; ++i) {
+        rt.tick(); rt.tick();
+        const auto before = rt.window().read_pixels();
+        rt.press_key(i % 2 == 0 ? Key::equal : Key::minus, Mods{.ctrl = true});
+        const auto after = rt.window().read_pixels();
+        ok(before != after, (std::string{"zoom "} + (i % 2 == 0 ? "in" : "out") + " changes the very next frame").c_str());
+        same(i % 2 == 0 ? "after zooming in" : "after zooming out", "");
+    }
+    {   // an empty screen with the cursor in its blink's off phase: the zoom is still seen at once
+        out("\x1b[2J\x1b[H");
+        rt.send(App::Msg{mayag::Edit<App::Model>{[](App::Model& mm) { mm.cursor_on = false; mm.tab().cur_a = 0.0f; }}});
+        rt.tick(); rt.tick();
+        const auto before = rt.window().read_pixels();
+        rt.press_key(Key::equal, Mods{.ctrl = true});
+        ok(rt.window().read_pixels() != before, "zooming a blank screen mid-blink shows at once (the cursor, at its new size)");
+        rt.press_key(Key::minus, Mods{.ctrl = true});
+    }
 }
 
 }  // namespace hand::cli::checks
