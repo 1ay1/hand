@@ -6,14 +6,22 @@
       "displayName": "Dev: the edit-build-test loop (hand at -O0, mayag + toe at -O2, PCH, ccache, mold)",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Dev", "CMAKE_CXX_COMPILER": "clang++", "CMAKE_C_COMPILER": "clang" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Dev",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_C_COMPILER": "clang"
+      }
     },
     {
       "name": "rel",
       "displayName": "Release with symbols: shipping, --bench, --flood",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build-rel",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "CMAKE_CXX_COMPILER": "clang++", "CMAKE_C_COMPILER": "clang" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_C_COMPILER": "clang"
+      }
     },
     {
       "name": "tsan",
@@ -22,22 +30,101 @@
       "binaryDir": "${sourceDir}/build-tsan",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Dev",
-        "CMAKE_CXX_COMPILER": "clang++", "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_C_COMPILER": "clang",
         "CMAKE_CXX_FLAGS": "-fsanitize=thread -fno-omit-frame-pointer",
         "CMAKE_C_FLAGS": "-fsanitize=thread",
         "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=thread"
       }
+    },
+    {
+      "name": "asan",
+      "displayName": "AddressSanitizer + UBSan: memory errors and undefined behaviour",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-asan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Dev",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer",
+        "CMAKE_C_FLAGS": "-fsanitize=address,undefined -fno-sanitize-recover=undefined",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined"
+      }
     }
   ],
   "buildPresets": [
-    { "name": "dev",  "configurePreset": "dev",  "targets": ["hand"], "jobs": 12 },
-    { "name": "rel",  "configurePreset": "rel",  "targets": ["hand"], "jobs": 12 },
-    { "name": "tsan", "configurePreset": "tsan", "targets": ["hand"], "jobs": 12 }
+    {
+      "name": "dev",
+      "configurePreset": "dev",
+      "targets": [
+        "hand"
+      ],
+      "jobs": 12
+    },
+    {
+      "name": "rel",
+      "configurePreset": "rel",
+      "targets": [
+        "hand"
+      ],
+      "jobs": 12
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan",
+      "targets": [
+        "hand"
+      ],
+      "jobs": 12
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan",
+      "targets": [
+        "hand"
+      ],
+      "jobs": 12
+    }
   ],
   "testPresets": [
-    { "name": "dev",  "configurePreset": "dev",  "execution": { "jobs": 12, "timeout": 150 } },
-    { "name": "tsan", "configurePreset": "tsan", "filter": { "include": { "name": "app_headless" } },
-      "environment": { "TSAN_OPTIONS": "halt_on_error=1:second_deadlock_stack=1" },
-      "execution": { "timeout": 600 } }
+    {
+      "name": "dev",
+      "configurePreset": "dev",
+      "execution": {
+        "jobs": 12,
+        "timeout": 150
+      }
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan",
+      "filter": {
+        "include": {
+          "name": "app_headless"
+        }
+      },
+      "environment": {
+        "TSAN_OPTIONS": "halt_on_error=1:second_deadlock_stack=1"
+      },
+      "execution": {
+        "timeout": 600
+      }
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan",
+      "filter": {
+        "include": {
+          "name": "app_headless"
+        }
+      },
+      "environment": {
+        "ASAN_OPTIONS": "detect_leaks=1:abort_on_error=1",
+        "UBSAN_OPTIONS": "print_stacktrace=1:halt_on_error=1"
+      },
+      "execution": {
+        "timeout": 600
+      }
+    }
   ]
 }

@@ -329,9 +329,11 @@ if (shot == "hosts" || shot == "ssh" || shot == "ssh-drop" || shot.rfind("manage
     } else if (shot.rfind("manager", 0) == 0) {
         // the host manager: a detail view, editing a config host, a new host
         rt.send(hand::App::Msg{E7{[shot](hand::App::Model& m) {
-            auto& db = m.ssh.book.hosts[0];
-            db.forwards = {"L5432:localhost:5432", "D1080"};
-            db.command = "tmux new -A -s main";
+            {   // a reference into hosts dies at the push_back below: use it only here
+                auto& db = m.ssh.book.hosts[0];
+                db.command = "tmux new -A -s main";
+                db.forwards = {"L5432:localhost:5432", "L3000:grafana:3000", "D1080"};
+            }
             hand::Host mine; mine.alias = "lab-nas"; mine.hostname = "192.168.1.20"; mine.user = "admin";
             mine.port = 2200; mine.identity = "~/.ssh/id_ed25519"; mine.source = hand::HostSource::saved;
             mine.tags = {"home"}; mine.uses = 4; mine.last = static_cast<std::int64_t>(std::time(nullptr)) - 7200;
@@ -345,7 +347,6 @@ if (shot == "hosts" || shot == "ssh" || shot == "ssh-drop" || shot.rfind("manage
                 if (h.alias == "lab-nas" || h.alias == "pi") h.folder = "Home";
             }
             m.ssh.book.folders = {{"Work", "ops", "bastion", "~/.ssh/work_ed25519", 0}, {"Work/CI", "ci", "", "", 0}};
-            db.forwards = {"L5432:localhost:5432", "L3000:grafana:3000", "D1080"};
             m.ssh.manager.ports = {3000, 1080, 5432}; m.ssh.manager.port_owners = {"ssh", "ssh", "postgres"};
             hand::ImportSource ps{"PuTTY", "HKCU\\Software\\SimonTatham\\PuTTY\\Sessions", {}};
             for (const char* a : {"router", "nas-old", "vpn-gw"}) { hand::Host h; h.alias = a; h.hostname = a; ps.hosts.push_back(h); }
