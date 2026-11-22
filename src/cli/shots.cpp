@@ -79,6 +79,15 @@ if (shot == "bench") {
     run("streaming (a line/frame)", [&](int i) { rt.post(hand::App::Msg{hand::App::Output{"line " + std::to_string(i) + " \x1b[33mwarning\x1b[0m: something\r\n"}}); });
     run("scrolling history", [&](int i) { rt.window().scroll(Vec2{400.0f, 300.0f}, Vec2{0.0f, (i / 30) % 2 ? -48.0f : 48.0f}); });
     run("pointer over tabs", [&](int i) { rt.window().move_to(Vec2{40.0f + static_cast<float>(i % 60) * 6.0f, 14.0f}); });
+    {   // the pane edge with a short history: the grid re-wraps live every frame
+        rt.send(hand::App::Msg{hand::App::TogglePane{}});
+        rt.send(hand::App::Msg{hand::App::PaneResize{true, 0.0f}});
+        run("dragging pane, live re-wrap", [&](int i) {
+            rt.post(hand::App::Msg{hand::App::PaneResize{false, static_cast<float>((i % 60 < 30 ? i % 60 : 60 - i % 60) * 3)}});
+        });
+        rt.send(hand::App::Msg{hand::App::PaneResize{false, 0.0f, true}});
+        rt.send(hand::App::Msg{hand::App::TogglePane{}});
+    }
     {   // the file pane's edge, dragged 3 px a frame over a FULL scrollback (10k lines of 120 chars)
         std::string hist;
         for (int i = 0; i < 10000; ++i)

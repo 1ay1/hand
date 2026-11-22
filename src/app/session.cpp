@@ -28,6 +28,8 @@ float App::Model::strip_h() const noexcept {
 }
 
 void App::fit(Model& m) {
+    // a re-wrap of at most this many cells (~2.5 ms) is done live during a drag
+    constexpr std::int64_t kLiveReflowCells = 300'000;
     // the file pane takes the right side; the terminal keeps at least ~320 px
     if (m.pane.open) m.pane.width = std::clamp(m.pane.width, 220.0f, std::max(220.0f, std::min(640.0f, m.win.x - 320.0f)));
     const float side = m.pane.open ? m.pane.width : 0.0f;
@@ -44,12 +46,21 @@ void App::fit(Model& m) {
     const int rows = std::max(1, static_cast<int>((m.size.y - 2.0f * pad) / ch));
     m.metrics.fit_cols = cols;
     m.metrics.fit_rows = rows;
-    // A pane edge being dragged: the layout follows the pointer every frame,
-    // but the grids keep their size until the drag pauses (PaneSettle). A
-    // grid resize rewraps all of history (14 ms a tab at 10k lines) and
-    // sends every shell SIGWINCH -- per column, it ran the drag at 20 fps.
-    // Meanwhile the grid draws clipped to (or short of) the new space.
-    if (m.pane.dragging) return;
+    // A pane edge being dragged: the layout follows the pointer every frame.
+    // The grids follow too when that is cheap -- a re-wrap costs ~8 ns a cell
+    // of history, so a tab with a few thousand lines re-wraps live, like
+    // kitty or foot. A big one (10k lines: ~14 ms) would drop frames under
+    // the pointer: it keeps its size, drawn clipped or short, and fits once
+    // the drag pauses (PaneSettle). Background tabs always wait.
+    if (m.pane.dragging) {
+        Session& se = m.tab();
+        const std::int64_t cells = static_cast<std::int64_t>(se.term ? se.term->history() + rows : 0) * cols;
+        if (se.term && cells <= kLiveReflowCells && (cols != se.term->cols() || rows != se.term->rows())) {
+            se.term->resize(cols, rows);
+            se.grid_key = 0;
+        }
+        return;
+    }
     // every tab, not just the visible one: a background shell sees the real size
     for (std::size_t i = 0; i < m.tab_count(); ++i) {
         Session& se = m.at(i);
