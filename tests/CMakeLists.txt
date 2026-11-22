@@ -51,6 +51,8 @@ add_test(NAME mayag_one_look
                  -P ${_MAYAG}/tests/lint/one_look.cmake)
 add_test(NAME mayag_no_byte_hash
          COMMAND ${CMAKE_COMMAND} -DROOT=${_MAYAG}/include/mayag -P ${_MAYAG}/tests/lint/no_byte_hash.cmake)
+add_test(NAME mayag_type_scale
+         COMMAND ${CMAKE_COMMAND} -DROOT=${_MAYAG} -P ${_MAYAG}/tests/lint/type_scale.cmake)
 set_tests_properties(layering purity concurrency_src concurrency_include_hand concurrency_allowlist_tight_src
                      concurrency_allowlist_tight_include_hand mayag_layering mayag_uses_jaal_public_api
-                     mayag_concurrency jaal_upward mayag_one_look mayag_no_byte_hash PROPERTIES LABELS "static")
+                     mayag_concurrency jaal_upward mayag_one_look mayag_no_byte_hash mayag_type_scale PROPERTIES LABELS "static")

@@ -37,6 +37,10 @@ Theme App::theme(const Model& m) {
     t.font_size = m.cfg.ui_follows && m.cfg.font_size > 0.0f
         ? std::clamp(m.ui_font_size * m.font_size / m.cfg.font_size, 9.0f, 28.0f) : m.ui_font_size;
     t.font_family = ui_family_of(m.cfg);   // font.ui: every label, tab and panel inherits it
+    // The two sizes a user sets, and nothing else: the interface size above,
+    // the terminal's here. Every other text size is a tier of the theme's
+    // type scale from one of them (mayag style/type.hpp).
+    t.content_size = m.font_size;
     // Nerd icons only when the lead face carries them; otherwise plain glyphs (no tofu)
     t.icons = !m.cfg.fonts.empty() && m.cfg.fonts.front().find("Nerd") != std::string::npos ? IconSet::nerd : IconSet::letters;
     t.motion_scale = 0.0f;   // a terminal never animates its chrome
