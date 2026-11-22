@@ -37,6 +37,12 @@ App::Cmd App::update(Model& m, NewTab) {
 App::Cmd App::update(Model& m, CloseTab c) {
     const std::size_t i = c.tab.get();
     if (i >= m.tab_count()) return {};
+    // unsaved edits are always asked about -- "close.confirm never" is about
+    // running programs, and a lost edit can't be got back
+    if (c.confirm == Confirm::asking && !m.dialog.ask && m.at(i).file && !m.at(i).file->loading && m.at(i).file->st.ed.dirty()) {
+        m.dialog.ask = Ask{.kind = Ask::Kind::close_file, .tab = c.tab, .focus = 2};
+        return {};
+    }
     if (c.confirm == Confirm::asking && m.cfg.close_confirm != CloseConfirm::never && !m.dialog.ask) {
         const bool busy = !busy_of(m, m.at(i), nullptr).empty();
         if (busy || m.cfg.close_confirm == CloseConfirm::always) {

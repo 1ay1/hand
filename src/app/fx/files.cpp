@@ -202,4 +202,47 @@ void preview_local(Sink out, std::string path, int lines) {
     out.send(App::Msg{App::PanePreview{std::move(path), std::move(pv)}});
 }
 
+void read_file(Sink out, SessionId sid, std::string path) {
+    App::FileLoaded r{.sid = sid, .path = path};
+    std::error_code ec;
+    const auto size = fs::file_size(path, ec);
+    if (ec) { r.error = ec.message(); out.send(App::Msg{std::move(r)}); return; }
+    if (size > 32u * 1024u * 1024u) {   // the editor holds the whole file: past this it is a log, not a source
+        r.error = "too large to edit (" + file_pane_detail::human(size) + ")";
+        out.send(App::Msg{std::move(r)});
+        return;
+    }
+    std::ifstream f(path, std::ios::binary);
+    if (!f) { r.error = "cannot read it"; out.send(App::Msg{std::move(r)}); return; }
+    r.text.resize(static_cast<std::size_t>(size));
+    f.read(r.text.data(), static_cast<std::streamsize>(size));
+    r.text.resize(static_cast<std::size_t>(f.gcount()));
+    // a NUL in the first 8 KB: a binary (git's test)
+    if (r.text.find('\0') < 8192) { r.binary = true; r.text.clear(); }
+    out.send(App::Msg{std::move(r)});
+}
+
+void write_file(Sink out, SessionId sid, std::string path, std::string text, std::uint64_t point) {
+    // Write a sibling, then rename it over the file: a crash or a full disk
+    // mid-write leaves the old file whole, never half of the new one.
+    App::FileSaved r{.sid = sid, .point = point};
+    const fs::path target{path};
+    fs::path tmp = target;
+    tmp += ".hand-save~";
+    std::error_code ec;
+    const auto perms = fs::status(target, ec).permissions();
+    const bool existed = !ec;
+    {
+        std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+        if (!f) { r.error = "cannot write in " + target.parent_path().string(); out.send(App::Msg{std::move(r)}); return; }
+        f.write(text.data(), static_cast<std::streamsize>(text.size()));
+        f.flush();
+        if (!f) { r.error = "the write failed (disk full?)"; fs::remove(tmp, ec); out.send(App::Msg{std::move(r)}); return; }
+    }
+    if (existed) fs::permissions(tmp, perms, ec);   // an executable script stays executable
+    fs::rename(tmp, target, ec);
+    if (ec) { r.error = ec.message(); fs::remove(tmp, ec); }
+    out.send(App::Msg{std::move(r)});
+}
+
 }  // namespace hand::fx

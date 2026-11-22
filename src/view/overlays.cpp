@@ -27,15 +27,15 @@ using namespace hand::detail;
 void overlays(const Ctx& c, const Model& m) {
     const Session& se = m.tab();
     settings_overlay(c, m);
-    if (se.search_open)
+    if (se.search_open && !se.file)
         term_search(c, "search", node_id("term"), se.search_query, false, false,
                     static_cast<int>(se.term->search_current()) - 1, static_cast<int>(se.term->search_count()));
-    if (m.time - m.resized_at < 0.8)
+    if (m.time - m.resized_at < 0.8 && !se.file)
         resize_hud(c, "hud", se.term->cols(), se.term->rows(),
                    std::to_string(static_cast<int>(m.size.x)) + "\u00D7" + std::to_string(static_cast<int>(m.size.y)) + "px");
     if (m.toast.card && m.time - m.toast.at < 3.0 && !m.settings.open)
         toasts(c, "toasts", {*m.toast.card}, m.size);
-    if (se.hint) hint_bar(c, "hint.tip", {.count = se.hint->hints.size(), .typed = se.hint->typed, .font_size = m.font_size, .y = m.size.y - 40.0f});
+    if (se.hint && !se.file) hint_bar(c, "hint.tip", {.count = se.hint->hints.size(), .typed = se.hint->typed, .font_size = m.font_size, .y = m.size.y - 40.0f});
     ssh_overlays(c, m);
     dialog(c, m);
 }

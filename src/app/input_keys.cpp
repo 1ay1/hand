@@ -26,6 +26,34 @@ using namespace mayag;
 using namespace mayag::dsl;
 using namespace hand::detail;
 
+/// A key in an EDITOR tab. The window keeps its own chords -- tabs (new,
+/// close, switch, move), settings, the file pane, the host picker and
+/// manager, zoom -- and the editor gets every other key, ⌘ shortcuts
+/// included. (They are the editor's: ⌘F finds in the file, ⌘C copies its
+/// selection, ⌘Z undoes an edit.) Returns nothing to fall through to the
+/// window's handling.
+static std::optional<App::Msg> editor_key(const App::Model& m, const KeyEvent& k) {
+    const Mods md = k.mods;
+    const bool cs = md.ctrl && md.shift && !md.alt && !md.super;
+    const bool cmd_only = md.super && !md.ctrl && !md.alt;
+    // the window's
+    if (cs && (k.key == Key::t || k.key == Key::w || k.key == Key::e || k.key == Key::s || k.key == Key::h ||
+               k.key == Key::tab || k.key == Key::left || k.key == Key::right || k.key == Key::page_up || k.key == Key::page_down))
+        return std::nullopt;
+    if (md.ctrl && !md.alt && !md.super && (k.key == Key::tab || k.key == Key::page_up || k.key == Key::page_down)) return std::nullopt;
+    if (md.ctrl && !md.shift && !md.alt && k.key == Key::comma) return std::nullopt;                  // settings
+    if (md.ctrl && !md.alt && (k.key == Key::equal || k.key == Key::minus || k.key == Key::n0)) return std::nullopt;   // zoom
+    if (md.alt && !md.ctrl && !md.shift && !md.super && k.key >= Key::n1 && k.key <= Key::n9 && m.tab_count() > 1) return std::nullopt;
+    if (cmd_only && (k.key == Key::t || k.key == Key::w || k.key == Key::comma || k.key == Key::equal || k.key == Key::minus ||
+                     k.key == Key::n0 || (k.key >= Key::n1 && k.key <= Key::n9)))
+        return std::nullopt;
+    if (md.super && md.shift && !md.ctrl && (k.key == Key::bracket_left || k.key == Key::bracket_right)) return std::nullopt;   // ⌘⇧[ ]
+    if (k.key == Key::alt && m.tab_count() > 1) return std::nullopt;   // hold alt: the tab numbers
+    // the editor's
+    if (auto op = text_editor_key(m.tab().file->st, k.key, md)) return App::EditorOp{std::move(*op)};
+    return App::Swallow{};
+}
+
 /// The Mac's ⌘ shortcuts, as the chord hand already binds for the same
 /// action -- one implementation each. ⌘ never reaches the shell (it has no
 /// encoding), so a ⌘ key that maps to nothing is simply consumed.
@@ -59,6 +87,9 @@ static std::optional<KeyEvent> mac_chord(const KeyEvent& k) {
 
 std::optional<App::Msg> App::on(const Model& m, const KeyEvent& k_in) {
     const Session& se = m.tab();
+    if (se.file && !m.settings.open && !m.ssh.picker.open && !m.ssh.manager.open && !m.dialog.ask &&
+        !(m.pane.open && m.pane.ui.focused))
+        if (auto msg = editor_key(m, k_in)) return msg;
     if (k_in.mods.super && !k_in.mods.ctrl && !k_in.mods.alt && !m.settings.open && !m.ssh.picker.open && !m.dialog.ask) {
         // ⌘K: clear screen and history (Terminal.app, iTerm), and the shell redraws its prompt
         if (k_in.key == Key::k)
@@ -135,6 +166,9 @@ std::optional<App::Msg> App::on(const Model& m, const KeyEvent& k_in) {
         const auto i = static_cast<std::size_t>(static_cast<int>(k.key) - static_cast<int>(Key::n1));
         if (m.tab_count() > 1) return SelectTab{TabIndex{k.key == Key::n9 ? m.tab_count() - 1 : std::min(i, m.tab_count() - 1)}};
     }
+    if (md.ctrl && !md.alt && (k.key == Key::equal || k.key == Key::minus || k.key == Key::n0))
+        return FontZoom{k.key == Key::equal ? Zoom::in : k.key == Key::minus ? Zoom::out : Zoom::reset, md.shift};
+    if (se.file) return Swallow{};   // an editor tab: the rest are the terminal's (hints, search, prompts)
     if (se.hint) {
         if (k.key == Key::escape || (cs && k.key == Key::space))
             return CloseHints{};
@@ -158,8 +192,6 @@ std::optional<App::Msg> App::on(const Model& m, const KeyEvent& k_in) {
     // foot's bindings
     if (cs && k.key == Key::c) return Copy{};
     if ((cs && k.key == Key::v) || (md.shift && !md.ctrl && k.key == Key::insert)) return PasteReq{};
-    if (md.ctrl && !md.alt && (k.key == Key::equal || k.key == Key::minus || k.key == Key::n0))
-        return FontZoom{k.key == Key::equal ? Zoom::in : k.key == Key::minus ? Zoom::out : Zoom::reset, md.shift};
     if (md.shift && !md.ctrl && (k.key == Key::page_up || k.key == Key::page_down) && !se.term->alt_screen()) {
         return ScrollBy{static_cast<float>((k.key == Key::page_up ? 1 : -1) * std::max(se.term->rows() - 2, 1))};
     }
@@ -215,6 +247,10 @@ std::optional<App::Msg> App::on(const Model& m, const TextEvent& t) {
     if (m.settings.open) {
         if (auto op = settings_panel_text(m.settings.ui, setting_specs(m.cfg), t.text)) return Panel{std::move(*op)};
         return std::nullopt;
+    }
+    if (se.file) {   // an editor tab: the text is typed into the file
+        if (auto op = text_editor_text(se.file->st, t.text)) return EditorOp{std::move(*op)};
+        return Swallow{};
     }
     if (se.search_open)
         return SearchText{t.text};

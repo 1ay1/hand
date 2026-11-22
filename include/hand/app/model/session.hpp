@@ -9,6 +9,7 @@
 #include <hand/ssh/hosts.hpp>
 
 #include <mayag/mayag.hpp>
+#include <mayag/widget/text_editor.hpp>
 #include <mayag/widget/terminal_view.hpp>
 
 #include <cstddef>
@@ -55,11 +56,27 @@ struct Launch {
     std::optional<SshTarget> ssh;
 };
 
+/// A file open in a tab: what the editor holds, and where it came from.
+/// A tab with one is an EDITOR tab: no pty is ever started for it (its Term
+/// is a tiny blank grid, so code that asks any tab for its screen still
+/// works), and the keyboard, the pointer and the view belong to the editor.
+struct FileDoc {
+    std::string                    path;          ///< absolute, local
+    mayag::dsl::TextEditorState    st;            ///< the text, cursors, find
+    bool                           loading = true;
+    std::string                    error;         ///< could not open it (the tab says why, and edits nothing)
+    std::string                    save_error;    ///< the last save failed: why (the text is still here)
+    std::optional<std::uint64_t>   saving;        ///< a write of this save point is in flight
+    bool                           close_after_save = false;   ///< "save" in the close dialog
+};
+
 /// One tab: a shell on a pty, the screen toe keeps for it, and everything
 /// that animates over it. Lives in Tabs; the window never holds one itself.
 struct Session {
     SessionId               sid = kNoSession;     ///< stable id: routes pty output, keys the stream
     PtyRef                  pty;
+    /// Engaged: this tab is a file in the editor, not a shell.
+    std::optional<FileDoc>  file;
     // What this tab wants of its pty. update only SAYS it (append bytes, ask
     // for a program, resize the term); App's root update turns the difference
     // into effects after every step (App::drain, src/app/fx/ performs them),

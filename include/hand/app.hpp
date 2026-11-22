@@ -72,6 +72,8 @@ struct App {
     using TunnelProbe = msg::TunnelProbe; using TunnelScan = msg::TunnelScan;
     using TogglePane = msg::TogglePane; using PaneOp = msg::PaneOp;         using PaneListed = msg::PaneListed;
     using PaneResize = msg::PaneResize; using PaneWatch = msg::PaneWatch;   using PanePreview = msg::PanePreview;
+    using OpenFile = msg::OpenFile;     using FileLoaded = msg::FileLoaded; using EditorOp = msg::EditorOp;
+    using FileSaved = msg::FileSaved;   using EditorPasted = msg::EditorPasted;
     using Notice = msg::Notice;
     using Spawned = msg::Spawned;       using Probe = msg::Probe;           using Probed = msg::Probed;
     using HostsLoaded = msg::HostsLoaded;
@@ -195,6 +197,16 @@ struct App {
     static Cmd update(Model& m, PaneResize);
     static Cmd update(Model& m, PaneWatch);
     static Cmd update(Model& m, PanePreview);
+    // EditorMsg (src/app/editor.cpp): files open in tabs
+    static Cmd update(Model& m, OpenFile);
+    static Cmd update(Model& m, FileLoaded);
+    static Cmd update(Model& m, EditorOp);
+    static Cmd update(Model& m, FileSaved);
+    static Cmd update(Model& m, EditorPasted);
+    /// Carry out what the active editor asked for (save, clipboard).
+    static Cmd editor_actions(Model& m);
+    /// Write tab `i`'s file (the state now); empty when there is nothing to do.
+    static Cmd save_file(Model& m, std::size_t i);
     /// The pane follows the active tab's directory: list it if it moved.
     static Cmd pane_sync(Model& m);
     // Edit: a direct model edit (the self-test and scripted shots only)

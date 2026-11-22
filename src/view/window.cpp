@@ -2,7 +2,8 @@
 //
 //   tabbed_window
 //   ├── tab_strip            one TermTabInfo per session         (view/tabs.cpp)
-//   └── the terminal         terminal_view + its overlays        (view/terminal.cpp)
+//   └── the active tab       a terminal: terminal_view + overlays (view/terminal.cpp)
+//       │                    a file: text_editor               (view/editor.cpp)
 //       └── file_pane        the tab's directory, when open (ctrl+shift+e)
 //
 // Plus what floats over the whole window -- dialog, toasts, host picker,
@@ -24,7 +25,7 @@ using namespace mayag::dsl;
 Node App::view(const Model& m) {
     const Ctx& c = ctx();
     view::overlays(c, m);
-    Node body = view::terminal(c, m);
+    Node body = m.tab().file ? view::editor(c, m) : view::terminal(c, m);
     if (m.pane.open) {   // the active tab's files, beside its terminal
         Node pane = file_pane(c, "files", m.pane.ui, detail::pane_props(m),
                               [](FilePaneOp op) -> App::Msg { return App::PaneOp{std::move(op)}; },

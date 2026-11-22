@@ -47,7 +47,10 @@ std::string one_line(const std::string& text) {
 }  // namespace
 
 App::Cmd App::update(Model& m, RequestQuit) {
-    if (m.cfg.close_confirm != CloseConfirm::never && !m.dialog.ask) {
+    bool unsaved = false;
+    for (std::size_t i = 0; i < m.tab_count(); ++i)
+        unsaved = unsaved || (m.at(i).file && !m.at(i).file->loading && m.at(i).file->st.ed.dirty());
+    if ((m.cfg.close_confirm != CloseConfirm::never || unsaved) && !m.dialog.ask) {
         bool busy = false;
         for (std::size_t i = 0; i < m.tab_count(); ++i) busy = busy || !busy_of(m, m.at(i), nullptr).empty();
         if (busy || m.cfg.close_confirm == CloseConfirm::always) {
@@ -65,7 +68,8 @@ App::Cmd App::update(Model& m, RememberToggle) {
 
 App::Cmd App::update(Model& m, DialogFocus f) {
     if (!m.dialog.ask) return {};
-    const std::size_t n = m.dialog.ask->kind == Ask::Kind::paste ? 3 : 2;   // the actions it offers
+    const auto kind = m.dialog.ask->kind;
+    const std::size_t n = kind == Ask::Kind::paste || kind == Ask::Kind::close_file ? 3 : 2;   // the actions it offers
     m.dialog.ask->focus = wrap(m.dialog.ask->focus, f.step, n);
     return {};
 }
@@ -77,6 +81,14 @@ App::Cmd App::update(Model& m, Answer a) {
     const auto* choice = std::get_if<Answer::Choose>(&a.pick);
     const std::size_t action = choice ? choice->action : 0;   // dismissing is cancelling
     const bool yes = action != 0;
+    if (asked.kind == Ask::Kind::close_file) {   // 0 cancel, 1 don't save, 2 save (no "don't ask again": edits matter)
+        if (action == 1) return update(m, CloseTab{asked.tab, Confirm::given});
+        if (action == 2 && asked.tab.get() < m.tab_count() && m.at(asked.tab.get()).file) {
+            m.at(asked.tab.get()).file->close_after_save = true;   // FileSaved closes it, if the write lands
+            return save_file(m, asked.tab.get());
+        }
+        return {};
+    }
     // "don't ask again": saved before whatever the answer does (a quit saves anyway)
     Cmd saved = yes && asked.remember && asked.kind != Ask::Kind::quit ? remember(m, asked.kind) : Cmd{};
     if (yes && asked.remember && asked.kind == Ask::Kind::quit) (void)remember(m, asked.kind);
@@ -91,6 +103,8 @@ App::Cmd App::update(Model& m, Answer a) {
             return yes ? Cmd::batch(std::move(saved), update(m, CloseTab{asked.tab, Confirm::given})) : Cmd{};
         case Ask::Kind::quit:
             return yes ? save_and_quit(m) : Cmd{};
+        case Ask::Kind::close_file:
+            return {};
     }
     return {};
 }

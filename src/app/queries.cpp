@@ -194,6 +194,7 @@ bool is_shell(const std::string& p) {
 
 /// What a tab is busy with ("" = just a prompt), and for how long.
 std::string busy_of(const Model& m, const Session& se, std::string* elapsed) {
+    if (se.file) return !se.file->loading && se.file->st.ed.dirty() ? "unsaved changes" : std::string{};
     if (!se.term || se.link.dropped) return {};
     std::string what;
     for (const auto& c : se.term->commands()) {   // shell integration knows exactly

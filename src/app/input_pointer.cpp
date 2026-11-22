@@ -31,6 +31,7 @@ std::optional<App::Msg> App::on(const Model& m, const ScrollEvent& s_win) {
     s.position.x -= term_left(m);
     if (m.settings.open || m.ssh.manager.open) return std::nullopt;   // the panel's scroll_view takes it
     if (in_pane(m, s_win.position.x)) return std::nullopt;   // the file pane's list
+    if (se.file) return std::nullopt;   // a file tab: its editor scrolls itself (text_editor's handlers)
     const float ch = std::max(m.metrics.cell_h, 1.0f);
     const int lines = static_cast<int>(std::round(s.delta.y / ch * m.cfg.scroll_lines));
     if (lines == 0 && (se.term->mouse_reporting() || se.term->alt_screen())) return std::nullopt;
@@ -61,6 +62,7 @@ std::optional<App::Msg> App::on(const Model& m, const MouseDown& e_win) {
     if (in_pane(m, e_win.position.x)) return std::nullopt;   // the file pane's
     if (m.pane.open && m.pane.ui.focused)   // a click on the terminal takes the keyboard back
         return PaneBlur{};
+    if (se.file) return std::nullopt;   // a file tab: the editor's own press handler
     if (minimap_on(m) && e.position.x > m.size.x - std::max(m.minimap.width, kMinimapRest)) return std::nullopt;   // the minimap's
     const int col = cell_of(e.position.x, m.metrics.origin_x, m.metrics.cell_w, se.term->cols());
     const int row = cell_of(e.position.y, m.metrics.origin_y, m.metrics.cell_h, se.term->rows());
@@ -110,6 +112,7 @@ std::optional<App::Msg> App::on(const Model& m, const MouseMove& e_win) {
     e.position.y -= term_top(m);   // terminal coordinates from here on
     e.position.x -= term_left(m);
     if (m.settings.open || m.ssh.manager.open) return std::nullopt;
+    if (se.file) return std::nullopt;   // no links, minimap or reporting over an editor
     if (in_pane(m, e_win.position.x) && se.mouse_button < 0 && !se.selecting) {   // the file pane's
         // the pointer left the terminal: the scrollback map and its peek fold away
         if (m.minimap.open || m.minimap.hover_y >= 0.0f || !se.hover_url.empty())
@@ -160,6 +163,7 @@ std::optional<App::Msg> App::on(const Model& m, const MouseUp& e_win) {
     MouseUp e = e_win;
     e.position.y -= term_top(m);   // terminal coordinates from here on
     e.position.x -= term_left(m);
+    if (se.file) return std::nullopt;
     if (se.mouse_button >= 0) {
         const int col = cell_of(e.position.x, m.metrics.origin_x, m.metrics.cell_w, se.term->cols());
         const int row = cell_of(e.position.y, m.metrics.origin_y, m.metrics.cell_h, se.term->rows());

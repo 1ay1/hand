@@ -12,6 +12,8 @@
 
 
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <thread>
 #include <chrono>
 
@@ -375,6 +377,32 @@ if (shot.rfind("files", 0) == 0) {   // the file pane beside a shell in this rep
             for (int i = 0; i < 8; ++i) rt.tick();
         }
     }
+}
+if (shot == "editor" || shot == "editor-find") {   // a file from the pane, open in the editor
+    std::error_code ec;
+    const std::string here = std::filesystem::current_path(ec).generic_string();
+    const std::string path = here + "/src/app/editor.cpp";
+    std::ifstream f(path, std::ios::binary);
+    std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    rt.send(hand::App::Msg{hand::App::Output{"\x1b]7;file://localhost" + here + "/src/app\a"}});
+    rt.press_key(mayag::Key::e, mayag::Mods{.shift = true, .ctrl = true});
+    for (int i = 0; i < 40; ++i) { rt.settle([](const auto&) { return false; }, std::chrono::milliseconds(10)); rt.tick(); }
+    rt.send(hand::App::Msg{hand::App::OpenFile{path}});
+    rt.send(hand::App::Msg{hand::App::FileLoaded{rt.model().tab().sid, path, std::move(text), "", false}});
+    for (int i = 0; i < 30; ++i) rt.press_key(mayag::Key::down, {});   // into the code, the caret in an update()
+    rt.press_key(mayag::Key::end, {});
+    rt.type("  // edited");
+    if (shot == "editor-find") {
+#if defined(__APPLE__)
+        rt.press_key(mayag::Key::f, mayag::Mods{.super = true});
+#else
+        rt.press_key(mayag::Key::f, mayag::Mods{.ctrl = true});
+#endif
+        rt.type("Model");
+    }
+    for (int i = 0; i < 60; ++i) { rt.settle([](const auto&) { return false; }, std::chrono::milliseconds(10)); rt.tick(); }   // the tab switch settles
+    rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) { m.strip.t = 1.0f; m.strip.switch_t = 1.0f; hand::App::fit(m); }}});
+    for (int i = 0; i < 4; ++i) rt.tick();
 }
 if (shot == "tabs") {
     using E3 = mayag::Edit<hand::App::Model>;

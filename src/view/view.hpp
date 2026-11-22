@@ -11,6 +11,8 @@ namespace hand::view {
 [[nodiscard]] mayag::Node tabs(const mayag::Ctx& c, const Model& m, float height);
 /// The terminal: the grid, the cursor's motion, and what sits over the cells.
 [[nodiscard]] mayag::Node terminal(const mayag::Ctx& c, const Model& m);
+/// A file tab: the editor (editor.cpp).
+[[nodiscard]] mayag::Node editor(const mayag::Ctx& c, const Model& m);
 /// What floats over the whole window: dialog, toasts, picker, search, HUD,
 /// the in-window settings panel. Posted as overlays.
 void overlays(const mayag::Ctx& c, const Model& m);

@@ -48,6 +48,11 @@ struct Place {
 Place place_of(const Model& m) {
     const Session& se = m.tab();
     Place p;
+    if (se.file) {   // a file tab: the pane stays on the file's folder
+        const auto s = se.file->path.find_last_of("/\\");
+        p.dir = s == std::string::npos ? m.env.cwd : se.file->path.substr(0, s == 0 ? 1 : s);
+        return p;
+    }
     const auto& r = remote_of(m.tab());
     const std::string osc_host = se.term ? se.term->cwd_host() : std::string{};
     const std::string osc_dir = se.term ? se.term->cwd() : std::string{};
@@ -335,7 +340,10 @@ App::Cmd App::update(Model& m, PaneOp p) {
                 break;
             case A::Kind::open:
                 if (m.pane.where.empty()) {
-                    if (!m.cfg.demo) cmds.push_back(Cmd::run(fx::open_path, a.path));
+                    // a local file opens in a tab, in the editor; what isn't
+                    // text (an image, a binary) goes on to the OS's app when
+                    // the read finds it out (FileLoaded)
+                    cmds.push_back(update(m, OpenFile{a.path}));
                     break;
                 }
                 [[fallthrough]];

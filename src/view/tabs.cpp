@@ -43,6 +43,16 @@ std::string title_of(const Model& m, const Session& se, const std::string& proc,
 TermTabInfo tab_info(const Model& m, std::size_t i) {
     const Session& se = m.at(i);
     TermTabInfo ti;
+    if (se.file) {   // a file: its name, where it lives, ✎ for an editor, ● while unsaved
+        const std::string& p = se.file->path;
+        const auto slash = p.find_last_of("/\\");
+        ti.title = se.name.empty() ? p.substr(slash == std::string::npos ? 0 : slash + 1) : se.name;
+        ti.cwd = short_path(m, slash == std::string::npos ? std::string{} : p.substr(0, slash));
+        ti.process = "edit";
+        ti.dirty = !se.file->loading && se.file->st.ed.dirty();
+        ti.running = se.file->saving.has_value();
+        return ti;
+    }
     const std::string proc = fg_process(se);
     const std::string cwd = se.term ? se.term->cwd() : std::string{};
     // the last command that ran: going now, or how it ended

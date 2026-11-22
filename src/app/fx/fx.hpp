@@ -71,6 +71,12 @@ void pick_upload(Sink out, std::string alias, std::string dir);
 // ── the file pane (src/app/fx/files.cpp) ───────────────────────────────────
 void list_local(Sink out, std::uint64_t token, std::string dir, bool git, bool quiet);
 void preview_local(Sink out, std::string path, int lines);
+// ── files in editor tabs (src/app/fx/files.cpp) ────────────────────────────
+/// Read a file for the editor (refuses binaries and anything over 32 MB).
+void read_file(Sink out, SessionId sid, std::string path);
+/// Write `text` to `path` atomically (a sibling temp file, renamed over it,
+/// keeping the file's permissions), then FileSaved{sid, point}.
+void write_file(Sink out, SessionId sid, std::string path, std::string text, std::uint64_t point);
 
 // ── sftp (src/app/fx/remote.cpp) ───────────────────────────────────────────
 void list_remote_pane(Sink out, std::uint64_t token, Host h, HostBook book, std::string dir, bool quiet);

@@ -48,6 +48,18 @@ TermDialogSpec paste_dialog(const Ctx& c, const Model& m, const Ask& a) {
 TermDialogSpec close_dialog(const Ctx& c, const Model& m, const Ask& a) {
     using T = DialogAction::Tone;
     TermDialogSpec d;
+    if (a.kind == Ask::Kind::close_file) {   // unsaved edits: always asked, and saving is offered
+        const Session& se = m.at(std::min(a.tab.get(), m.tab_count() - 1));
+        const std::string path = se.file ? se.file->path : std::string{};
+        const std::string name = path.substr(path.find_last_of("/\\") + 1);
+        d.tag = "UNSAVED";
+        d.tone = c.theme.warning;
+        d.title = "Save changes to " + name + "?";
+        d.body = "Closing without saving loses them.";
+        d.meta = short_path(m, path);
+        d.actions = {{"cancel", "esc", T::normal}, {"don't save", "", T::danger}, {"save", "\u23CE", T::primary}};
+        return d;
+    }
     const bool quit = a.kind == Ask::Kind::quit;
     std::vector<std::size_t> which;
     if (quit) for (std::size_t i = 0; i < m.tab_count(); ++i) which.push_back(i);

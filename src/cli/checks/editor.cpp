@@ -1,0 +1,112 @@
+// hand::cli::checks — a file from the pane opens in a tab, in the editor.
+//
+// Through the real input layer: the pane's open action makes an editor tab
+// beside the shell; keys type into the file (and never reach a pty); ⌘ /
+// ctrl chords are the editor's (find, save) while the window keeps its own
+// (switching tabs); closing with unsaved edits asks, and "save" closes it
+// once the write lands. (The self-test runs as the demo: the read is fed as
+// the FileLoaded a real read sends, and saves land without touching disk.)
+
+#include "suites.hpp"
+
+#include <hand/app.hpp>
+
+#include <string>
+
+namespace hand::cli::checks {
+
+using namespace mayag;
+using namespace mayag::dsl;
+
+namespace {
+Mods primary() {
+#if defined(__APPLE__)
+    return Mods{.super = true};
+#else
+    return Mods{.ctrl = true};
+#endif
+}
+}  // namespace
+
+void editor(Runtime& rt, Vec2, Check& ok) {
+    const std::size_t tabs0 = rt.model().tab_count();
+    const std::size_t shell_tab = rt.model().active();
+    const std::string path = "/tmp/hand-selftest/notes.cpp";
+
+    // the pane's open action: a new tab beside the shell, in front
+    rt.send(App::Msg{App::PaneOp{FilePaneOp{[path](FilePaneState& s) { s.out.push_back({FilePaneAction::Kind::open, path}); }}}});
+    ok(rt.model().tab_count() == tabs0 + 1 && rt.model().tab().file && rt.model().tab().file->path == path,
+       "opening a file from the pane makes an editor tab in front");
+    ok(rt.model().active() == shell_tab + 1, "...right beside the tab it came from");
+    ok(!rt.model().tab().pty && !rt.model().tab().launch, "an editor tab starts no shell");
+    const SessionId sid = rt.model().tab().sid;
+    rt.send(App::Msg{App::FileLoaded{sid, path, "int main() {\n    return 0;\n}\n", "", false}});
+    for (int i = 0; i < 3; ++i) rt.tick();
+    const auto& d = [&]() -> const FileDoc& { return *rt.model().tab().file; };
+    ok(!d().loading && d().st.ed.line_count() == 4 && d().st.ed.language->name == "C++", "the text arrives, in C++");
+
+    // the same file again: its tab, not a second one
+    rt.send(App::Msg{App::OpenFile{path}});
+    ok(rt.model().tab_count() == tabs0 + 1, "opening it again brings its tab, not another");
+
+    // typing goes into the file
+    rt.press_key(Key::down);
+    rt.press_key(Key::end);
+    rt.window().type(" // done");
+    rt.tick();
+    ok(d().st.ed.line(1) == "    return 0; // done", "typed text lands in the file at the caret");
+    ok(d().st.ed.dirty(), "...and the file is unsaved");
+    ok(rt.model().tab().input.empty(), "nothing is sent to any pty");
+
+    // the editor's chords: find
+    rt.press_key(Key::f, primary());
+    ok(d().st.find_open, "the find key opens find in the file");
+    rt.window().type("return");
+    rt.tick();
+    ok(d().st.matches.size() == 1, "...and finds what is typed");
+    rt.press_key(Key::escape);
+    ok(!d().st.find_open, "escape closes find");
+
+    // the window keeps its chords: ctrl+tab goes back to the shell and returns
+    rt.press_key(Key::tab, Mods{.shift = true, .ctrl = true});
+    ok(!rt.model().tab().file, "ctrl+shift+tab still switches tabs from an editor");
+    rt.press_key(Key::tab, Mods{.ctrl = true});
+    ok(rt.model().tab().file.has_value(), "...and back");
+
+    // close with unsaved edits: asked, even though close.confirm may be never
+    rt.press_key(Key::w, Mods{.shift = true, .ctrl = true});
+    ok(rt.model().dialog.ask && rt.model().dialog.ask->kind == Ask::Kind::close_file, "closing unsaved edits asks first");
+    rt.press_key(Key::escape);
+    ok(rt.model().tab_count() == tabs0 + 1 && d().st.ed.dirty(), "cancel keeps the tab and the edits");
+
+    // save, then close: no question
+    rt.press_key(Key::s, primary());
+    for (int i = 0; i < 3; ++i) rt.tick();
+    ok(!d().st.ed.dirty(), "the save key saves");
+    rt.press_key(Key::w, Mods{.shift = true, .ctrl = true});
+    for (int i = 0; i < 3; ++i) rt.tick();
+    if (rt.model().dialog.ask) rt.press_key(Key::escape);   // a close.confirm = always run
+    for (int i = 0; i < 3; ++i) rt.tick();
+    ok(rt.model().tab_count() == tabs0 || rt.model().dialog.ask.has_value(), "a saved file's tab closes");
+
+    // "save" from the dialog: the tab closes once the write lands
+    if (rt.model().tab_count() == tabs0) {
+        rt.send(App::Msg{App::OpenFile{path}});
+        rt.send(App::Msg{App::FileLoaded{rt.model().tab().sid, path, "x\n", "", false}});
+        rt.window().type("y");
+        rt.tick();
+        rt.press_key(Key::w, Mods{.shift = true, .ctrl = true});
+        rt.press_key(Key::enter);   // the focused action: save
+        for (int i = 0; i < 4; ++i) rt.tick();
+        ok(rt.model().tab_count() == tabs0, "\"save\" in the dialog saves, then closes the tab");
+    }
+
+    // a binary is not a tab: it goes to its app and the waiting tab closes
+    rt.send(App::Msg{App::OpenFile{"/tmp/hand-selftest/logo.png"}});
+    rt.send(App::Msg{App::FileLoaded{rt.model().tab().sid, "/tmp/hand-selftest/logo.png", "", "", true}});
+    for (int i = 0; i < 3; ++i) rt.tick();
+    ok(rt.model().tab_count() == tabs0 && !rt.model().tab().file, "a binary goes to its own app, no tab left behind");
+    if (rt.model().active() != shell_tab) rt.send(App::Msg{App::SelectTab{TabIndex{shell_tab}}});
+}
+
+}  // namespace hand::cli::checks

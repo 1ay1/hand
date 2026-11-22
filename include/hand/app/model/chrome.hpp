@@ -45,7 +45,7 @@ struct SettingsModel {
 
 /// The confirmation dialog: one question at a time.
 struct Ask {
-    enum class Kind : std::uint8_t { paste, close_tab, quit };
+    enum class Kind : std::uint8_t { paste, close_tab, quit, close_file };
     Kind        kind = Kind::paste;
     TabIndex    tab{0};             ///< close_tab: which
     std::size_t focus = 0;          ///< the focused action (0 = cancel)

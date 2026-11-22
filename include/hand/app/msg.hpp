@@ -16,6 +16,7 @@
 //        ├─ SshMsg       OpenHosts HostsKey ConnectHost ConnectTyped Reconnect HostsLoaded
 //        ├─ ManagerMsg   ToggleManager Manager FilesListed FilesDone UploadPicked TunnelProbe TunnelScan
 //        ├─ PaneMsg      TogglePane PaneOp PaneListed PaneResize PaneWatch PanePreview
+//        ├─ EditorMsg    OpenFile FileLoaded EditorOp FileSaved EditorPasted   a file in a tab
 //        └─ Edit         a direct model edit (self-test and shots only)
 //
 // Each leaf names an intent and carries typed data -- ids are SessionId /
@@ -212,13 +213,26 @@ struct PaneWatch {};                                               ///< re-read 
 struct PanePreview { std::string path; std::optional<mayag::dsl::FilePreview> preview; };
 using PaneMsg = std::variant<TogglePane, PaneOp, PaneListed, PaneResize, PaneWatch, PanePreview>;
 
+// ── files in tabs: the editor ──────────────────────────────────────────────
+/// Open `path` in an editor tab (or bring its tab to the front).
+struct OpenFile { std::string path; };
+/// The file's bytes arrived (or why they couldn't).
+struct FileLoaded { SessionId sid; std::string path; std::string text; std::string error; bool binary = false; };
+/// An interaction in the editor of the active tab.
+struct EditorOp { mayag::dsl::TextEditorOp op; };
+/// A save of `point` finished; `error` empty when the bytes are on disk.
+struct FileSaved { SessionId sid; std::uint64_t point = 0; std::string error; };
+/// The clipboard's text, for the editor that asked.
+struct EditorPasted { SessionId sid; std::string text; };
+using EditorMsg = std::variant<OpenFile, FileLoaded, EditorOp, FileSaved, EditorPasted>;
+
 // ── the root ───────────────────────────────────────────────────────────────
 /// A direct model edit. For the self-test and scripted shots only: the app
 /// itself names every change (tests/layering.cmake rejects E{...} in src/app
 /// and src/view).
 using Edit = mayag::Edit<Model>;
 using AnyBase = std::variant<ShellMsg, TabMsg, ClockMsg, TextMsg, SearchMsg, ScrollMsg, SelectMsg, PointerMsg, KeyboardMsg,
-                             ModeMsg, DialogMsg, WindowMsg, SshMsg, ManagerMsg, PaneMsg, Edit>;
+                             ModeMsg, DialogMsg, WindowMsg, SshMsg, ManagerMsg, PaneMsg, EditorMsg, Edit>;
 /// The message. Derived (not an alias) so it is one nominal type in errors and
 /// forward declarations. A leaf converts straight in -- `Any m = NewTab{}` --
 /// because std::variant's converting constructor finds the one domain that
