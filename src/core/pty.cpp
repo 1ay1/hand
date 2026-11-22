@@ -29,6 +29,22 @@
 
 namespace hand {
 
+/// A child starts with the signals a terminal's program expects: every
+/// disposition default and nothing blocked. Ignored signals survive exec, so
+/// without this a hand started where SIGINT is ignored (a `cmd &` from a
+/// script, nohup, some launchers) gave shells that ctrl-C could not stop --
+/// the tty sent SIGINT and `yes` shrugged. Async-signal-safe: fork child only.
+void reset_signals() noexcept {
+    struct sigaction dfl{};
+    dfl.sa_handler = SIG_DFL;
+    sigemptyset(&dfl.sa_mask);
+    for (int s = 1; s < NSIG; ++s)
+        if (s != SIGKILL && s != SIGSTOP) (void)::sigaction(s, &dfl, nullptr);
+    sigset_t none;
+    sigemptyset(&none);
+    (void)::sigprocmask(SIG_SETMASK, &none, nullptr);
+}
+
 Pty::~Pty() {
     if (master >= 0) ::close(master);
     if (child > 0 && !reaped.read([](const bool& r) { return r; })) {
@@ -63,8 +79,7 @@ Pty::Started Pty::start(const PtySpec& spec) {
         ::setenv("TERM_PROGRAM", "hand", 1);
         ::unsetenv("COLUMNS");
         ::unsetenv("LINES");
-        signal(SIGPIPE, SIG_DFL);
-        signal(SIGCHLD, SIG_DFL);
+        reset_signals();
         for (const auto& [k, v] : env) ::setenv(k.c_str(), v.c_str(), 1);
         if (!cwd.empty() && ::chdir(cwd.c_str()) != 0) { /* keep the inherited directory */ }
         const char* argv0 = std::strrchr(shell.c_str(), '/');
@@ -194,6 +209,7 @@ void spawn_detached(const std::vector<std::string>& argv) {
     const pid_t pid = ::fork();
     if (pid < 0) return;
     if (pid == 0) {
+        reset_signals();
         ::setsid();
         if (::fork() != 0) ::_exit(0);   // the grandchild is adopted by init
         const int null = ::open("/dev/null", O_RDWR);

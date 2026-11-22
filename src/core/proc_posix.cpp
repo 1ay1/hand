@@ -1,6 +1,7 @@
 // hand::proc — POSIX (Linux, macOS).
 
 #include <hand/core/proc.hpp>
+#include <hand/core/pty.hpp>
 
 #if !defined(_WIN32)
 
@@ -28,6 +29,7 @@ Result run(const std::vector<std::string>& argv, std::string_view in, int timeou
     const pid_t pid = ::fork();
     if (pid < 0) return r;
     if (pid == 0) {
+        reset_signals();
         ::dup2(pin[0], 0); ::dup2(pout[1], 1); ::dup2(perr[1], 2);
         for (int fd : {pin[0], pin[1], pout[0], pout[1], perr[0], perr[1]}) ::close(fd);
         std::vector<char*> a;

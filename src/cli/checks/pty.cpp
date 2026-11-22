@@ -8,6 +8,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -54,6 +55,27 @@ void pty([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& ok) {
         for (int i = 0; i < 40 && code < 0; ++i) { code = hand::pty_reap(pty.pid()); if (code < 0) std::this_thread::sleep_for(std::chrono::milliseconds(25)); }
         ok(code == 7, "the exit code comes back");
     }
+#if !defined(_WIN32)
+    {   // hand started where SIGINT is ignored (`hand &` from a script): ignored
+        // signals survive exec, so the child must be given defaults back
+        struct sigaction ign{}, was{};
+        ign.sa_handler = SIG_IGN;
+        sigemptyset(&ign.sa_mask);
+        (void)::sigaction(SIGINT, &ign, &was);
+        const hand::Pty sl{{.cols = 40, .rows = 5, .shell = "sleep", .args = {"5"}}};
+        (void)::sigaction(SIGINT, &was, nullptr);
+        bool stopped = false;
+        if (sl.ok()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));   // sleep is up and on the tty
+            sl.write("\x03");
+            for (int i = 0; i < 40 && !stopped; ++i) {
+                stopped = hand::pty_reap(sl.pid()) >= 0;
+                if (!stopped) std::this_thread::sleep_for(std::chrono::milliseconds(25));
+            }
+        }
+        ok(stopped, "ctrl-C stops a child even when hand itself ignores SIGINT");
+    }
+#endif
 }
 
 }  // namespace hand::cli::checks

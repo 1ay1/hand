@@ -109,6 +109,11 @@ int pty_reap(pid_t pid);
 /// A process's argv; empty when it is gone or not ours to read.
 [[nodiscard]] std::vector<std::string> proc_argv(pid_t pid);
 
+/// In a fork child, before exec: every signal disposition default, nothing
+/// blocked (ignored signals survive exec; a child must not inherit hand's).
+/// POSIX only; async-signal-safe.
+void reset_signals() noexcept;
+
 /// Run `argv` fully detached (double fork, setsid, stdio on /dev/null;
 /// DETACHED_PROCESS on Windows): never blocks, never leaves a zombie.
 /// For opening links, notifications.
