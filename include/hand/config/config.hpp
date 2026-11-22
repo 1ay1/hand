@@ -18,6 +18,17 @@
 
 namespace hand {
 
+// ── typeface roles: where each preloaded face lives in the font stack ──────
+// Every candidate face is loaded at start into a mayag custom role, so
+// choosing one is writing a role byte (no file read while running). The
+// terminal's monospace candidates and the chrome's UI candidates each get a
+// block; main loads into them, the settings offer them, the view reads them.
+inline constexpr std::size_t kMonoRoles = 16;
+inline constexpr std::size_t kUiRoles   = mayag::custom_family_count - kMonoRoles;
+[[nodiscard]] constexpr mayag::FontFamily mono_role(std::size_t i) noexcept { return mayag::custom_family(i); }
+[[nodiscard]] constexpr mayag::FontFamily ui_role(std::size_t i) noexcept { return mayag::custom_family(kMonoRoles + i); }
+static_assert(kUiRoles >= 8, "room for a UI typeface picker");
+
 // What the widgets already name, hand uses as is: one type per idea.
 using CursorAnim = mayag::dsl::CursorMotion;
 using CursorFx   = mayag::dsl::CursorFx;
@@ -44,6 +55,12 @@ struct Config {
     /// font.family as hand.vibe names it, read before the fonts are known;
     /// matched against `fonts` at start (resolve_font_family). Never saved.
     std::string font_family_wanted;
+    /// The face the chrome is set in (tabs, settings, dialogs, the file pane):
+    /// an index into `ui_fonts`, the proportional families found at start.
+    int   ui_font = 0;
+    std::vector<std::string> ui_fonts;     ///< filled at start, never saved
+    std::string ui_font_wanted;            ///< font.ui as hand.vibe names it (resolved at start)
+    float ui_font_size = 12.5f;            ///< chrome text size, px
     float font_size = 13.0f;
     float line_height = 1.2f;
     // colors
@@ -150,6 +167,9 @@ bool setting_apply(Config& c, const mayag::dsl::SettingEdit& e);
 /// Match font_family_wanted (from hand.vibe) against `fonts` (found on this
 /// machine), setting font_family. Returns a problem, or "".
 std::string resolve_font_family(Config& c);
+/// The role the chrome's text is set in (font.ui): FontFamily::ui when no
+/// UI face was preloaded.
+[[nodiscard]] mayag::FontFamily ui_family_of(const Config& c);
 
 // ── the file ───────────────────────────────────────────────────────────────
 [[nodiscard]] std::string config_path();   ///< $HAND_CONFIG or ~/.config/hand/hand.vibe

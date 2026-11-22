@@ -266,7 +266,7 @@ int cell_of(float v, float origin, float size, int max) {
 
 FontFamily family_of(const Config& c) {
     return c.fonts.empty() ? FontFamily::mono
-                           : custom_family(static_cast<std::size_t>(std::clamp(c.font_family, 0, static_cast<int>(c.fonts.size()) - 1)));
+                           : mono_role(static_cast<std::size_t>(std::clamp(c.font_family, 0, static_cast<int>(c.fonts.size()) - 1)));
 }
 
 float cell_width(const Model& m, float size) {

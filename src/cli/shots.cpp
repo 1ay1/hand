@@ -480,6 +480,15 @@ if (shot == "settings") {
 }
 if (shot == "settings-panel")
     rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) { m.settings.open = true; m.settings.t = 1.0f; m.settings.ui.selected = 1; }}});
+if (shot == "settings-ui-font") {   // the interface font switched live, its menu open
+    rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) {
+        m.settings.open = true; m.settings.t = 1.0f;
+        if (m.cfg.ui_fonts.size() > 1) m.cfg.ui_font = 1;
+    }}});
+    rt.tick();
+    for (int i = 0; i < 3; ++i) rt.press_key(mayag::Key::down);
+    rt.press_key(mayag::Key::enter);
+}
 if (shot == "settings-menu") {
     rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) { m.settings.open = true; m.settings.t = 1.0f; }}});
     rt.tick();

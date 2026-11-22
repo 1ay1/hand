@@ -111,7 +111,9 @@ void settings_panel([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Ch
         // ── the dropdown with the mouse ────────────────────────────────────
         rt.press_key(K::comma, Mods{.ctrl = true});
         rt.tick();
-        const auto trig = dsl::node_id("settings.colors.scheme.select");
+        // the interface-font select: on the first screen of the panel (a click
+        // lands where a user's would, so the target must be in view)
+        const auto trig = dsl::node_id("settings.font.ui.select");
         rt.click(trig);
         ok(rt.model().settings.ui.menu >= 0, "clicking the dropdown opens it");
         rt.click(trig);

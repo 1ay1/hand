@@ -30,6 +30,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <span>
 #include <string_view>
 #include <hand/core/platform.hpp>
 #include <csignal>
@@ -63,7 +64,6 @@ std::vector<std::string_view> mono_candidates() {
 /// every installed candidate becomes custom_family(i) so font.family switches
 /// live without reading a file on the UI thread.
 std::shared_ptr<typo::FontStack> load_fonts(bool system) {
-    std::vector<std::string> names;
     std::shared_ptr<typo::FontStack> s;
     if (!system) {
         s = std::make_shared<typo::FontStack>();
@@ -88,12 +88,25 @@ std::shared_ptr<typo::FontStack> load_fonts(bool system) {
             (void)typo::system::attach_family(*s, FontFamily::display, ui);
         }
         startup::mark("  fonts: display family");
-        for (auto cand : mono) {
-            if (names.size() >= custom_family_count) break;
-            const std::array<std::string_view, 1> one{cand};
-            if (auto got = typo::system::attach_family(*s, custom_family(names.size()), one))
-                if (std::find(names.begin(), names.end(), got->name) == names.end()) names.push_back(got->name);
-        }
+        // every installed candidate into its own role (config.hpp), once per
+        // family: the choices font.family and font.ui offer
+        const auto preload = [&](std::span<const std::string_view> cands, std::size_t cap, auto role) {
+            const auto& db = typo::system::Database::instance();
+            std::vector<std::string> got;
+            for (auto cand : cands) {
+                if (got.size() >= cap) break;
+                const typo::system::FontEntry* e = db.first_available(std::array{cand});
+                if (e == nullptr || std::find(got.begin(), got.end(), e->family) != got.end()) continue;
+                const std::array<std::string_view, 1> one{cand};
+                if (auto a = typo::system::attach_family(*s, role(got.size()), one)) got.push_back(a->name);
+            }
+        };
+        preload(mono, hand::kMonoRoles, hand::mono_role);
+        startup::mark("  fonts: mono candidates");
+        std::vector<std::string_view> ui{"Inter", "Inter Variable", "Geist", "IBM Plex Sans", "Roboto"};
+        for (auto f : typo::system::ui_font_families())
+            if (std::find(ui.begin(), ui.end(), f) == ui.end()) ui.push_back(f);
+        preload(ui, hand::kUiRoles, hand::ui_role);
     }
     return s;   // the family names live on the stack (family_name): App::init reads them
 }

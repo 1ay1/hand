@@ -41,6 +41,25 @@ void config_roundtrip([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, 
     if (!diff.empty()) std::printf("    differs after reload:%s\n", diff.c_str());
     ok(saved && problems.empty() && diff.empty() && b.url_launcher == "firefox",
        "hand.vibe round-trips every setting");
+    {   // font.ui: saved by NAME, matched to this machine's faces at start, and
+        // the theme's face is that face's role (every label inherits it)
+        hand::Config u;
+        u.ui_fonts = {"Inter", "Geist", "Noto Sans"};
+        u.ui_font = 2;
+        const bool s2 = hand::config_save(u, path);
+        hand::Config v;
+        (void)hand::config_load(v, path);
+        ::unlink(path.c_str());
+        v.ui_fonts = {"Noto Sans", "Inter"};   // another machine, another order
+        const std::string pr = hand::resolve_font_family(v);
+        ok(s2 && pr.empty() && v.ui_font == 0 && hand::ui_family_of(v) == hand::ui_role(0),
+           "font.ui is kept by name and found on another machine's list");
+        hand::Config w;
+        ok(hand::ui_family_of(w) == mayag::FontFamily::ui, "no UI faces found: the chrome uses the stack's own UI chain");
+        const auto& m = rt.model();
+        ok(hand::App::theme(m).font_family == hand::ui_family_of(m.cfg) && hand::App::theme(m).font_size == m.cfg.ui_font_size,
+           "the theme carries font.ui and font.ui_size to every widget");
+    }
     // a broken or partial file is reported, never fatal
     const std::string bad = path + ".bad";
     { std::FILE* f = std::fopen(bad.c_str(), "w"); std::fputs("font { size 15.5  nope 3 }\ncolors { scheme \"Nord\" bold_is_bright yes }\n", f); std::fclose(f); }

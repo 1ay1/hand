@@ -148,15 +148,19 @@ App::Cmd App::init(Model& m, const Flags& f) {
     m.env = f.env;
     m.fonts = f.fonts;
     m.wall_ms = m.env.wall_epoch_ms;
-    // the monospace families mayag attached (custom_family(0), (1), ...):
-    // the choices font.family offers on this machine
-    m.cfg.fonts.clear();
-    if (m.fonts)
-        for (std::size_t i = 0; i < mayag::custom_family_count; ++i) {
-            const std::string& name = m.fonts->family_name(mayag::custom_family(i));
-            if (name.empty() || std::ranges::find(m.cfg.fonts, name) != m.cfg.fonts.end()) break;
-            m.cfg.fonts.push_back(name);
+    // the faces main preloaded into their roles (config.hpp): the choices
+    // font.family and font.ui offer on this machine
+    const auto found = [&](std::vector<std::string>& into, std::size_t n, auto role) {
+        into.clear();
+        if (!m.fonts) return;
+        for (std::size_t i = 0; i < n; ++i) {
+            const std::string& name = m.fonts->family_name(role(i));
+            if (name.empty() || std::ranges::find(into, name) != into.end()) break;
+            into.push_back(name);
         }
+    };
+    found(m.cfg.fonts, kMonoRoles, mono_role);
+    found(m.cfg.ui_fonts, kUiRoles, ui_role);
     if (std::string p = resolve_font_family(m.cfg); !p.empty()) {   // hand.vibe named a face this machine lacks
         m.toast.card = Toast{.title = "hand.vibe", .body = std::move(p), .kind = Toast::Kind::error};
         m.toast.at = m.time;

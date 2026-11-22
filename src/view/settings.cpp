@@ -33,7 +33,8 @@ Theme App::theme(const Model& m) {
     t.success = rgb_of(p.ansi[2]);
     t.warning = rgb_of(p.ansi[3]);
     t.info = rgb_of(p.ansi[6]);
-    t.font_size = 12.5f;
+    t.font_size = m.cfg.ui_font_size;
+    t.font_family = ui_family_of(m.cfg);   // font.ui: every label, tab and panel inherits it
     // Nerd icons only when the lead face carries them; otherwise plain glyphs (no tofu)
     t.icons = !m.cfg.fonts.empty() && m.cfg.fonts.front().find("Nerd") != std::string::npos ? IconSet::nerd : IconSet::letters;
     t.motion_scale = 0.0f;   // a terminal never animates its chrome

@@ -69,6 +69,11 @@ const std::vector<Row>& rows() {
          GET(c.font_size), SET(c.font_size = v)},
         {"font", "line_height", "row height as a multiple of the size", Kind::number, 1.0f, 2.0f, 0.05f, 2, "\u00D7", 1, none,
          GET(c.line_height), SET(c.line_height = v)},
+        {"font", "ui", "the face of tabs, panels and dialogs (found on this machine)", Kind::cycle, 0, 0, 0, 0, "", 1,
+         [](const Config& c) { return c.ui_fonts.empty() ? std::vector<std::string>{"default"} : c.ui_fonts; },
+         GET(c.ui_font), SET(c.ui_font = static_cast<int>(v))},
+        {"font", "ui_size", "the size of tabs, panels and dialogs", Kind::number, 9, 20, 0.5f, 1, "px", 1, none,
+         GET(c.ui_font_size), SET(c.ui_font_size = v)},
 
         {"colors", "scheme", "913 schemes from iTerm2-Color-Schemes", Kind::cycle, 0, 0, 0, 0, "", 1, scheme_names,
          GET(scheme_index(c)), SET(c.scheme = static_cast<std::size_t>(v) == default_scheme() ? -1 : static_cast<int>(v))},
@@ -301,6 +306,9 @@ dsl::SettingSpec spec_of(const Row& r, const Config& c, const Config& d) {
     if (sec == "motion" && std::string_view{r.key} == "blink") s.label = "Blink style";
     if (sec == "motion" && std::string_view{r.key} == "cursor") s.label = "Cursor movement";
     if (sec == "cursor" && std::string_view{r.key} == "style") s.label = "Shape";
+    if (sec == "font" && std::string_view{r.key} == "ui") s.label = "Interface font";
+    if (sec == "font" && std::string_view{r.key} == "ui_size") s.label = "Interface size";
+    if (sec == "font" && std::string_view{r.key} == "family") s.label = "Terminal font";
     s.hint = r.hint;
     s.kind = r.kind;
     s.value = r.get(c);
@@ -311,8 +319,11 @@ dsl::SettingSpec spec_of(const Row& r, const Config& c, const Config& d) {
     if (r.options) s.options = r.options(c);
     const std::string_view key = r.key;
     if (key == "scheme") s.option_swatches = scheme_swatches();
+    // a typeface menu previews every option in its own face
     if (std::string_view{r.section} == "font" && key == "family")
-        for (std::size_t i = 0; i < c.fonts.size(); ++i) s.option_families.push_back(mayag::custom_family(i));
+        for (std::size_t i = 0; i < c.fonts.size(); ++i) s.option_families.push_back(mono_role(i));
+    if (std::string_view{r.section} == "font" && key == "ui")
+        for (std::size_t i = 0; i < c.ui_fonts.size(); ++i) s.option_families.push_back(ui_role(i));
     s.modified = std::fabs(r.get(c) - r.get(d)) > 1e-4f;
     return s;
 }
@@ -332,6 +343,7 @@ std::uint64_t settings_key(const Config& c) {
         mix(u);
     }
     for (const auto& f : c.fonts) for (char ch : f) mix(static_cast<unsigned char>(ch));
+    for (const auto& f : c.ui_fonts) for (char ch : f) mix(static_cast<unsigned char>(ch));
     return h;
 }
 
@@ -349,7 +361,7 @@ bool setting_apply(Config& c, const dsl::SettingEdit& e) {
     if (e.op == Op::reset_all) {
         Config d{};
         d.shell = c.shell; d.shell_cli = c.shell_cli; d.demo = c.demo; d.url_launcher = c.url_launcher;
-        d.fonts = c.fonts;   // what this machine has: not a setting
+        d.fonts = c.fonts; d.ui_fonts = c.ui_fonts;   // what this machine has: not a setting
         c = d;
         return true;
     }
@@ -379,12 +391,25 @@ Palette palette_of(const Config& c) {
 std::size_t scheme_count() { return presets::all.size(); }
 
 std::string resolve_font_family(Config& c) {
-    if (c.font_family_wanted.empty()) return {};
-    const std::string val = std::exchange(c.font_family_wanted, {});
-    const auto f = std::find(c.fonts.begin(), c.fonts.end(), val);
-    if (f == c.fonts.end()) return "font.family: no option \"" + val + "\"\n";
-    c.font_family = static_cast<int>(f - c.fonts.begin());
-    return {};
+    // font.family and font.ui name faces, which are found while the window
+    // opens: matched here, once they are known
+    std::string problems;
+    const auto match = [&](std::string& wanted, const std::vector<std::string>& found, int& into, const char* key) {
+        if (wanted.empty()) return;
+        const std::string val = std::exchange(wanted, {});
+        if (val == "default") return;   // saved where no faces were found: nothing was chosen
+        const auto f = std::find(found.begin(), found.end(), val);
+        if (f == found.end()) { problems += std::string{key} + ": no option \"" + val + "\"\n"; return; }
+        into = static_cast<int>(f - found.begin());
+    };
+    match(c.font_family_wanted, c.fonts, c.font_family, "font.family");
+    match(c.ui_font_wanted, c.ui_fonts, c.ui_font, "font.ui");
+    return problems;
+}
+
+mayag::FontFamily ui_family_of(const Config& c) {
+    if (c.ui_fonts.empty()) return mayag::FontFamily::ui;
+    return ui_role(static_cast<std::size_t>(std::clamp(c.ui_font, 0, static_cast<int>(c.ui_fonts.size()) - 1)));
 }
 
 // ── hand.vibe ──────────────────────────────────────────────────────────────
@@ -481,6 +506,7 @@ std::string config_load(Config& c, const std::string& path) {
                     // on a worker while the window opens: keep the name and
                     // resolve it once they are known (resolve_font_family).
                     if (sec == "font" && key == "family" && c.fonts.empty()) { c.font_family_wanted = val; continue; }
+                    if (sec == "font" && key == "ui" && c.ui_fonts.empty()) { c.ui_font_wanted = val; continue; }
                     const auto f = std::find(o.begin(), o.end(), val);
                     if (f == o.end()) { problems += name + ": no option \"" + val + "\"\n"; continue; }
                     r.set(c, static_cast<float>(f - o.begin()));
