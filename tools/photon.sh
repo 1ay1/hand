@@ -46,7 +46,12 @@ DIR=$(mktemp -d)
 printf "confirm {\n  close never\n}\nfiles {\n  side left\n  width 300\n  watch false\n}\ntabs {\n  always true\n}\n${PHOTON_VIBE:-}" > "$DIR/hand.vibe"
 PROG=cat
 case "$SCEN" in scroll|select) PROG="seq 1 20000; exec cat" ;; esac
-env MAYAG_PHOTON=1 HAND_CONFIG="$DIR/hand.vibe" "$@" setsid "$HAND" -e "$PROG" </dev/null >"$DIR/out.log" 2>&1 &
+# its own empty workspace (opened there, so it gets the focus even when a
+# fullscreen window holds it elsewhere); back where we were on exit
+HOME_WS=$(hyprctl activeworkspace -j | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+trap 'hyprctl eval "hl.dispatch(hl.dsp.focus({ workspace = \"$HOME_WS\" }))" >/dev/null 2>&1' EXIT
+hyprctl eval 'hl.dispatch(hl.dsp.focus({ workspace = "77" }))' >/dev/null   # the name: a number is ignored
+env MAYAG_PHOTON=2 HAND_CONFIG="$DIR/hand.vibe" "$@" setsid "$HAND" -e "$PROG" </dev/null >"$DIR/out.log" 2>&1 &
 PID=$!
 i=0
 while [ $i -lt 50 ]; do   # up to 5 s for the window
@@ -58,9 +63,23 @@ done
 set -- $GEO
 ADDR=$1; WX=$2; WY=$3; WW=$4; WH=$5
 hyprctl dispatch focuswindow "address:$ADDR" >/dev/null
+hyprctl eval 'hl.dispatch(hl.dsp.window.fullscreen({ mode = "fullscreen" }))' >/dev/null
 sleep 0.6
-FOCUS=$(hyprctl activewindow -j | python3 -c "import json,sys; print(json.load(sys.stdin).get('pid',0))")
-if [ "$FOCUS" != "$PID" ]; then echo "photon: hand did not get the focus; not driving it"; kill $PID; exit 1; fi
+set -- $(hyprctl clients -j | python3 -c "import json,sys; c=next(c for c in json.load(sys.stdin) if c['pid']==$PID); print(c['at'][0],c['at'][1],c['size'][0],c['size'][1])")
+WX=$1; WY=$2; WW=$3; WH=$4
+sleep 0.3
+# keyboard focus follows the mouse here (input:follow_mouse = 1), and the
+# compositor refuses focus requests: put the pointer on hand to focus it
+printf 'm %d %d\ns 150\n' $((WX + WW / 2)) $((WY + WH / 2)) | "$VMOUSE" $SCREEN
+i=0
+while :; do
+    FOCUS=$(hyprctl clients -j | python3 -c "import json,sys; c=next((c for c in json.load(sys.stdin) if c['focusHistoryID']==0),{}); print(c.get('pid',0))")
+    [ "$FOCUS" = "$PID" ] && break
+    i=$((i+1)); [ $i -gt 10 ] && break
+    hyprctl dispatch focuswindow "address:$ADDR" >/dev/null; sleep 0.2
+done
+case "$SCEN" in drag|select|scroll) ;;   # pointer input goes to the surface under the pointer: no focus needed
+    *) if [ "$FOCUS" != "$PID" ]; then echo "photon: hand did not get the focus; not driving it"; kill $PID; exit 1; fi ;; esac
 
 key()   { wtype "$@"; sleep 0.03; }
 mouse() { "$VMOUSE" $SCREEN; }
@@ -96,8 +115,23 @@ case "$SCEN" in
 esac
 sleep 0.4
 t=0   # end it from inside: each tab's cat ends, the last tab closes, hand quits
-while [ $t -lt $TABS ]; do wtype -k Escape; wtype -k Return; sleep 0.05; wtype -M ctrl d -m ctrl; sleep 0.15; t=$((t+1)); done
+# never Escape here: with a modifier still latched it is a compositor binding
+# (ctrl+shift+Escape opened 129 btop windows). The drag left the pane open.
+while [ $t -lt $TABS ]; do wtype -k Return; sleep 0.05; wtype -M ctrl d -m ctrl; sleep 0.15; t=$((t+1)); done
 i=0; while kill -0 $PID 2>/dev/null && [ $i -lt 50 ]; do i=$((i+1)); sleep 0.1; done
-if kill -0 $PID 2>/dev/null; then echo "photon: hand did not exit"; kill -9 $PID; fi
-grep -A1 "input->photon" "$DIR/out.log" || { echo "photon: no measurement"; tail -5 "$DIR/out.log"; }
+if kill -0 $PID 2>/dev/null; then
+    echo "photon: hand did not exit"
+    [ -n "${KEEP:-}" ] && grim -g "$WX,$WY ${WW}x${WH}" -s 0.5 "$DIR/stuck.png" && echo "stuck: $DIR/stuck.png"
+    kill -9 $PID
+fi
+# the summary from every frame's trace (needs no clean exit)
+python3 - "$DIR/out.log" <<'PY' || echo "photon: no measurement"
+import sys
+r=[l.split() for l in open(sys.argv[1]) if l.startswith('photon ')]
+if not r: sys.exit(1)
+tot=sorted(float(x[10]) for x in r); n=len(tot)
+st=[sum(float(x[i]) for x in r)/n for i in (3,5,7)]
+print("mayag: input->photon  best %.2f  p50 %.2f  mean %.2f  p95 %.2f  worst %.2f ms  (%d frames)" % (tot[0], tot[n//2], sum(tot)/n, tot[min(n-1,int(n*.95))], tot[-1], n))
+print("  stages (mean): to us %.2f  in us %.2f  compositor %.2f ms" % tuple(st))
+PY
 [ -n "${KEEP:-}" ] && echo "log: $DIR/out.log" || rm -rf "$DIR"

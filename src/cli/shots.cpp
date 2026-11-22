@@ -59,22 +59,24 @@ if (shot == "bench") {
     using clk = std::chrono::steady_clock;
     const auto run = [&](const char* what, auto&& poke) {
         static const int N = std::getenv("HAND_BENCH_LOOP") ? std::atoi(std::getenv("HAND_BENCH_LOOP")) : 120;
-        double view = 0, cascade = 0, layout = 0, paint = 0, render = 0;
+        double view = 0, cascade = 0, layout = 0, paint = 0, render = 0, fold = 0;
         const auto t0 = clk::now();
         for (int i = 0; i < N; ++i) {
-            poke(i);
+            poke(i);   // the input (posted: one input, one frame)
+            const auto a = clk::now();
             rt.tick();
+            fold += std::chrono::duration<double, std::milli>(clk::now() - a).count();
             const auto& f = rt.host().latency().last();
             view += f.view_ms; cascade += f.cascade_ms; layout += f.layout_ms; paint += f.paint_ms; render += f.render_ms;
         }
         const double total = std::chrono::duration<double, std::milli>(clk::now() - t0).count() / N;
-        std::printf("  %-26s %6.3f ms/frame   view %.3f  cascade %.3f  layout %.3f  paint %.3f  raster %.3f\n",
-                    what, total, view / N, cascade / N, layout / N, paint / N, render / N);
+        std::printf("  %-26s %6.3f ms/frame   frame %.3f  view %.3f  cascade %.3f  layout %.3f  paint %.3f  raster %.3f\n",
+                    what, total, fold / N, view / N, cascade / N, layout / N, paint / N, render / N);
     };
     std::printf("hand frame pipeline (%dx%d, %d cols x %d rows)\n", static_cast<int>(size.x), static_cast<int>(size.y),
                 rt.model().tab().term->cols(), rt.model().tab().term->rows());
-    run("typing (a char/frame)", [&](int i) { rt.send(hand::App::Msg{hand::App::Output{std::string(1, static_cast<char>('a' + i % 26))}}); });
-    run("streaming (a line/frame)", [&](int i) { rt.send(hand::App::Msg{hand::App::Output{"line " + std::to_string(i) + " \x1b[33mwarning\x1b[0m: something\r\n"}}); });
+    run("typing (a char/frame)", [&](int i) { rt.post(hand::App::Msg{hand::App::Output{std::string(1, static_cast<char>('a' + i % 26))}}); });
+    run("streaming (a line/frame)", [&](int i) { rt.post(hand::App::Msg{hand::App::Output{"line " + std::to_string(i) + " \x1b[33mwarning\x1b[0m: something\r\n"}}); });
     run("scrolling history", [&](int i) { rt.window().scroll(Vec2{400.0f, 300.0f}, Vec2{0.0f, (i / 30) % 2 ? -48.0f : 48.0f}); });
     run("pointer over tabs", [&](int i) { rt.window().move_to(Vec2{40.0f + static_cast<float>(i % 60) * 6.0f, 14.0f}); });
     std::printf("  damage: %.1f%% of tiles reused, %llu mismatches\n",

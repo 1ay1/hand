@@ -321,6 +321,20 @@ dsl::SettingSpec spec_of(const Row& r, const Config& c, const Config& d) {
 
 std::size_t setting_count() { return rows().size(); }
 
+std::uint64_t settings_key(const Config& c) {
+    // every setting's current value, plus the lists a row may offer (fonts)
+    std::uint64_t h = 0xCBF29CE484222325ull;
+    const auto mix = [&](std::uint64_t v) { h = (h ^ v) * 0x100000001B3ull; };
+    for (const auto& r : rows()) {
+        const float v = r.get(c);
+        std::uint32_t u;
+        std::memcpy(&u, &v, 4);
+        mix(u);
+    }
+    for (const auto& f : c.fonts) for (char ch : f) mix(static_cast<unsigned char>(ch));
+    return h;
+}
+
 std::vector<dsl::SettingSpec> setting_specs(const Config& c) {
     const Config d{};
     std::vector<dsl::SettingSpec> v;

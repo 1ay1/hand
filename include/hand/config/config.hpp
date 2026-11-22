@@ -137,6 +137,8 @@ struct Config {
 // ── the table ──────────────────────────────────────────────────────────────
 [[nodiscard]] std::size_t setting_count();
 [[nodiscard]] std::vector<mayag::dsl::SettingSpec> setting_specs(const Config& c);
+/// A hash of every value the settings table shows (for memoising the panel).
+[[nodiscard]] std::uint64_t settings_key(const Config& c);
 /// Apply a panel edit. Returns true when the config changed.
 bool setting_apply(Config& c, const mayag::dsl::SettingEdit& e);
 

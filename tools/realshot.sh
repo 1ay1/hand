@@ -22,7 +22,7 @@ done
 sleep 0.8
 if [ -n "${KEYS:-}" ]; then eval "$KEYS"; sleep 0.6; fi
 grim -g "$GEO $CROP" "$OUT"
-[ -n "${KEYS:-}" ] && wtype -k Escape && sleep 0.3
+[ -n "${UNDO:-}" ] && eval "$UNDO" && sleep 0.3   # never Escape: a compositor binding with a latched modifier
 wtype -k Return; sleep 0.05; wtype -M ctrl d -m ctrl
 i=0; while kill -0 $PID 2>/dev/null && [ $i -lt 30 ]; do i=$((i+1)); sleep 0.1; done
 kill -9 $PID 2>/dev/null
