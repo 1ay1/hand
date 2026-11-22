@@ -18,13 +18,6 @@
 #include <string>
 #include <vector>
 
-// Threads share ONE Pty (CoOwned): the tab writes and resizes it, its reader
-// reads and reaps it. Every member is a syscall on an fd the kernel makes
-// thread-safe (write / ioctl / read / waitpid), fd_ and pid_ are set by
-// spawn() before the pty is shared and never change, and reaped_ is written
-// by the one reader and read only in ~Pty, after every owner let go.
-MAYAG_SYNC(hand::Pty);
-
 namespace hand {
 
 /// A tab's pty, owned JOINTLY by the tab and its reader thread. The fd is
@@ -35,8 +28,11 @@ class PtyRef {
   public:
     PtyRef() = default;
     explicit PtyRef(mayag::CoOwned<Pty> p) : p_(std::move(p)) {}
-    /// A pty for a new tab, not yet spawned.
-    [[nodiscard]] static PtyRef make() { return PtyRef{mayag::CoOwned<Pty>::make()}; }
+    /// Start `spec` on a new pty: empty when it didn't start.
+    [[nodiscard]] static PtyRef make(const PtySpec& spec) {
+        auto p = mayag::CoOwned<Pty>::make(spec);
+        return p->ok() ? PtyRef{std::move(p)} : PtyRef{};
+    }
     [[nodiscard]] Pty* operator->() const noexcept { return &p_->get(); }
     [[nodiscard]] Pty& operator*() const noexcept { return p_->get(); }
     explicit operator bool() const noexcept { return p_.has_value(); }

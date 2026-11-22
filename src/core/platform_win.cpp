@@ -127,24 +127,24 @@ std::uint64_t peak_rss() {
     return static_cast<std::uint64_t>(c.peak_working_set);
 }
 
-Waker::Waker() {
-    // Manual reset: signal() may be called many times before a waiter looks,
-    // and drain() is the explicit reset, matching the self-pipe semantics.
+Waker::Ends Waker::open() {
+    // a manual-reset event: signal() sets it, drain() resets it
     const HANDLE h = ::CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    read_ = reinterpret_cast<std::intptr_t>(h);
-    write_ = read_;
+    if (h == nullptr) return {0, 0};
+    const auto v = reinterpret_cast<std::intptr_t>(h);
+    return {v, v};
 }
 
 Waker::~Waker() {
-    if (read_ != 0) ::CloseHandle(reinterpret_cast<HANDLE>(read_));
+    if (read_end != 0) ::CloseHandle(reinterpret_cast<HANDLE>(read_end));
 }
 
 void Waker::signal() const noexcept {
-    if (read_ != 0) ::SetEvent(reinterpret_cast<HANDLE>(read_));
+    if (read_end != 0) ::SetEvent(reinterpret_cast<HANDLE>(read_end));
 }
 
 void Waker::drain() const noexcept {
-    if (read_ != 0) ::ResetEvent(reinterpret_cast<HANDLE>(read_));
+    if (read_end != 0) ::ResetEvent(reinterpret_cast<HANDLE>(read_end));
 }
 
 Ready wait_readable(const Waker& w, std::intptr_t pty, int timeout_ms) {

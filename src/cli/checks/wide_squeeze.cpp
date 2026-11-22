@@ -24,11 +24,11 @@ using namespace mayag;
 void wide_squeeze([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& ok) {
     // ── wide output, squeezed thin and back, in a real fish: no gap ────────
     if (::access("/usr/bin/fish", X_OK) == 0) {
-        hand::Pty pty;
         const auto si = hand::shell_integration("/usr/bin/fish");
         hand::Term t{100, 30, hand::palette_of(hand::Config{})};
         t.set_prompt_protect(!si.reflow_aware);
-        if (pty.spawn(100, 30, "/usr/bin/fish", si.env, si.args)) {
+        const hand::Pty pty{{.cols = 100, .rows = 30, .shell = "/usr/bin/fish", .env = si.env, .args = si.args}};
+        if (pty.ok()) {
             const auto pump = [&](int ms) {
                 std::string buf;
                 for (int k = 0; k < ms / 50 && hand::pty_read(pty.fd(), buf, 50); ++k) {

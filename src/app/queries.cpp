@@ -367,13 +367,10 @@ void start_ssh(Model& m, Session& se, const Host& h) {
     se.link.connected_at = m.time;
     se.link.dropped = false;
     if (m.cfg.demo) return;
-    se.pty = PtyRef::make();
     const auto argv = ssh_argv(h, m.ssh.book, {.multiplex = m.cfg.ssh_multiplex, .keepalive = m.cfg.ssh_keepalive});
-    if (!se.pty->spawn(m.metrics.fit_cols, m.metrics.fit_rows, "ssh", {},
-                       std::vector<std::string>{argv.begin() + 1, argv.end()}, {})) {
-        (void)se.term->feed("\x1b[31mhand: could not start ssh\x1b[0m\r\n");
-        se.pty.reset();
-    }
+    se.pty = PtyRef::make({.cols = m.metrics.fit_cols, .rows = m.metrics.fit_rows, .shell = "ssh",
+                           .args = std::vector<std::string>{argv.begin() + 1, argv.end()}});
+    if (!se.pty) (void)se.term->feed("\x1b[31mhand: could not start ssh\x1b[0m\r\n");
 }
 
 /// Bring tab `i` to the front: it is read, and its cursor appears where it is.

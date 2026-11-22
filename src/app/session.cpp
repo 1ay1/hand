@@ -110,7 +110,6 @@ App::Session App::spawn_session(Model& m, const std::string& cwd) {
     se.term = std::make_shared<Term>(std::max(m.metrics.fit_cols, 2), std::max(m.metrics.fit_rows, 1), m.palette,
                                      static_cast<int>(m.cfg.scrollback));
     if (m.cfg.demo) return se;
-    se.pty = PtyRef::make();
     // `-e CMD`: a bare program runs as is; a command line (arguments, pipes)
     // goes through sh -c, the way every terminal's -e behaves
     const bool cmdline = !m.cfg.shell_cli.empty() && m.cfg.shell_cli.find_first_of(" \t|;&<>$'\"") != std::string::npos;
@@ -120,10 +119,9 @@ App::Session App::spawn_session(Model& m, const std::string& cwd) {
     if (cmdline) si.args = {"-c", m.cfg.shell_cli};
     if (!cwd.empty()) si.env.emplace_back("PWD", cwd);
     se.term->set_prompt_protect(!si.reflow_aware);
-    if (!se.pty->spawn(m.metrics.fit_cols, m.metrics.fit_rows, shell, si.env, si.args, cwd)) {
-        (void)se.term->feed("\x1b[31mhand: could not start a shell\x1b[0m\r\n");
-        se.pty.reset();
-    }
+    se.pty = PtyRef::make({.cols = m.metrics.fit_cols, .rows = m.metrics.fit_rows, .shell = shell,
+                           .env = si.env, .args = si.args, .cwd = cwd});
+    if (!se.pty) (void)se.term->feed("\x1b[31mhand: could not start a shell\x1b[0m\r\n");
     return se;
 }
 

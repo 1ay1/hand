@@ -14,12 +14,14 @@
 // the chunk, the message comes back with the credit attached.
 //
 // Threads share one OutputCredit through mayag::CoOwned, which requires
-// mayag::Sync. core knows nothing of the runtime, so that CLAIM is made where
-// the credit is shared: include/hand/app/msg.hpp. This file is one of the
-// few places in hand allowed a raw atomic (tests/allow_raw.txt), because it
-// IS the safe type the rest of hand uses.
+// mayag::Sync -- PROVEN below by jaal, from the two fields: a Waker (const
+// ends) and an atomic flag. This file is one of the few places in hand
+// allowed a raw atomic (tests/allow_raw_include_hand.txt), because it IS the
+// safe type the rest of hand uses.
 
 #include <hand/core/platform.hpp>
+
+#include <mayag/core/sync.hpp>
 
 #include <atomic>
 #include <cstdint>
@@ -33,27 +35,28 @@ class OutputCredit {
     OutputCredit& operator=(const OutputCredit&) = delete;
 
     /// Reader: may a chunk go out now (none is with the UI)?
-    [[nodiscard]] bool free() const noexcept { return !out_.load(std::memory_order_acquire); }
+    [[nodiscard]] bool free() const noexcept { return !out.load(std::memory_order_acquire); }
     /// Reader: a chunk is on its way.
-    void spend() noexcept { out_.store(true, std::memory_order_release); }
+    void spend() noexcept { out.store(true, std::memory_order_release); }
     /// Reader: the loop is gone, so the chunk never left.
-    void refund() noexcept { out_.store(false, std::memory_order_release); }
+    void refund() noexcept { out.store(false, std::memory_order_release); }
     /// UI: the chunk is fed; the reader may send the next one.
     void give_back() noexcept {
-        out_.store(false, std::memory_order_release);
-        wake_.signal();
+        out.store(false, std::memory_order_release);
+        wake.signal();
     }
     /// Reader: sleep until the pty has bytes, the credit comes back, or the
     /// timeout passes. pty = -1 watches only the credit (back-pressured).
     [[nodiscard]] plat::Ready wait(std::intptr_t pty, int timeout_ms) const {
-        return plat::wait_readable(wake_, pty, timeout_ms);
+        return plat::wait_readable(wake, pty, timeout_ms);
     }
     /// Reader: consume the wakeups that were collected.
-    void settle() const noexcept { wake_.drain(); }
+    void settle() const noexcept { wake.drain(); }
 
-  private:
-    plat::Waker       wake_;
-    std::atomic<bool> out_{false};
+    // Public on purpose: the state jaal checks.
+    const plat::Waker wake;
+    std::atomic<bool> out{false};   ///< a chunk is with the UI
 };
+static_assert(mayag::Sync<OutputCredit>, "OutputCredit must be safe to share between a reader and the UI");
 
 }  // namespace hand

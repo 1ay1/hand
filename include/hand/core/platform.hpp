@@ -73,8 +73,12 @@ namespace hand::plat {
 // something, which is what makes ctrl-C latency a scheduling question and
 // not a polling-interval question.
 class Waker {
+    struct Ends { std::intptr_t read = -1, write = -1; };
+    [[nodiscard]] static Ends open();   ///< a pipe (POSIX) / an event (Windows)
+    explicit Waker(Ends e) noexcept : read_end(e.read), write_end(e.write) {}
+
   public:
-    Waker();
+    Waker() : Waker(open()) {}
     ~Waker();
     Waker(const Waker&) = delete;
     Waker& operator=(const Waker&) = delete;
@@ -86,11 +90,12 @@ class Waker {
     void drain() const noexcept;
 
     /// The raw handle a waiter watches; an fd on POSIX.
-    [[nodiscard]] std::intptr_t handle() const noexcept { return read_; }
+    [[nodiscard]] std::intptr_t handle() const noexcept { return read_end; }
 
-  private:
-    std::intptr_t read_ = -1;
-    std::intptr_t write_ = -1;
+    // Public and const: fixed when the waker is made, so threads may share
+    // it (jaal proves Waker Sync from these two fields).
+    const std::intptr_t read_end = -1;
+    const std::intptr_t write_end = -1;   ///< == read_end on Windows (one event)
 };
 
 /// Which of {waker, pty} became ready within timeout_ms.

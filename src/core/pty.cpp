@@ -30,10 +30,10 @@
 namespace hand {
 
 Pty::~Pty() {
-    if (fd_ >= 0) ::close(fd_);
-    if (pid_ > 0 && !reaped_) {
-        ::kill(pid_, SIGHUP);
-        (void)::waitpid(pid_, nullptr, WNOHANG);
+    if (master >= 0) ::close(master);
+    if (child > 0 && !reaped.read([](const bool& r) { return r; })) {
+        ::kill(child, SIGHUP);
+        (void)::waitpid(child, nullptr, WNOHANG);
     }
 }
 
@@ -45,15 +45,17 @@ std::string Pty::resolve_shell(std::string shell) {
     return shell;
 }
 
-bool Pty::spawn(int cols, int rows, std::string shell, const std::vector<std::pair<std::string, std::string>>& env,
-                const std::vector<std::string>& args, const std::string& cwd) {
-    shell = resolve_shell(std::move(shell));
+Pty::Started Pty::start(const PtySpec& spec) {
+    const std::string shell = resolve_shell(spec.shell);
+    const auto& env = spec.env;
+    const auto& args = spec.args;
+    const auto& cwd = spec.cwd;
     winsize ws{};
-    ws.ws_col = static_cast<unsigned short>(cols);
-    ws.ws_row = static_cast<unsigned short>(rows);
-    int master = -1;
-    const pid_t pid = ::forkpty(&master, nullptr, nullptr, &ws);
-    if (pid < 0) return false;
+    ws.ws_col = static_cast<unsigned short>(spec.cols);
+    ws.ws_row = static_cast<unsigned short>(spec.rows);
+    int fd = -1;
+    const pid_t pid = ::forkpty(&fd, nullptr, nullptr, &ws);
+    if (pid < 0) return {};
     if (pid == 0) {
         // child: a clean terminal environment, then the shell
         ::setenv("TERM", "xterm-256color", 1);
@@ -75,22 +77,20 @@ bool Pty::spawn(int cols, int rows, std::string shell, const std::vector<std::pa
         ::execlp("/bin/sh", "sh", static_cast<char*>(nullptr));
         ::_exit(127);
     }
-    ::fcntl(master, F_SETFL, ::fcntl(master, F_GETFL) | O_NONBLOCK);
-    ::fcntl(master, F_SETFD, FD_CLOEXEC);
-    fd_ = master;
-    pid_ = pid;
-    return true;
+    ::fcntl(fd, F_SETFL, ::fcntl(fd, F_GETFL) | O_NONBLOCK);
+    ::fcntl(fd, F_SETFD, FD_CLOEXEC);
+    return {fd, pid};
 }
 
 void Pty::write(std::string_view bytes) const {
-    if (fd_ < 0) return;
+    if (master < 0) return;
     int stalls = 0;
     while (!bytes.empty()) {
-        const ssize_t n = ::write(fd_, bytes.data(), bytes.size());
+        const ssize_t n = ::write(master, bytes.data(), bytes.size());
         if (n > 0) { bytes.remove_prefix(static_cast<std::size_t>(n)); stalls = 0; continue; }
         if (n < 0 && errno == EINTR) continue;
         if (n < 0 && errno == EAGAIN && ++stalls < 200) {
-            pollfd p{fd_, POLLOUT, 0};
+            pollfd p{master, POLLOUT, 0};
             (void)::poll(&p, 1, 10);   // bounded: at most ~2 s total
             continue;
         }
@@ -99,13 +99,13 @@ void Pty::write(std::string_view bytes) const {
 }
 
 void Pty::resize(int cols, int rows, int px_w, int px_h) const {
-    if (fd_ < 0) return;
+    if (master < 0) return;
     winsize ws{};
     ws.ws_col = static_cast<unsigned short>(cols);
     ws.ws_row = static_cast<unsigned short>(rows);
     ws.ws_xpixel = static_cast<unsigned short>(px_w);
     ws.ws_ypixel = static_cast<unsigned short>(px_h);
-    (void)::ioctl(fd_, TIOCSWINSZ, &ws);
+    (void)::ioctl(master, TIOCSWINSZ, &ws);
 }
 
 bool pty_read(int fd, std::string& out, int timeout_ms) {
@@ -127,9 +127,9 @@ bool pty_read(int fd, std::string& out, int timeout_ms) {
 std::intptr_t pty_handle(int fd) { return fd; }
 
 int Pty::reap() {
-    if (reaped_) return -1;
-    const int code = pty_reap(pid_);
-    if (code >= 0) reaped_ = true;
+    if (reaped.read([](const bool& r) { return r; })) return -1;
+    const int code = pty_reap(child);
+    if (code >= 0) reaped.with([](bool& r) { r = true; });
     return code;
 }
 

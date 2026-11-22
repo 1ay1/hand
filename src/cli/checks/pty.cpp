@@ -23,18 +23,19 @@ using namespace mayag;
 
 void pty([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& ok) {
     // a real child on a real pty, through toe (bounded: ≤ 2 s)
-    hand::Pty pty;
     hand::Term t{40, 5, hand::palette_of(hand::Config{})};
 #if defined(_WIN32)
     // Our own binary as the child: it writes the SGR from its
     // own stdout (the one path conhost passes through intact)
     // and exits 7, so this stays a test of the pty and toe
     // rather than of a shell's escape handling.
-    const bool up = pty.spawn(40, 5, hand::self_exe(), {}, {"--emit-red"});
+    const hand::Pty pty{{.cols = 40, .rows = 5, .shell = hand::self_exe(), .args = {"--emit-red"}}};
+    const bool up = pty.ok();
     const char* cmd = "";
     const char* what = "ConPTY starts a child on a real pty";
 #else
-    const bool up = pty.spawn(40, 5, "/bin/sh");
+    const hand::Pty pty{{.cols = 40, .rows = 5, .shell = "/bin/sh"}};
+    const bool up = pty.ok();
     const char* cmd = "printf '\\033[31mred\\033[0m'; exit 7\n";
     const char* what = "forkpty starts a shell";
 #endif

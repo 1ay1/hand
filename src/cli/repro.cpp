@@ -31,11 +31,11 @@ std::optional<int> repro(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         const std::string_view a = argv[i];
     if (a == "--repro-narrow-fish") {
-        hand::Pty pty;
         const auto si = hand::shell_integration("/usr/bin/fish");
         hand::Term t{100, 30, hand::palette_of(hand::Config{})};
         t.set_prompt_protect(!si.reflow_aware);
-        if (!pty.spawn(100, 30, "/usr/bin/fish", si.env, si.args)) return 1;
+        const hand::Pty pty{{.cols = 100, .rows = 30, .shell = "/usr/bin/fish", .env = si.env, .args = si.args}};
+        if (!pty.ok()) return 1;
         const auto pump = [&](int ms) {
             std::string buf;
             for (int k = 0; k < ms / 50 && hand::pty_read(pty.fd(), buf, 50); ++k) {
@@ -156,12 +156,12 @@ std::optional<int> repro(int argc, char** argv) {
             return hand::Pty::resolve_shell({});
         }();
         std::printf("shell: %s\n", shell.c_str());
-        hand::Pty pty;
         const auto si = hand::shell_integration(shell);
         int cols = 80, rows = 24;
         hand::Term t{cols, rows, hand::palette_of(hand::Config{})};
         t.set_prompt_protect(!si.reflow_aware);
-        if (!pty.spawn(cols, rows, shell, si.env, si.args)) return 1;
+        const hand::Pty pty{{.cols = cols, .rows = rows, .shell = shell, .env = si.env, .args = si.args}};
+        if (!pty.ok()) return 1;
         const bool show_bytes = false;
         const auto pump = [&](int ms) {
             std::string buf;

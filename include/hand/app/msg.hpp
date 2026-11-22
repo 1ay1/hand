@@ -39,12 +39,6 @@
 #include <variant>
 #include <vector>
 
-// Every member of OutputCredit (core/credit.hpp) is one atomic load/store or
-// one syscall on a pipe (POSIX) / event (Windows) that the OS makes
-// thread-safe, and only its reader thread waits on it: any thread may call
-// any member at any time. That is what CoOwned<OutputCredit> needs.
-MAYAG_SYNC(hand::OutputCredit);
-
 namespace hand::msg {
 
 // ── the shells ─────────────────────────────────────────────────────────────
@@ -225,6 +219,10 @@ struct Any : AnyBase {
 }  // namespace hand::msg
 
 // The proof, at compile time: every message may move between threads (it
-// holds nothing the sender can still reach). A borrowed pointer, a view or a
+// holds nothing the sender can still reach), except Edit, which the Sink keeps
+// on the loop (jaal::loop_only). A borrowed pointer, a view or a
 // shared_ptr in any leaf fails the build here, naming the culprit.
-static_assert(mayag::Sendable<hand::msg::Any>, "a hand message holds something borrowed");
+static_assert(mayag::Postable<hand::msg::Any>, "a hand message holds something borrowed");
+// ...and every leaf except the loop-only Edit really is Sendable: a message
+// that reaches update() from a reader or a task carries only owned values.
+static_assert(!mayag::Sendable<hand::msg::Edit>, "Edit is loop-only: it must never cross threads");

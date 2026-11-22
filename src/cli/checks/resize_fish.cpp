@@ -24,11 +24,11 @@ using namespace mayag;
 void resize_fish([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& ok) {
     // ── resize never corrupts: real fish, a drag of sizes (bounded) ───────
     if (::access("/usr/bin/fish", X_OK) == 0) {
-        hand::Pty pty;
         const auto si = hand::shell_integration("/usr/bin/fish");
         hand::Term t{80, 24, hand::palette_of(hand::Config{})};
         t.set_prompt_protect(!si.reflow_aware);
-        const bool up = pty.spawn(80, 24, "/usr/bin/fish", si.env, si.args);
+        const hand::Pty pty{{.cols = 80, .rows = 24, .shell = "/usr/bin/fish", .env = si.env, .args = si.args}};
+        const bool up = pty.ok();
         const auto pump = [&](int ms) {
             std::string buf;
             for (int k = 0; k < ms / 50 && hand::pty_read(pty.fd(), buf, 50); ++k) {

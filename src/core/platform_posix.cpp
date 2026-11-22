@@ -55,32 +55,31 @@ std::uint64_t peak_rss() {
 #endif
 }
 
-Waker::Waker() {
+Waker::Ends Waker::open() {
     int p[2] = {-1, -1};
-    if (::pipe(p) != 0) return;
+    if (::pipe(p) != 0) return {};
     for (int fd : p) {
         ::fcntl(fd, F_SETFL, ::fcntl(fd, F_GETFL) | O_NONBLOCK);
         ::fcntl(fd, F_SETFD, FD_CLOEXEC);
     }
-    read_ = p[0];
-    write_ = p[1];
+    return {p[0], p[1]};
 }
 
 Waker::~Waker() {
-    if (read_ >= 0) ::close(static_cast<int>(read_));
-    if (write_ >= 0) ::close(static_cast<int>(write_));
+    if (read_end >= 0) ::close(static_cast<int>(read_end));
+    if (write_end >= 0) ::close(static_cast<int>(write_end));
 }
 
 void Waker::signal() const noexcept {
-    if (write_ < 0) return;
+    if (write_end < 0) return;
     const char b = 1;
-    (void)!::write(static_cast<int>(write_), &b, 1);
+    (void)!::write(static_cast<int>(write_end), &b, 1);
 }
 
 void Waker::drain() const noexcept {
-    if (read_ < 0) return;
+    if (read_end < 0) return;
     char sink[64];
-    while (::read(static_cast<int>(read_), sink, sizeof sink) > 0) {}
+    while (::read(static_cast<int>(read_end), sink, sizeof sink) > 0) {}
 }
 
 Ready wait_readable(const Waker& w, std::intptr_t pty, int timeout_ms) {
