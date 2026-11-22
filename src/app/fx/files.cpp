@@ -31,8 +31,15 @@ std::string lower(std::string s) {
 }
 
 std::int64_t unix_of(fs::file_time_type t) {
+    // libc++ (macOS) has no clock_cast; libc++ and libstdc++ both have
+    // file_clock::to_sys, MSVC's STL has only clock_cast.
+#if defined(_LIBCPP_VERSION) || defined(__GLIBCXX__)
+    const auto sys = fs::file_time_type::clock::to_sys(t);
+#else
     const auto sys = std::chrono::clock_cast<std::chrono::system_clock>(t);
-    return static_cast<std::int64_t>(std::chrono::system_clock::to_time_t(sys));
+#endif
+    return static_cast<std::int64_t>(std::chrono::system_clock::to_time_t(
+        std::chrono::time_point_cast<std::chrono::system_clock::duration>(sys)));
 }
 
 std::string when_of(std::int64_t epoch_s) {   // not `unix`: a predefined macro in GNU mode

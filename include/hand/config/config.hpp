@@ -148,7 +148,9 @@ struct Config {
     // not settings: launch options
     std::string shell;          ///< [main] shell (from the file)
     std::string shell_cli;      ///< -e CMD: this run only, never saved
-    std::string url_launcher = "xdg-open";   ///< [main] url_launcher=
+    /// [main] url_launcher=: a program run with the link, or empty for the
+    /// system's own opener (open on macOS, xdg-open, the Windows shell).
+    std::string url_launcher;
     bool        demo = false;
 };
 

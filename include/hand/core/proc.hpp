@@ -51,6 +51,10 @@ struct RawSession {
 void reveal(const std::string& path);
 /// Open a local file in its default app.
 void open_path(const std::string& path);
+/// Open a link with the system's opener (`open` on macOS, xdg-open on the
+/// free desktops, the shell's association on Windows). Detached: never waits
+/// for the browser it starts.
+void open_url(const std::string& url);
 /// This machine's name, as a shell would report it in OSC 7.
 [[nodiscard]] std::string host_name();
 /// A fresh temp file path (not created).

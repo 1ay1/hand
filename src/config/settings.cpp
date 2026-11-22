@@ -419,7 +419,7 @@ mayag::FontFamily ui_family_of(const Config& c) {
 // ── hand.vibe ──────────────────────────────────────────────────────────────
 //
 //   # hand.vibe -- every key is a setting (ctrl+, edits them live)
-//   main { url_launcher xdg-open }
+//   main { url_launcher firefox }      (absent: the system's opener)
 //   font { family "JetBrains Mono"  size 13.0  line_height 1.2 }
 //   colors { scheme "Atom One Dark"  bold_is_bright true ... }
 //
@@ -539,7 +539,7 @@ bool config_save(const Config& c, const std::string& path) {
     VibeObject* root = vibe_value_object(doc.v);
     VibeObject* main = section_of(root, "main");
     if (!c.shell.empty()) vibe_object_set_string(main, "shell", c.shell.c_str());
-    vibe_object_set_string(main, "url_launcher", c.url_launcher.c_str());
+    if (!c.url_launcher.empty()) vibe_object_set_string(main, "url_launcher", c.url_launcher.c_str());
     for (const auto& r : rows()) {
         VibeObject* so = section_of(root, r.section);
         const float v = r.get(c);

@@ -246,6 +246,11 @@ void open_path(const std::string& path) {
     ::ShellExecuteW(nullptr, L"open", widen(path).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 }
 
+void open_url(const std::string& url) {
+    // the registered handler for the scheme (the default browser for http)
+    ::ShellExecuteW(nullptr, L"open", widen(url).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+}
+
 std::string host_name() {
     wchar_t buf[256];
     DWORD n = 256;

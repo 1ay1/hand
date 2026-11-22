@@ -194,7 +194,7 @@ App::Cmd App::update(Model& m, OpenUrl u) {
     std::string url = u.url;
     if (url.rfind("www.", 0) == 0) url = "https://" + url;
     if (m.cfg.demo) return {};
-    return Cmd::run(fx::open_detached, std::vector<std::string>{m.cfg.url_launcher, url});
+    return Cmd::run(fx::open_url, m.cfg.url_launcher, url);
 }
 
 App::Cmd App::update(Model&, PasteReq) {

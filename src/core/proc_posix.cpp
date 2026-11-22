@@ -19,6 +19,12 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#if defined(__APPLE__)
+#  include <arpa/inet.h>   // ntohs
+#  include <libproc.h>     // proc_listpids, proc_pidinfo, proc_pidfdinfo, proc_name
+#  include <sys/proc_info.h>
+#endif
+
 namespace hand::proc {
 
 Result run(const std::vector<std::string>& argv, std::string_view in, int timeout_ms) {
@@ -77,6 +83,10 @@ Result run(const std::vector<std::string>& argv, std::string_view in, int timeou
 
 std::vector<Listener> tcp_listeners(bool* ok) {
     std::vector<Listener> out;
+    const auto add = [&](int port, int pid, std::string name) {
+        for (const auto& l : out) if (l.port == port) return;
+        out.push_back({port, pid, std::move(name)});
+    };
 #if defined(__linux__)
     if (ok) *ok = true;
     for (const char* f : {"/proc/net/tcp", "/proc/net/tcp6"}) {
@@ -90,14 +100,42 @@ std::vector<Listener> tcp_listeners(bool* ok) {
             if (st != "0A") continue;   // LISTEN
             const auto c = local.rfind(':');
             if (c == std::string::npos) continue;
-            const int port = static_cast<int>(std::strtol(local.c_str() + c + 1, nullptr, 16));
-            bool seen = false;
-            for (const auto& l : out) seen = seen || l.port == port;
-            if (!seen) out.push_back({port, 0, ""});
+            add(static_cast<int>(std::strtol(local.c_str() + c + 1, nullptr, 16)), 0, "");
+        }
+    }
+#elif defined(__APPLE__)
+    // No /proc: walk every process's sockets with libproc (what lsof does,
+    // in-process). Only processes of this user answer, which is exactly the
+    // set that matters -- the tunnels are this user's ssh.
+    if (ok) *ok = true;
+    std::vector<pid_t> pids(4096);
+    int n = ::proc_listpids(PROC_ALL_PIDS, 0, pids.data(), static_cast<int>(pids.size() * sizeof(pid_t)));
+    if (n <= 0) { if (ok) *ok = false; return out; }
+    pids.resize(static_cast<std::size_t>(n) / sizeof(pid_t));
+    std::vector<proc_fdinfo> fds;
+    for (const pid_t pid : pids) {
+        if (pid <= 0) continue;
+        const int bytes = ::proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nullptr, 0);
+        if (bytes <= 0) continue;
+        fds.resize(static_cast<std::size_t>(bytes) / sizeof(proc_fdinfo) + 16);
+        const int got = ::proc_pidinfo(pid, PROC_PIDLISTFDS, 0, fds.data(), static_cast<int>(fds.size() * sizeof(proc_fdinfo)));
+        if (got <= 0) continue;
+        std::string name;
+        for (std::size_t i = 0; i < static_cast<std::size_t>(got) / sizeof(proc_fdinfo); ++i) {
+            if (fds[i].proc_fdtype != PROX_FDTYPE_SOCKET) continue;
+            socket_fdinfo si{};
+            if (::proc_pidfdinfo(pid, fds[i].proc_fd, PROC_PIDFDSOCKETINFO, &si, sizeof si) != sizeof si) continue;
+            if (si.psi.soi_kind != SOCKINFO_TCP || si.psi.soi_proto.pri_tcp.tcpsi_state != TSI_S_LISTEN) continue;
+            if (name.empty()) {
+                char b[2 * MAXCOMLEN + 1] = {};
+                if (::proc_name(pid, b, sizeof b) > 0) name = b;
+            }
+            add(static_cast<int>(ntohs(static_cast<std::uint16_t>(si.psi.soi_proto.pri_tcp.tcpsi_ini.insi_lport))),
+                static_cast<int>(pid), name);
         }
     }
 #else
-    if (ok) *ok = false;   // macOS: no cheap way without lsof
+    if (ok) *ok = false;
 #endif
     return out;
 }
@@ -130,9 +168,25 @@ std::vector<RawSession> putty_sessions(const std::string& root) {
 }
 
 std::vector<std::string> pick_files(const std::string& title) {
-    // zenity / kdialog when present; a terminal has no picker of its own
-    for (const auto& argv : {std::vector<std::string>{"zenity", "--file-selection", "--multiple", "--separator=\n", "--title=" + title},
-                             std::vector<std::string>{"kdialog", "--getopenfilename", ".", "--multiple", "--separate-output"}}) {
+    // The desktop's own picker: AppKit's open panel through osascript on
+    // macOS, zenity / kdialog elsewhere. One path per line; cancel is none.
+#if defined(__APPLE__)
+    std::string quoted;   // an AppleScript string literal
+    for (char ch : title) { if (ch == '"' || ch == '\\') quoted += '\\'; quoted += ch; }
+    const std::vector<std::vector<std::string>> pickers{{
+        "osascript",
+        "-e", "set fs to choose file with prompt \"" + quoted + "\" with multiple selections allowed",
+        "-e", "set out to \"\"",
+        "-e", "repeat with f in fs",
+        "-e", "set out to out & POSIX path of f & linefeed",
+        "-e", "end repeat",
+        "-e", "return out"}};
+#else
+    const std::vector<std::vector<std::string>> pickers{
+        {"zenity", "--file-selection", "--multiple", "--separator=\n", "--title=" + title},
+        {"kdialog", "--getopenfilename", ".", "--multiple", "--separate-output"}};
+#endif
+    for (const auto& argv : pickers) {
         const Result r = run(argv, {}, -1);
         if (!r.started) continue;
         std::vector<std::string> out;
@@ -162,6 +216,14 @@ void open_path(const std::string& path) {
     (void)run({"open", path}, {}, 5000);
 #else
     (void)run({"xdg-open", path}, {}, 5000);
+#endif
+}
+
+void open_url(const std::string& url) {
+#if defined(__APPLE__)
+    spawn_detached({"open", url});
+#else
+    spawn_detached({"xdg-open", url});
 #endif
 }
 

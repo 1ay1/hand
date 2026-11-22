@@ -3,6 +3,7 @@
 #include "suites.hpp"
 
 #include <hand/core/platform.hpp>   // self_exe (the Windows branch)
+#include <hand/core/proc.hpp>       // tcp_listeners
 
 #include <algorithm>
 #include <array>
@@ -76,6 +77,26 @@ void pty([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& ok) {
         ok(stopped, "ctrl-C stops a child even when hand itself ignores SIGINT");
     }
 #endif
+    {   // tunnel status: a port a child listens on is seen, on every OS (the
+        // ssh manager's "is -L 5432 really up?" -- it was Linux-only once)
+        bool known = false;
+        (void)hand::proc::tcp_listeners(&known);
+        ok(known, "this OS can list listening TCP ports");
+#if !defined(_WIN32)
+        const int port = 20000 + hand::self_pid() % 20000;
+        const hand::Pty nc{{.cols = 40, .rows = 5, .shell = "nc", .args = {"-l", std::to_string(port)}}};
+        bool seen = false;
+        for (int i = 0; i < 40 && nc.ok() && !seen; ++i) {
+            for (const auto& l : hand::proc::tcp_listeners()) seen = seen || l.port == port;
+            if (!seen) std::this_thread::sleep_for(std::chrono::milliseconds(25));
+        }
+        if (nc.ok()) {
+            nc.write("\x03");
+            for (int i = 0; i < 40 && hand::pty_reap(nc.pid()) < 0; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(25));
+        }
+        ok(!nc.ok() || seen, "...and a child's listening port shows up");
+#endif
+    }
 }
 
 }  // namespace hand::cli::checks

@@ -8,6 +8,12 @@
 namespace hand::fx {
 
 void open_detached(std::vector<std::string> argv) { spawn_detached(argv); }
+void open_url(std::string launcher, std::string url) {
+    // A launcher named in hand.vibe wins. "xdg-open" (the old default, in
+    // many saved files) means "the system's opener": on a Mac that is `open`.
+    if (launcher.empty() || launcher == "xdg-open") return proc::open_url(url);
+    spawn_detached({launcher, url});
+}
 void open_path(std::string path) { proc::open_path(path); }
 void reveal(std::string path) { proc::reveal(path); }
 

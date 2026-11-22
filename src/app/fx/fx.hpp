@@ -61,6 +61,8 @@ void remove_folder(HostSources s, std::string name);
 
 // ── the desktop (src/app/fx/os.cpp) ────────────────────────────────────────
 void open_detached(std::vector<std::string> argv);
+/// A link: `launcher` from hand.vibe, or the system's opener when it is empty.
+void open_url(std::string launcher, std::string url);
 void open_path(std::string path);
 void reveal(std::string path);
 void tunnel_scan(Sink out);
