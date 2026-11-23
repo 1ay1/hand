@@ -94,7 +94,7 @@ void overlays(const Ctx& c, const Model& m) {
                                   (s.host ? " on " + s.host->alias : std::string{});
         picker(c, "search_all", s.q, items, rk, s.sel,
                PickerStyle{.placeholder = "Search the text of every file in " + where,
-                           .prefix = "\u2315",
+                           .prefix = "/",   // the search idiom (⌕ is missing from most UI fonts)
                            .width = std::min(820.0f, m.win.x - 60.0f),
                            .max_rows = 14,
                            .empty_text = s.q.text.size() < 2 ? "Type two or more characters"
