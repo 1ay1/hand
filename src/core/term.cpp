@@ -1,6 +1,7 @@
 // hand::Term — toe ⇄ mayag. The only translation unit that includes toe.
 
 #include <hand/core/term.hpp>
+#include <hand/core/hint_scan.hpp>
 
 #include <toe/input/keymap.hpp>
 #include <toe/term/update.hpp>
@@ -9,7 +10,6 @@
 #include <cctype>
 #include <cstdio>
 #include <optional>
-#include <regex>
 #include <variant>
 
 namespace hand {
@@ -53,11 +53,11 @@ void convert_cell(const Screen& s, const toe::term::Palette& pal, const toe::ter
         d.width = cell.width;
     }
     const auto& pen = cell.pen;
-    if (!std::holds_alternative<toe::term::DefaultColor>(pen.fg)) {
+    if (!pen.fg.is<toe::term::DefaultColor>()) {
         d.fg = u32(pal.resolve(pen.fg, true));
         d.default_fg = false;
     }
-    if (!std::holds_alternative<toe::term::DefaultColor>(pen.bg)) {
+    if (!pen.bg.is<toe::term::DefaultColor>()) {
         d.bg = u32(pal.resolve(pen.bg, false));
         d.default_bg = false;
     }
@@ -76,7 +76,7 @@ void convert_cell(const Screen& s, const toe::term::Palette& pal, const toe::ter
     d.flags = f;
     if (has(pen.attr, Attr::Underline)) {
         d.ul_style = static_cast<dsl::TermUnderline>(std::clamp(static_cast<int>(pen.underline), 1, 5));
-        if (!std::holds_alternative<toe::term::DefaultColor>(pen.underline_color))
+        if (!pen.underline_color.is<toe::term::DefaultColor>())
             d.ul_color = u32(pal.resolve(pen.underline_color, true));
     }
 }
@@ -538,7 +538,7 @@ const std::vector<dsl::ScrollbackRun>& Term::minimap(int buckets) const {
             const auto& cell = best[static_cast<std::size_t>(c)];
             const bool ink = !cell.spacer() && cell.cp != U' ' && cell.cp != 0;
             const auto& pen = cell.pen;
-            const std::uint32_t fg = std::holds_alternative<toe::term::DefaultColor>(pen.fg) ? def : u32(pal.resolve(pen.fg, true));
+            const std::uint32_t fg = pen.fg.is<toe::term::DefaultColor>() ? def : u32(pal.resolve(pen.fg, true));
             if (!ink) { flush(c); continue; }
             if (start >= 0 && fg != col) flush(c);
             if (start < 0) { start = c; col = fg; }
@@ -573,30 +573,30 @@ Term::Cursor Term::cursor() const {
 
 std::vector<Term::Hint> Term::hints() const {
     using K = Hint::Kind;
-    static const std::regex url{R"(((?:https?|ftp|file)://|www\.)[^\s<>"'`]+)"};
-    static const std::regex path{R"((?:~|\.{1,2})?/[\w.@+~\-]+(?:/[\w.@+~\-]+)*/?|[\w.@+\-]+(?:/[\w.@+\-]+)+/?)"};
-    static const std::regex hash{R"(\b[0-9a-f]{7,40}\b)"};
-    static const std::regex ip{R"(\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b)"};
+    using Scan = std::size_t (*)(std::string_view, std::size_t);
     const auto& s = p_->m.screen;
     std::vector<Hint> out;
+    std::string line;
+    std::vector<int> col_of;
+    std::vector<std::pair<std::size_t, std::size_t>> taken;
     for (int r = s.size().rows - 1; r >= 0; --r) {
         // the row as text, with each byte's column
         const auto cells = s.row(toe::Row{r});
-        std::string line;
-        std::vector<int> col_of;
+        line.clear();
+        col_of.clear();
         for (int c = 0; c < static_cast<int>(cells.size()); ++c) {
             const auto& cell = cells[static_cast<std::size_t>(c)];
             if (cell.spacer()) continue;
-            const std::size_t before = line.size();
             put_utf8(line, cell.cp == 0 ? U' ' : cell.cp);
             col_of.resize(line.size(), c);
-            (void)before;
         }
         col_of.push_back(static_cast<int>(cells.size()));
-        std::vector<std::pair<std::size_t, std::size_t>> taken;
-        const auto add = [&](const std::regex& re, K kind) {
-            for (auto it = std::sregex_iterator(line.begin(), line.end(), re); it != std::sregex_iterator{}; ++it) {
-                std::size_t b = static_cast<std::size_t>(it->position()), e = b + static_cast<std::size_t>(it->length());
+        taken.clear();
+        const auto add = [&](Scan scan, K kind) {
+            for (std::size_t i = 0; i < line.size();) {
+                std::size_t b = i, e = scan(line, i);
+                if (e == hint_scan::npos || e <= b) { ++i; continue; }
+                i = e;
                 while (e > b && std::string_view{".,;:)]}'\""}.find(line[e - 1]) != std::string_view::npos) --e;
                 if (e - b < 3) continue;
                 bool clash = false;
@@ -617,10 +617,10 @@ std::vector<Term::Hint> Term::hints() const {
                 out.push_back({kind, r, c0, c1 - c0, std::move(text)});
             }
         };
-        add(url, K::url);
-        add(ip, K::ip);
-        add(path, K::path);
-        add(hash, K::hash);
+        add(hint_scan::scan_url, K::url);
+        add(hint_scan::scan_ip, K::ip);
+        add(hint_scan::scan_path, K::path);
+        add(hint_scan::scan_hash, K::hash);
     }
     return out;
 }

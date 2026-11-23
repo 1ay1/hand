@@ -18,15 +18,33 @@
 #   mayag_no_byte_hash           cache keys are values, never an object's padded bytes
 #   echo_latency                 keystroke -> pty -> echo -> frame, through the real loop (hand --echo):
 #                                fails if the median passes 8 ms (baseline ~1 ms release, ~2.3 ms dev)
+#   hint_scan                    hint mode's hand-written URL / path / hash / IP scanners agree with the
+#                                std::regex each one replaced, on 40k random strings
+#   fold_budget                  the self-test run alone, failing if any update passed jaal's 8 ms fold
+#                                budget (label perf; the parallel app_headless only reports them)
 
 set(_JAAL_LINT ${PROJECT_SOURCE_DIR}/external/mayag/third_party/jaal/tests/lint)
 set(_MAYAG     ${PROJECT_SOURCE_DIR}/external/mayag)
 
 add_test(NAME app_headless COMMAND hand --headless --last-resort)
+add_executable(hint_scan_test EXCLUDE_FROM_ALL hint_scan_test.cpp)
+target_include_directories(hint_scan_test PRIVATE ${PROJECT_SOURCE_DIR}/include)
+target_compile_features(hint_scan_test PRIVATE cxx_std_23)
+# the build presets make only `hand`: ctest builds the test it runs
+add_test(NAME hint_scan_build
+         COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target hint_scan_test)
+set_tests_properties(hint_scan_build PROPERTIES FIXTURES_SETUP hint_scan_bin)
+add_test(NAME hint_scan COMMAND hint_scan_test)
+set_tests_properties(hint_scan PROPERTIES FIXTURES_REQUIRED hint_scan_bin)
 if(NOT WIN32)   # `cat` is the echo program
     add_test(NAME echo_latency COMMAND hand --echo --last-resort)
     set_tests_properties(echo_latency PROPERTIES RUN_SERIAL TRUE TIMEOUT 60 LABELS "perf")
 endif()
+# the self-test again, alone on the machine, failing on any update over
+# jaal's 8 ms fold budget (it names the message: "slow update: hand::msg::X")
+add_test(NAME fold_budget COMMAND hand --headless --last-resort)
+set_tests_properties(fold_budget PROPERTIES RUN_SERIAL TRUE TIMEOUT 120 LABELS "perf"
+                     ENVIRONMENT "HAND_FOLD_BUDGET=strict")
 add_test(NAME layering COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/layering.cmake)
 add_test(NAME purity COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/purity.cmake)
 

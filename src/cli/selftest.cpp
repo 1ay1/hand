@@ -6,6 +6,8 @@
 
 #include <array>
 #include <cstdio>
+#include <cstdlib>
+#include <string_view>
 
 namespace hand::cli {
 
@@ -48,6 +50,17 @@ int selftest(Runtime& rt, Vec2 size) {
         checks::config_roundtrip,
     };
     for (const auto suite : suites) suite(rt, size, ok);
+    // jaal times every update (options::fold_budget_time, 8 ms) and names a
+    // slow one on stderr. The self-test drives every feature once: none of
+    // them may hold the loop -- the UI -- longer than a frame. Wall-clock, so
+    // it is a GATE only where the machine is ours: ctest's serial `fold_budget`
+    // (HAND_FOLD_BUDGET=strict); in a parallel run, or under a sanitizer,
+    // a slow fold is still named on stderr but does not fail the suite.
+    if (const char* s = std::getenv("HAND_FOLD_BUDGET"); s && std::string_view{s} == "strict")
+        ok(rt.slow_folds() == 0, "no update ran over jaal's fold budget");
+    else if (rt.slow_folds() > 0)
+        std::printf("  note  %llu update(s) over jaal's fold budget (see stderr; HAND_FOLD_BUDGET=strict fails on it)\n",
+                    static_cast<unsigned long long>(rt.slow_folds()));
     std::printf(ok.failures() ? "FAIL\n" : "PASS\n");
     return ok.failures();
 }
