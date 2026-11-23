@@ -18,6 +18,7 @@
 //        ├─ PaneMsg      TogglePane PaneOp PaneListed PaneResize PaneWatch PanePreview
 //        ├─ EditorMsg    OpenFile FileLoaded EditorOp FileSaved EditorPasted FileWatch FileStat
 //        │               QuickOpen QuickListed QuickKey QuickText QuickPick     files in tabs, ⌘P
+//        │               SearchAll SearchAllKey SearchAllText SearchAllDone SearchAllPick   ⌘⇧F
 //        └─ Edit         a direct model edit (self-test and shots only)
 //
 // Each leaf names an intent and carries typed data -- ids are SessionId /
@@ -215,8 +216,9 @@ struct PanePreview { std::string path; std::optional<mayag::dsl::FilePreview> pr
 using PaneMsg = std::variant<TogglePane, PaneOp, PaneListed, PaneResize, PaneWatch, PanePreview>;
 
 // ── files in tabs: the editor ──────────────────────────────────────────────
-/// Open `path` in an editor tab (or bring its tab to the front).
-struct OpenFile { std::string path; };
+/// Open `path` in an editor tab (or bring its tab to the front); with a
+/// `line` (0-based), select [col, col+len) on it and centre it.
+struct OpenFile { std::string path; int line = -1; int col = 0; int len = 0; };
 /// The file's bytes arrived (or why they couldn't).
 /// `reload`: a re-read of an open file (it changed on disk, or "reload").
 struct FileLoaded { SessionId sid; std::string path; std::string text; std::string error; bool binary = false;
@@ -239,8 +241,17 @@ struct QuickKey { mayag::Key key; mayag::Mods mods; };
 struct QuickText { std::string text; };
 /// Open the ranked entry `index` (a click, or enter).
 struct QuickPick { int index = 0; };
+/// ⌘⇧F: search the project's files for text.
+struct SearchAll {};
+struct SearchAllKey { mayag::Key key; mayag::Mods mods; };
+struct SearchAllText { std::string text; };
+using hand::SearchHit;
+/// A search finished (`token`: which query it answers; older ones are dropped).
+struct SearchAllDone { std::uint64_t token = 0; std::string root; std::vector<SearchHit> hits; bool truncated = false; std::string error; };
+struct SearchAllPick { int index = 0; };
 using EditorMsg = std::variant<OpenFile, FileLoaded, EditorOp, FileSaved, EditorPasted, FileWatch, FileStat,
-                               QuickOpen, QuickListed, QuickKey, QuickText, QuickPick>;
+                               QuickOpen, QuickListed, QuickKey, QuickText, QuickPick,
+                               SearchAll, SearchAllKey, SearchAllText, SearchAllDone, SearchAllPick>;
 
 // ── the root ───────────────────────────────────────────────────────────────
 /// A direct model edit. For the self-test and scripted shots only: the app

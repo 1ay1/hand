@@ -130,6 +130,31 @@ void editor(Runtime& rt, Vec2, Check& ok) {
     rt.press_key(Key::escape);
     ok(!rt.model().quick.open, "escape closes it");
 
+    // ⌘⇧F: text across the project, landing on the line
+#if defined(__APPLE__)
+    rt.press_key(Key::f, Mods{.shift = true, .super = true});
+#else
+    rt.press_key(Key::f, Mods{.shift = true, .ctrl = true});
+#endif
+    ok(rt.model().search_all.open, "the project-search key opens the search");
+    rt.window().type("needle");
+    rt.tick();
+    const std::uint64_t tok = rt.model().search_all.token;
+    rt.send(App::Msg{App::SearchAllDone{tok - 1, "/tmp/hand-selftest", {{"stale.cpp", 0, 0, 6, "needle"}}, false, ""}});
+    ok(rt.model().search_all.hits.empty(), "an older query's answer is dropped");
+    rt.send(App::Msg{App::SearchAllDone{tok, "/tmp/hand-selftest", {{"notes.cpp", 2, 4, 6, "    needle();"}}, false, ""}});
+    ok(rt.model().search_all.hits.size() == 1, "the current query's answer is shown");
+    rt.press_key(Key::enter);
+    ok(!rt.model().search_all.open && rt.model().tab().file && rt.model().tab().file->path == "/tmp/hand-selftest/notes.cpp",
+       "enter opens the hit's file");
+    rt.send(App::Msg{App::FileLoaded{rt.model().tab().sid, "/tmp/hand-selftest/notes.cpp", "a\nb\n    needle();\n", "", false}});
+    {
+        const auto& ed = rt.model().tab().file->st.ed;
+        ok(ed.primary_sel().start() == mayag::editor::Pos{2, 4} && ed.primary_sel().end() == mayag::editor::Pos{2, 10},
+           "...with the match selected on its line");
+    }
+    rt.send(App::Msg{App::CloseTab{TabIndex{rt.model().active()}, Confirm::given}});
+
     // a binary is not a tab: it goes to its app and the waiting tab closes
     rt.send(App::Msg{App::OpenFile{"/tmp/hand-selftest/logo.png"}});
     rt.send(App::Msg{App::FileLoaded{rt.model().tab().sid, "/tmp/hand-selftest/logo.png", "", "", true}});

@@ -69,6 +69,7 @@ struct FileDoc {
     std::optional<std::uint64_t>   saving;        ///< a write of this save point is in flight
     bool                           close_after_save = false;   ///< "save" in the close dialog
     std::int64_t                   disk_mtime = 0; ///< the file's mtime when last read or written (watching for outside edits)
+    std::optional<mayag::editor::Range> jump;     ///< where to land once the text arrives (a search hit)
 };
 
 /// ⌘P: every file of the project, fuzzy-found.
@@ -80,6 +81,23 @@ struct QuickOpenModel {
     std::string              root;              ///< absolute; files are relative to it
     std::vector<std::string> files;
     bool                     truncated = false; ///< the project has more than the list holds
+};
+
+/// One line that matched (⌘⇧F): `file` relative to the searched root; the
+/// match is bytes [col, col+len) of the line (0-based line).
+struct SearchHit { std::string file; int line = 0; int col = 0; int len = 0; std::string text; };
+
+/// ⌘⇧F: the project's files searched for text.
+struct SearchAllModel {
+    bool                       open = false;
+    bool                       searching = false;
+    mayag::TextEditState       q;
+    int                        sel = 0;
+    std::uint64_t              token = 0;        ///< the newest query asked
+    std::string                root;             ///< hits' files are relative to it
+    std::vector<SearchHit>     hits;
+    bool                       truncated = false;
+    std::string                error;
 };
 
 /// One tab: a shell on a pty, the screen toe keeps for it, and everything

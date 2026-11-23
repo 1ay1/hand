@@ -34,6 +34,7 @@ std::optional<App::Msg> App::on(const Model& m, const FocusEvent& f) {
 std::optional<App::Msg> App::on(const Model& m, const Left& l) {
     if (m.ssh.picker.open && l.node == part_id("hosts", part_menu)) return PickerClose{};
     if (m.quick.open && l.node == part_id("quick", part_menu)) return QuickOpen{};   // a click outside: close
+    if (m.search_all.open && l.node == part_id("search_all", part_menu)) return SearchAll{};
     if (m.tab().file)
         if (auto op = text_editor_clicked(m.tab().file->st, "doc", l.node)) return EditorOp{std::move(*op)};
     if (m.settings.open)
@@ -77,6 +78,9 @@ std::optional<App::Msg> App::on(const Model& m, const Clicked& c) {
         for (std::size_t k = 0; k < n; ++k)
             if (c.node == part_id("quick", k)) return QuickPick{static_cast<int>(k)};
     }
+    if (m.search_all.open)
+        for (std::size_t k = 0; k < m.search_all.hits.size(); ++k)
+            if (c.node == part_id("search_all", k)) return SearchAllPick{static_cast<int>(k)};
     if (m.tab().file)
         if (auto op = text_editor_clicked(m.tab().file->st, "doc", c.node)) return EditorOp{std::move(*op)};
     if (c.node == node_id("ssh.close")) return CloseTab{TabIndex{m.active()}, Confirm::given};

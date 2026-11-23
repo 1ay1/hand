@@ -98,6 +98,17 @@ std::optional<App::Msg> App::on(const Model& m, const KeyEvent& k_in) {
                                  q.ctrl && !q.super && se.file.has_value();   // in a shell, ctrl+P is the shell's (history)
 #endif
         if (quick_chord) return QuickOpen{};
+        const bool search_chord = k_in.key == Key::f && q.shift && !q.alt &&
+#if defined(__APPLE__)
+                                  q.super && !q.ctrl;
+#else
+                                  q.ctrl && !q.super && se.file.has_value();   // in a shell tab, ctrl+shift+F searches its scrollback
+#endif
+        if (search_chord) return SearchAll{};
+        if (m.search_all.open) {
+            if (k_in.key == Key::ctrl || k_in.key == Key::shift || k_in.key == Key::alt || k_in.key == Key::super) return std::nullopt;
+            return SearchAllKey{k_in.key, k_in.mods};
+        }
         if (m.quick.open) {
             if (k_in.key == Key::ctrl || k_in.key == Key::shift || k_in.key == Key::alt || k_in.key == Key::super) return std::nullopt;
             return QuickKey{k_in.key, k_in.mods};
@@ -243,6 +254,7 @@ std::optional<App::Msg> App::on(const Model& m, const TextEvent& t) {
         return PickerText{t.text};
     if (m.dialog.ask.has_value()) return Swallow{};
     if (m.quick.open) return QuickText{t.text};
+    if (m.search_all.open) return SearchAllText{t.text};
     if (m.pane.open && m.pane.ui.focused) {   // the pane reads keys; text only while filtering
         if (auto op = file_pane_text(m.pane.ui, t.text)) return PaneOp{std::move(*op)};
         return Swallow{};

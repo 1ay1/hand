@@ -81,6 +81,9 @@ void stat_file(Sink out, SessionId sid, std::string path);
 /// Every file under `root` worth opening (git's list when it is a repo:
 /// ignored files stay out; else a bounded walk skipping build trees).
 void list_project(Sink out, std::string root);
+/// Search the project (from `root`'s repo top) for `query`: git grep in a
+/// repo, grep elsewhere; plain text, case-insensitive unless it has capitals.
+void search_project(Sink out, std::uint64_t token, std::string root, std::string query);
 /// Write `text` to `path` atomically (a sibling temp file, renamed over it,
 /// keeping the file's permissions), then FileSaved{sid, point}.
 void write_file(Sink out, SessionId sid, std::string path, std::string text, std::uint64_t point);

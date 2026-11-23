@@ -65,6 +65,43 @@ void overlays(const Ctx& c, const Model& m) {
                            .footer = {{"\u23CE", "open"}, {"\u2191\u2193", "choose"}, {"esc", "close"}},
                            .noun = m.quick.truncated ? "files (the first 50k)" : "files"});
     }
+    if (m.search_all.open) {   // ⌘⇧F: every line in the project with the text
+        const auto& s = m.search_all;
+        std::vector<PickerItem> items;
+        Ranked rk;
+        for (const auto& h : s.hits) {
+            // the line, its indent dropped, and cut to keep the match in view
+            std::size_t a = h.text.find_first_not_of(" \t");
+            if (a == std::string::npos) a = 0;
+            if (static_cast<std::size_t>(h.col) > a + 60) a = static_cast<std::size_t>(h.col) - 40;   // a long line: start near the match
+            while (a > 0 && a < h.text.size() && (static_cast<unsigned char>(h.text[a]) & 0xC0) == 0x80) --a;   // not mid-character
+            std::string line = h.text.substr(a, 140);
+            const bool cut_front = a > h.text.find_first_not_of(" \t");
+            if (cut_front) line = "\u2026" + line;
+            FuzzyMatch fm;
+            const std::size_t at = static_cast<std::size_t>(h.col) - a + (cut_front ? 3 : 0);   // … is 3 bytes
+            for (int k = 0; k < h.len; ++k) if (at + static_cast<std::size_t>(k) < line.size()) fm.positions.push_back(static_cast<std::uint16_t>(at + static_cast<std::size_t>(k)));
+            const auto slash = h.file.find_last_of('/');
+            const std::string name = slash == std::string::npos ? h.file : h.file.substr(slash + 1);
+            rk.order.push_back(static_cast<int>(items.size()));
+            rk.matches.push_back(std::move(fm));
+            items.push_back({.label = std::move(line), .detail = h.file, .hint = std::to_string(h.line + 1), .icon_name = name});
+        }
+        // how many files the hits are in
+        std::size_t files = 0;
+        for (std::size_t i = 0; i < s.hits.size(); ++i) files += i == 0 || s.hits[i].file != s.hits[i - 1].file ? 1 : 0;
+        const std::string where = s.root.empty() ? std::string{"the project"} : s.root.substr(s.root.find_last_of('/') + 1);
+        picker(c, "search_all", s.q, items, rk, s.sel,
+               PickerStyle{.placeholder = "Search the text of every file in " + where,
+                           .prefix = "\u2315",
+                           .width = std::min(820.0f, m.win.x - 60.0f),
+                           .max_rows = 14,
+                           .empty_text = s.q.text.size() < 2 ? "Type two or more characters"
+                                       : s.searching ? "Searching\u2026" : !s.error.empty() ? s.error : "Nothing found",
+                           .footer = {{"\u23CE", "open at the line"}, {"\u2191\u2193", "choose"}, {"esc", "close"}},
+                           .noun = (s.truncated ? "results (the first 2000) in " : "results in ") + std::to_string(files) +
+                                   (files == 1 ? " file" : " files") + (s.searching ? "  \u00B7  searching\u2026" : ""), .mono = true});
+    }
     dialog(c, m);
 }
 

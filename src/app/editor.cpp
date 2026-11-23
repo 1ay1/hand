@@ -43,11 +43,17 @@ std::string name_of(const std::string& path) {
 
 App::Cmd App::update(Model& m, OpenFile o) {
     if (o.path.empty()) return {};
+    const std::optional<editor::Range> jump = o.line < 0 ? std::nullopt
+        : std::optional{editor::Range{{o.line, o.col}, {o.line, o.col + o.len}}};
     // already open: that tab
     for (std::size_t i = 0; i < m.tab_count(); ++i)
         if (m.at(i).file && m.at(i).file->path == o.path) {
             activate(m, i);
             m.pane.ui.focused = false;
+            if (jump) {
+                if (m.at(i).file->loading) m.at(i).file->jump = jump;
+                else text_editor_ops::jump_to(m.at(i).file->st, *jump);
+            }
             return SetTitle{name_of(o.path)};
         }
     Session se;
@@ -58,6 +64,7 @@ App::Cmd App::update(Model& m, OpenFile o) {
     se.term = std::make_shared<Term>(2, 1, m.palette, 0, m.env.entropy ^ se.sid.get());
     se.title = name_of(o.path);
     se.file = FileDoc{.path = o.path};
+    se.file->jump = jump;
     const SessionId sid = se.sid;
     const bool first_split = m.tab_count() == 1 && !m.cfg.strip_always();
     const std::size_t at = m.tabs.insert(m.active() + 1, std::move(se));   // beside the tab it came from
@@ -98,6 +105,7 @@ App::Cmd App::update(Model& m, FileLoaded l) {
     }
     d->st = text_editor_ops::open(l.text, l.path);
     d->disk_mtime = l.mtime;
+    if (d->jump) text_editor_ops::jump_to(d->st, *std::exchange(d->jump, std::nullopt));
     return {};
 }
 
@@ -232,6 +240,7 @@ std::string quick_root(const Model& m) {
 App::Cmd App::update(Model& m, QuickOpen) {
     if (m.quick.open) { m.quick.open = false; return {}; }
     m.quick.open = true;
+    m.search_all.open = false;
     m.quick.q.set({});
     m.quick.sel = 0;
     const std::string root = quick_root(m);
@@ -275,5 +284,72 @@ App::Cmd App::update(Model& m, QuickPick p) {
 }
 
 std::vector<std::pair<int, FuzzyMatch>> quick_open_ranked(const Model& m) { return quick_ranked(m); }
+
+// ── ⌘⇧F: text across the project ───────────────────────────────────────────
+
+namespace {
+/// Ask for the current query (a 2+ character one); older answers are dropped by token.
+App::Cmd search_now(Model& m) {
+    auto& s = m.search_all;
+    s.sel = 0;
+    ++s.token;
+    if (s.q.text.size() < 2) { s.hits.clear(); s.searching = false; s.error.clear(); s.truncated = false; return {}; }
+    s.searching = true;
+    if (m.cfg.demo) return {};
+    return App::Cmd::task(fx::search_project, s.token, quick_root(m), s.q.text);
+}
+}  // namespace
+
+App::Cmd App::update(Model& m, SearchAll) {
+    auto& s = m.search_all;
+    if (s.open) { s.open = false; return {}; }
+    s.open = true;
+    m.quick.open = false;
+    // the selection in the front editor (one line of it) is the natural query
+    if (m.tab().file && !m.tab().file->loading) {
+        const auto& ed = m.tab().file->st.ed;
+        const auto& p = ed.primary_sel();
+        if (!p.empty() && p.start().line == p.end().line) s.q.set(ed.text_in(p.range()));
+    }
+    s.q.select_all();   // typing replaces the last search; enter re-runs it
+    return search_now(m);
+}
+
+App::Cmd App::update(Model& m, SearchAllKey k) {
+    auto& s = m.search_all;
+    if (!s.open) return {};
+    const std::string before = s.q.text;
+    const auto in = picker_key(s.q, k.key, k.mods, s.sel, static_cast<int>(s.hits.size()));
+    if (in.act == PickerIntent::Act::close) { s.open = false; return {}; }
+    if (in.act == PickerIntent::Act::choose) return update(m, SearchAllPick{in.index});
+    return s.q.text != before ? search_now(m) : Cmd{};
+}
+
+App::Cmd App::update(Model& m, SearchAllText t) {
+    auto& s = m.search_all;
+    if (!s.open) return {};
+    s.q.insert(t.text);
+    return search_now(m);
+}
+
+App::Cmd App::update(Model& m, SearchAllDone d) {
+    auto& s = m.search_all;
+    if (d.token != s.token) return {};   // an older query's answer
+    s.searching = false;
+    s.root = std::move(d.root);
+    s.hits = std::move(d.hits);
+    s.truncated = d.truncated;
+    s.error = std::move(d.error);
+    s.sel = std::min(s.sel, std::max(static_cast<int>(s.hits.size()) - 1, 0));
+    return {};
+}
+
+App::Cmd App::update(Model& m, SearchAllPick p) {
+    auto& s = m.search_all;
+    if (p.index < 0 || p.index >= static_cast<int>(s.hits.size())) return {};
+    const SearchHit h = s.hits[static_cast<std::size_t>(p.index)];
+    s.open = false;
+    return update(m, OpenFile{s.root + "/" + h.file, h.line, h.col, h.len});
+}
 
 }  // namespace hand

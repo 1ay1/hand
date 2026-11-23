@@ -77,6 +77,8 @@ struct App {
     using FileWatch = msg::FileWatch;   using FileStat = msg::FileStat;     using QuickOpen = msg::QuickOpen;
     using QuickListed = msg::QuickListed; using QuickKey = msg::QuickKey;   using QuickText = msg::QuickText;
     using QuickPick = msg::QuickPick;
+    using SearchAll = msg::SearchAll;   using SearchAllKey = msg::SearchAllKey; using SearchAllText = msg::SearchAllText;
+    using SearchAllDone = msg::SearchAllDone; using SearchAllPick = msg::SearchAllPick; using SearchHit = msg::SearchHit;
     using Notice = msg::Notice;
     using Spawned = msg::Spawned;       using Probe = msg::Probe;           using Probed = msg::Probed;
     using HostsLoaded = msg::HostsLoaded;
@@ -213,6 +215,11 @@ struct App {
     static Cmd update(Model& m, QuickKey);
     static Cmd update(Model& m, QuickText);
     static Cmd update(Model& m, QuickPick);
+    static Cmd update(Model& m, SearchAll);
+    static Cmd update(Model& m, SearchAllKey);
+    static Cmd update(Model& m, SearchAllText);
+    static Cmd update(Model& m, SearchAllDone);
+    static Cmd update(Model& m, SearchAllPick);
     /// Carry out what the active editor asked for (save, clipboard).
     static Cmd editor_actions(Model& m);
     /// Write tab `i`'s file (the state now); empty when there is nothing to do.

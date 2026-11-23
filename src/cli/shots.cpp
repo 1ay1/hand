@@ -380,7 +380,7 @@ if (shot.rfind("files", 0) == 0) {   // the file pane beside a shell in this rep
     }
 }
 if (shot == "editor" || shot == "editor-find" || shot == "editor-deep" || shot == "editor-complete" || shot == "editor-symbols" ||
-    shot == "editor-changed" || shot == "quick-open") {   // a file from the pane, open in the editor
+    shot == "editor-changed" || shot == "quick-open" || shot == "search-all") {   // a file from the pane, open in the editor
     std::error_code ec;
     const std::string here = std::filesystem::current_path(ec).generic_string();
     const std::string path = here + (shot == "editor-deep" ? "/external/mayag/include/mayag/widget/text_editor.hpp" : "/src/app/editor.cpp");
@@ -414,6 +414,30 @@ if (shot == "editor" || shot == "editor-find" || shot == "editor-deep" || shot =
     }
     if (shot == "editor-symbols") rt.press_key(mayag::Key::o, mayag::Mods{.shift = true, .ctrl = prim.ctrl, .super = prim.super});
     if (shot == "editor-changed") rt.send(hand::App::Msg{hand::App::FileStat{rt.model().tab().sid, 1}});
+    if (shot == "search-all") {   // the real search over this repo, fed back as its answer
+        rt.press_key(mayag::Key::f, mayag::Mods{.shift = true, .ctrl = prim.ctrl, .super = prim.super});
+        rt.type("cmd::task");
+        hand::App::SearchAllDone done{.token = rt.model().search_all.token};
+        {   // the same command fx::search_project runs
+            const auto g = hand::proc::run({"git", "-C", here, "grep", "-n", "-I", "--no-color", "-F", "-i", "-e", "cmd::task", "--"}, {}, 4000);
+            done.root = here;
+            std::size_t a = 0;
+            for (std::size_t i = 0; i <= g.out.size(); ++i) {
+                if (i < g.out.size() && g.out[i] != '\n') continue;
+                const std::string l = g.out.substr(a, i - a); a = i + 1;
+                const auto c1 = l.find(':'), c2 = c1 == std::string::npos ? c1 : l.find(':', c1 + 1);
+                if (c2 == std::string::npos) continue;
+                hand::SearchHit h{.file = l.substr(0, c1), .line = std::atoi(l.substr(c1 + 1, c2 - c1 - 1).c_str()) - 1, .text = l.substr(c2 + 1)};
+                std::string low = h.text; for (char& ch : low) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+                const auto at = low.find("cmd::task");
+                h.col = at == std::string::npos ? 0 : static_cast<int>(at); h.len = 9;
+                done.hits.push_back(std::move(h));
+            }
+        }
+        rt.send(hand::App::Msg{std::move(done)});
+        rt.press_key(mayag::Key::down, {});
+        rt.press_key(mayag::Key::down, {});
+    }
     if (shot == "quick-open") {
         rt.press_key(mayag::Key::p, prim);
         { // the demo never lists (no task): list this repo the way fx::list_project does

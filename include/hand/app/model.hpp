@@ -81,6 +81,7 @@ struct Model {
     SshModel                ssh;                  ///< ctrl+shift+s picker, ctrl+shift+h manager
     PaneModel               pane;                 ///< ctrl+shift+e
     QuickOpenModel          quick;                ///< ⌘P / ctrl+P: the project's files
+    SearchAllModel          search_all;           ///< ⌘⇧F: text across the project
 
     /// The tab in front: what the keyboard, the mouse and the view act on.
     [[nodiscard]] Session& tab() noexcept { return tabs.active(); }
