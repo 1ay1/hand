@@ -64,6 +64,7 @@ if (shot == "bench") {
         if (const char* only = std::getenv("HAND_BENCH_ONLY"); only && !std::string_view{what}.starts_with(only)) return;
         static const int N = std::getenv("HAND_BENCH_LOOP") ? std::atoi(std::getenv("HAND_BENCH_LOOP")) : 120;
         double view = 0, cascade = 0, layout = 0, paint = 0, render = 0, fold = 0;
+        const auto reused0 = rt.window().tiles_reused(), total0 = rt.window().tiles_total();
         const auto t0 = clk::now();
         for (int i = 0; i < N; ++i) {
             poke(i);   // the input (posted: one input, one frame)
@@ -74,8 +75,10 @@ if (shot == "bench") {
             view += f.view_ms; cascade += f.cascade_ms; layout += f.layout_ms; paint += f.paint_ms; render += f.render_ms;
         }
         const double total = std::chrono::duration<double, std::milli>(clk::now() - t0).count() / N;
-        std::printf("  %-26s %6.3f ms/frame   frame %.3f  view %.3f  cascade %.3f  layout %.3f  paint %.3f  raster %.3f\n",
-                    what, total, fold / N, view / N, cascade / N, layout / N, paint / N, render / N);
+        const auto tiles = rt.window().tiles_total() - total0;
+        const double reuse = tiles ? 100.0 * static_cast<double>(rt.window().tiles_reused() - reused0) / static_cast<double>(tiles) : 0.0;
+        std::printf("  %-26s %6.3f ms/frame   frame %.3f  view %.3f  cascade %.3f  layout %.3f  paint %.3f  raster %.3f  reuse %4.1f%%\n",
+                    what, total, fold / N, view / N, cascade / N, layout / N, paint / N, render / N, reuse);
     };
     std::printf("hand frame pipeline (%dx%d, %d cols x %d rows)\n", static_cast<int>(size.x), static_cast<int>(size.y),
                 rt.model().tab().term->cols(), rt.model().tab().term->rows());
