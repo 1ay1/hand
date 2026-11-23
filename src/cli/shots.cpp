@@ -495,7 +495,7 @@ if (shot == "tabs") {
         for (int i = 0; i < 30; ++i) rt.tick();
     }
 }
-if (shot == "hosts" || shot == "ssh" || shot == "ssh-drop" || shot == "ssh-retry" || shot == "ssh-edit" || shot.rfind("manager", 0) == 0) {
+if (shot == "hosts" || shot == "ssh" || shot == "ssh-drop" || shot == "ssh-retry" || shot == "ssh-edit" || shot == "ssh-files" || shot.rfind("manager", 0) == 0) {
     using E7 = mayag::Edit<hand::App::Model>;
     rt.send(hand::App::Msg{E7{[](hand::App::Model& m) {
         const std::int64_t now = static_cast<std::int64_t>(std::time(nullptr));
@@ -598,6 +598,29 @@ if (shot == "hosts" || shot == "ssh" || shot == "ssh-drop" || shot == "ssh-retry
                 if (shot == "ssh-retry") { m.tab().link.attempts = 2; m.tab().link.retry_at = m.time + 3.6; }   // the third try, 4 s away
                 else m.tab().link.retry_at = -1.0;   // waiting for you
             }}});
+        if (shot == "ssh-files") {   // the file pane on prod-db: a folder listed over the shared connection
+            rt.send(hand::App::Msg{E7{[](hand::App::Model& m) {
+                using FE = mayag::dsl::FileEntry;
+                const std::int64_t now = static_cast<std::int64_t>(std::time(nullptr));
+                m.pane.open = true; m.pane.follow = false;
+                m.pane.where = "prod-db"; m.pane.host = *m.ssh.book.find("prod-db");
+                m.pane.path = "/etc/nginx"; m.pane.loading = false;
+                m.pane.entries = {FE{.name = "conf.d", .dir = true, .mtime = now - 86400 * 9},
+                                  FE{.name = "sites-available", .dir = true, .mtime = now - 3600 * 5},
+                                  FE{.name = "sites-enabled", .dir = true, .mtime = now - 3600 * 5},
+                                  FE{.name = "snippets", .dir = true, .mtime = now - 86400 * 40},
+                                  FE{.name = "fastcgi_params", .size = 1077, .mtime = now - 86400 * 200},
+                                  FE{.name = "mime.types", .size = 5349, .mtime = now - 86400 * 200},
+                                  FE{.name = "nginx.conf", .size = 1482, .mtime = now - 60 * 7},
+                                  FE{.name = "proxy_params", .size = 222, .mtime = now - 86400 * 200}};
+                m.pane.preview = mayag::dsl::FilePreview{"nginx.conf", {"user www-data;", "worker_processes auto;", "pid /run/nginx.pid;",
+                    "include /etc/nginx/modules-enabled/*.conf;", "", "events {", "    worker_connections 768;", "}"}, "1.4 KB"};
+                m.pane.preview_path = "/etc/nginx/nginx.conf";
+                m.pane.ui.sel = 6;   // nginx.conf (folders first)
+                hand::App::fit(m);
+            }}});
+            for (int i = 0; i < 8; ++i) rt.tick();
+        }
         if (shot == "ssh-edit") {   // a file on the remote host, open in the editor
             rt.send(hand::App::Msg{hand::App::OpenFile{.path = "/etc/nginx/sites-available/app.conf", .host = rt.model().tab().remote}});
             rt.send(hand::App::Msg{hand::App::FileLoaded{rt.model().tab().sid, "/etc/nginx/sites-available/app.conf",

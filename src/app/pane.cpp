@@ -106,6 +106,7 @@ FilePaneProps pane_props(const Model& m) {
     FilePaneProps p;
     p.path = m.pane.path;
     p.where = m.pane.where;
+    p.where_danger = m.pane.host && m.cfg.ssh_prod_guard && remote_env(m, *m.pane.host) == HostEnv::prod;
     p.entries = m.pane.entries;
     for (auto& e : p.entries)   // the glow fades over ~2.5 s
         if (const auto it = m.pane.fresh_at.find(e.name); it != m.pane.fresh_at.end())
