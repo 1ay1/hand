@@ -34,6 +34,8 @@ float term_left(const Model& m);
 bool in_pane(const Model& m, float x);
 /// Something in the file pane is still glowing (it changed a moment ago).
 bool pane_glowing(const Model& m);
+/// The cursor has stopped blinking: nothing typed or printed for ~10 s.
+bool blink_resting(const Model& m);
 bool in_strip(const Model& m, float y);
 /// The foreground process of a session's shell, as the last probe found it.
 const std::string& fg_process(const Session& se);

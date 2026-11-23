@@ -64,6 +64,14 @@ struct Model {
     bool                    focused = true;
     std::string             preedit;              ///< the input method's composition, drawn at the cursor (not yet typed)
     bool                    cursor_on = true;
+    /// The cursor stops blinking after a while with no keys and no output
+    /// (GTK's cursor-blink-timeout): an idle window then draws no frames at
+    /// all. `blink_seen` is what the front tab looked like at the last blink
+    /// (content epoch, cursor, keys typed); `blinks_idle` how many blinks it
+    /// has stayed so.
+    std::uint64_t           blink_seen = 0;
+    int                     blinks_idle = 0;
+    std::uint64_t           keys_typed = 0;
     double                  time = 0.0;
     mayag::dsl::TermMetrics metrics{};            ///< cell size, from the font (fit())
     Tabs                    tabs;                 ///< every tab, in strip order; never empty

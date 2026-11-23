@@ -10,6 +10,7 @@ namespace hand {
 App::Cmd App::update(Model& m, Typed t) {
     Session& se = m.tab();
     se.fx.typed_at = se.active_at = m.time;   // the motion effects follow keystrokes, pty or not
+    ++m.keys_typed;                           // wakes a resting cursor blink
     if (t.bytes.find('\r') != std::string::npos) se.fx.enter_at = m.time;
     if (!se.pty && !se.starting) return {};
     se.term->select_clear();

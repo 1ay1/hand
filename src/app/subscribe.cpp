@@ -48,7 +48,7 @@ App::Sub App::subscribe(const Model& m) {
     const bool gliding = m.cfg.cursor_anim != CursorAnim::none &&
                          (!m.tab().cur_known || !motion::cursor_settled(m.tab().fx, m.cfg.cursor_anim, m.tab().cur_x, m.tab().cur_y,
                                                                   static_cast<float>(cur.col), static_cast<float>(cur.row)));
-    const bool breathing = m.cfg.blink_style == BlinkStyle::breathe && m.cfg.cursor_blink && m.focused;
+    const bool breathing = m.cfg.blink_style == BlinkStyle::breathe && m.cfg.cursor_blink && m.focused && !blink_resting(m);
     const bool tailing = m.cfg.cursor_anim != CursorAnim::none && m.cfg.cursor_trail > 0.0f &&
                          !motion::tail_settled(m.tab().fx, m.cfg.cursor_anim == CursorAnim::smear ? static_cast<float>(cur.col) : m.tab().cur_x,
                                                m.cfg.cursor_anim == CursorAnim::smear ? static_cast<float>(cur.row) : m.tab().cur_y);

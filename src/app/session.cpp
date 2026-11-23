@@ -460,7 +460,27 @@ App::Cmd App::update(Model& m, Second) {
     return pane_sync(m);   // catches an `ssh` started inside the tab
 }
 
+bool detail::blink_resting(const Model& m) {
+    const int after = std::max(4, static_cast<int>(10000.0f / std::max(m.cfg.blink_ms, 50.0f)));   // ~10 s of blinks
+    return m.cfg.cursor_blink && m.blinks_idle >= after;
+}
+
 App::Cmd App::update(Model& m, Blink) {
+    // Quiet for 20 blinks (10 s at the default rate): no keys, no output, the
+    // cursor where it was -- stop blinking, solid, and the window draws
+    // nothing more until something happens (then it blinks again).
+    const Session& se = m.tab();
+    const auto cur = se.term ? se.term->cursor() : Term::Cursor{};
+    const std::uint64_t seen = (se.term ? se.term->epoch() : 0) * 0x9E3779B97F4A7C15ull ^ m.keys_typed * 0xBF58476D1CE4E5B9ull ^
+                               (static_cast<std::uint64_t>(cur.row) << 32 | static_cast<std::uint32_t>(cur.col)) ^
+                               static_cast<std::uint64_t>(m.active());
+    m.blinks_idle = seen == m.blink_seen ? m.blinks_idle + 1 : 0;
+    m.blink_seen = seen;
+    if (blink_resting(m)) {
+        m.cursor_on = true;
+        m.tab().cur_a = 1.0f;
+        return {};
+    }
     m.cursor_on = !m.cursor_on || !m.cfg.cursor_blink;
     if (m.cfg.blink_style == BlinkStyle::hard) m.tab().cur_a = m.cursor_on ? 1.0f : 0.0f;
     return {};

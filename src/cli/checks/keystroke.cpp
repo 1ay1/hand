@@ -44,6 +44,19 @@ void keystroke([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& 
     for (int i = 0; i < 120; ++i) rt.tick();
     rt.window().drive_frames(false);
     rt.send(App::Msg{E{[](App::Model& m) { m.cfg.cursor_blink = true; }}});
+
+    // An idle window draws nothing: after ~10 s of blinks with no keys and no
+    // output the cursor rests, solid, and no frames are asked for (a fading
+    // blink otherwise animated ~40 frames a second forever).
+    {
+        const int n = static_cast<int>(10000.0f / rt.model().cfg.blink_ms) + 2;
+        for (int i = 0; i < n; ++i) { rt.send(App::Msg{App::Blink{}}); for (int k = 0; k < 40; ++k) rt.tick(); }
+        ok(rt.model().blinks_idle >= n - 2 && rt.model().cursor_on && rt.model().tab().cur_a == 1.0f && !rt.host().frames_on(),
+           "an idle window stops blinking: the cursor rests solid and no frames are drawn");
+        rt.send(App::Msg{App::Typed{"x"}});
+        rt.send(App::Msg{App::Blink{}});
+        ok(rt.model().blinks_idle == 0, "...and a key wakes the blink");
+    }
 }
 
 }  // namespace hand::cli::checks
