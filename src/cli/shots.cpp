@@ -207,7 +207,21 @@ if (shot == "echo") {   // keystroke -> pty -> echo -> parsed -> frame drawn: ha
         trip += std::chrono::duration<double, std::milli>(b - a).count();
         frame += std::chrono::duration<double, std::milli>(clk::now() - b).count();
         lat.push_back(std::chrono::duration<double, std::milli>(clk::now() - a).count());
-        if (i % 32 == 31) { rt.press_key(mayag::Key::enter); rt.settle([](const auto&) { return false; }, std::chrono::milliseconds(5)); rt.tick(); }
+        if (std::getenv("HAND_ECHO_DIAG") && lat.back() > 10.0)
+            std::printf("  slow key %d: %.2f ms (to echo %.2f)\n", i, lat.back(), std::chrono::duration<double, std::milli>(b - a).count());
+        if (i % 32 == 31) {
+            // enter runs the line: wait for the shell to finish it and redraw
+            // its prompt (quiet for 30 ms), or the next key measures the
+            // shell's prompt hooks, not hand
+            rt.press_key(mayag::Key::enter);
+            const auto until = clk::now() + std::chrono::seconds(2);
+            for (std::uint64_t seen = rt.model().tab().bytes; clk::now() < until;) {
+                rt.settle([](const auto&) { return false; }, std::chrono::milliseconds(30));
+                rt.tick();
+                if (rt.model().tab().bytes == seen) break;
+                seen = rt.model().tab().bytes;
+            }
+        }
     }
     std::sort(lat.begin(), lat.end());
     const auto pct = [&](double p) { return lat.empty() ? 0.0 : lat[std::min(lat.size() - 1, static_cast<std::size_t>(p * static_cast<double>(lat.size())))]; };
