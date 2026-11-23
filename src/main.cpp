@@ -74,7 +74,11 @@ std::shared_ptr<typo::FontStack> load_fonts(bool system) {
         for (auto cand : mono)
             if (typo::system::Database::instance().first_available(std::array{cand})) { lead[0] = cand; break; }
         startup::mark("  fonts: database");
-        s = typo::system::default_stack(typo::FontConfig{.mode = typo::RenderMode::hybrid, .atlas_size = 2048}, 400,
+        // 1024, not the 2048 maximum: the atlas doubles by itself when its
+        // working set needs it (Atlas::maintain), and a terminal's glyphs fit
+        // in a fraction of 1024². Starting at 2048 cost 4 MB of coverage and,
+        // with one emoji in a prompt, 16 MB of colour plane -- twice, CPU and GPU.
+        s = typo::system::default_stack(typo::FontConfig{.mode = typo::RenderMode::hybrid, .atlas_size = 1024}, 400,
                                         false, lead);
         startup::mark("  fonts: default stack");
         (void)typo::system::attach_family(*s, FontFamily::mono, mono);

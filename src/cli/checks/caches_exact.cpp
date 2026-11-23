@@ -91,6 +91,29 @@ void caches_exact([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Chec
         ok(rt.window().read_pixels() != before, "zooming a blank screen mid-blink shows at once (the cursor, at its new size)");
         rt.press_key(Key::minus, Mods{.ctrl = true});
     }
+    {   // the glyph atlas starts small (1024) and must make room as it goes:
+        // every printable glyph in four styles at ever larger zooms (each size
+        // is a fresh set of rasters), and a colour glyph -- frames stay exact
+        // across the repacks that forces
+        const int w0 = rt.model().fonts ? rt.model().fonts->atlas().width() : 0;
+        const auto gen0 = rt.model().fonts ? rt.model().fonts->atlas().generation() : 0u;
+        int zooms = 0;
+        for (int screen = 0; screen < 8; ++screen) {
+            for (int z = 0; z < 3; ++z, ++zooms) rt.press_key(Key::equal, Mods{.ctrl = true});
+            std::string s = "\x1b[2J\x1b[H";
+            for (const char* sgr : {"\x1b[0m", "\x1b[1m", "\x1b[3m", "\x1b[1;3m"}) {
+                s += sgr;
+                for (char ch = '!'; ch <= '~'; ++ch) s += ch;
+                s += "\U0001F680\x1b[0m\r\n";
+            }
+            same(("new glyphs at zoom +" + std::to_string(zooms) + ": the atlas makes room, frames stay exact").c_str(), s);
+        }
+        ok(w0 == 1024 && rt.model().fonts->atlas().generation() != gen0,
+           ("the glyph atlas starts at 1024 and moved its glyphs (compacted or grew, now " + std::to_string(rt.model().fonts->atlas().width()) +
+            "): the frames above crossed a repack (" + std::to_string(rt.model().fonts->atlas().glyph_count()) + " glyphs, " +
+            std::to_string(static_cast<int>(rt.model().fonts->atlas().occupancy() * 100.0f)) + "% full)").c_str());
+        for (int z = 0; z < zooms; ++z) rt.press_key(Key::minus, Mods{.ctrl = true});
+    }
 }
 
 }  // namespace hand::cli::checks
