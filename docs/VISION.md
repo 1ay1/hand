@@ -16,6 +16,64 @@ agent is any TUI. What hand adds is everything *around* it: knowing what the
 agent is doing, seeing what it changed, and fixing or rejecting that change
 without leaving the terminal.
 
+## Who it's for
+
+Developers who live in the terminal and run coding agents, often several at
+once and often on remote boxes (dev servers, GPU machines, prod-adjacent
+hosts). hand is open source and built to be loved by them, not merely used.
+
+Its edge, in one line: **terminal-native, any agent, local and remote, nothing
+to install.** Editors (Zed, Cursor, VS Code) host agents inside an editor;
+agent vendors build review into their own tool; multi-agent runners assume
+local worktrees. Nobody makes the terminal itself the place where you run,
+watch and review every agent on every machine.
+
+## v1 is one demo
+
+> `ssh gpu-box`, start three agents in three tabs. One turns ◆: it needs
+> you. Answer it. Another finishes: `⌘⇧D`, walk its diff, revert one hunk,
+> select a function and `⌘L` "don't touch this". Back to the shell with
+> `Esc`. Thirty seconds, no setup, nothing installed on the box.
+
+Everything that serves this demo ships. Everything else waits.
+
+## What makes developers fall in love
+
+- **It is a great terminal first.** Matches Ghostty/kitty on latency, frame
+  times, font rendering, IME and TUI correctness, measured side by side with
+  a real `claude` session. Nobody discovers the editor in a terminal that
+  feels off.
+- **Zero setup.** No account, no server install, no config to get started;
+  agent support lights up when an agent runs. One config file (`hand.vibe`)
+  and a GUI for every setting.
+- **Fast everywhere.** Instant launch, no frame drops under agent redraws,
+  remote actions in tens of milliseconds over the shared connection.
+- **Honest and safe.** hand never overwrites your unsaved edits, never
+  phones home, marks prod hosts in red, and every revert is undoable.
+- **Beautiful and quiet.** Restrained, precise UI; nothing on screen that
+  isn't earning its place.
+- **Hackable.** Small, readable C++ with self-tests and screenshot scenes;
+  easy to build, easy to contribute to.
+
+## How hand knows what an agent is doing
+
+Reliable signals first, guesses last:
+
+1. **Agent hooks.** Claude Code `Notification`/`Stop` hooks, Codex `notify`,
+   and similar: hand ships a tiny helper (`hand notify …`, which writes an
+   OSC sequence to its own tty) and offers to add it to the agent's config.
+   Works over SSH because the OSC travels down the same pty.
+2. **Terminal signals.** OSC 9 / OSC 777 notifications, BEL, title changes.
+3. **Heuristics.** Output flowing = working; quiet at a prompt = needs you.
+
+## Baselines with parallel agents
+
+A baseline belongs to a working tree, not a tab. Each agent tab records its
+tree (`git rev-parse --show-toplevel`, so worktrees are separate trees).
+Two agents in the same tree share one baseline and hand says so on both
+tabs, suggesting `git worktree add`. Outside git, the baseline is file
+mtimes under the tab's directory.
+
 ## The loop
 
 ```
@@ -42,7 +100,10 @@ without leaving the terminal.
    `path:12-30` plus the snippet into the agent's prompt as a bracketed
    paste. ⌘-click any `path:line` the agent prints to open it at that line.
 5. **Undo a turn.** Each time the agent goes back to "needs you", hand
-   checkpoints the tree. "Revert last turn" restores it in one step.
+   checkpoints the tree (a git stash-style commit object, never touching
+   your branch). "Revert last turn" restores it in one step. Agents with
+   their own rewind (Claude Code) keep theirs; hand's works for every agent
+   and for edits made outside the agent.
 
 `Esc` / `⌘W` always returns to the plain terminal. None of this is visible
 until an agent runs or you call it.
@@ -65,18 +126,23 @@ installed on the server. A dropped link reconnects on its own, and with
 
 ## Order of work
 
-1. **Agent awareness**: detect agent tabs; working / needs-you / done state on
-   the tab; OSC 9/777 + bell; system notification when unfocused.
-   Shots: `agents`. Test: state transitions from scripted output.
-2. **Rendering under agents**: DEC 2026, kitty keyboard (shift+enter), paste,
-   no tearing at full redraw rate; stress with a real `claude` session.
-3. **Baseline and changes list**: per-tab baseline, live changed-file count,
-   local and remote. Test: real-ssh suite covers remote baseline.
+1. **Terminal bar**: side-by-side with Ghostty on a real `claude` session —
+   input latency, frame times, DEC 2026, kitty keyboard (shift+enter), paste,
+   IME. Fix every loss before building review features.
+2. **Agent awareness**: detect agent tabs; working / needs-you / done state on
+   the tab from hooks, OSC 9/777, bell, then heuristics; system notification
+   when unfocused; `hand notify` helper. Shots: `agents`. Test: state
+   transitions from scripted output.
+3. **Baseline and changes list**: per-tree baseline (worktree-aware), live
+   changed-file count, shared-tree warning, local and remote. Test: real-ssh
+   suite covers remote baseline.
 4. **Review split**: `⌘⇧D` diff editor beside the agent, hunk walk, keep /
    revert, live reload with touched-line glow. Shots: `review`, `review-ssh`.
 5. **Steer**: `⌘L` send selection, ⌘-click `path:line`.
 6. **Checkpoints**: per-turn snapshots and "revert last turn".
 7. **Remote persistence**: optional tmux reattach for agents on servers.
+8. **Launch**: README with the demo as a GIF, one-line install (brew, AUR,
+   release binaries for macOS / Linux / Windows), contributor guide.
 
-Every step is judged by one question: does a plain terminal user notice
+Every step is judged by two questions: does a plain terminal user notice
 nothing until they want it, and does an agent user never have to leave hand?
