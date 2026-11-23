@@ -149,6 +149,34 @@ if (shot == "bench") {
         std::printf("  %-26s %6.3f ms/MB   (feed %.3f, worst frame %.2f ms, %.0f MB/s, history %d)\n", "yes (1 MB/frame)",
                     total / N, feed / N, worst, N * 1000.0 / total, rt.model().tab().term->history());
     }
+    {   // the editor on a big file: 100k lines of C++ (~4 MB)
+        std::string text;
+        text.reserve(5u << 20);
+        for (int i = 0; i < 100000; ++i)
+            text += i % 9 == 0 ? "// section " + std::to_string(i) + ": what the next lines are for\n"
+                  : i % 9 == 1 ? "static int f" + std::to_string(i) + "(const std::vector<int>& v, int k) {\n"
+                  : i % 9 == 7 ? "    return static_cast<int>(v.size()) + k * " + std::to_string(i) + ";\n"
+                  : i % 9 == 8 ? "}\n"
+                  : "    if (v.empty() || k < 0) { std::printf(\"%d\\n\", k); }   // " + std::to_string(i) + "\n";
+        const std::string path = "/tmp/hand-bench-big.cpp";
+        rt.send(hand::App::Msg{hand::App::OpenFile{path}});
+        const auto a = clk::now();
+        rt.send(hand::App::Msg{hand::App::FileLoaded{rt.model().tab().sid, path, std::move(text), "", false, 1}});
+        rt.tick();
+        std::printf("  %-26s %6.3f ms   (load into the buffer + first frame)\n", "editor: open 100k lines",
+                    std::chrono::duration<double, std::milli>(clk::now() - a).count());
+        for (int i = 0; i < 10; ++i) rt.tick();
+        run("editor: typing", [&](int i) { rt.window().type(std::string(1, static_cast<char>('a' + i % 26))); });
+        run("editor: scrolling", [&](int i) { rt.window().scroll(Vec2{900.0f, 300.0f}, Vec2{0.0f, (i / 30) % 2 ? -60.0f : 60.0f}); });
+        run("editor: page down", [&](int) { rt.window().press_key(mayag::Key::page_down, {}); });
+        {
+            const auto b = clk::now();
+            rt.press_key(mayag::Key::end, mayag::Mods{.super = true});
+            rt.press_key(mayag::Key::down, mayag::Mods{.ctrl = true});
+            std::printf("  %-26s %6.3f ms\n", "editor: jump to the end", std::chrono::duration<double, std::milli>(clk::now() - b).count());
+        }
+        run("editor: typing at the end", [&](int i) { rt.window().type(std::string(1, static_cast<char>('a' + i % 26))); });
+    }
     return 0;
 }
 if (shot == "flood") {   // a real shell running a firehose: frames keep coming, memory stays flat, ctrl-C lands
