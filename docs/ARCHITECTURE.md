@@ -27,6 +27,36 @@ Each arrow is one-way and checked by ctest on every hand build:
 | `mayag_uses_jaal_public_api` | mayag never reaches into `jaal::detail` or jaal's private keys |
 | `jaal_upward` | jaal never names mayag or hand |
 | `concurrency_*`, `mayag_concurrency` | jaal's own banlist over hand and over mayag (next section) |
+| `one_hand`, `mayag_one_look` | one source on every platform (next section but one) |
+
+## One source on every platform
+
+hand is written once for macOS, Linux and Windows. What genuinely differs
+between them lives in ONE seam, and everything above it decides from data --
+the pattern Ghostty (`ctrlOrSuper`), Electron (`CmdOrCtrl`) and VS Code
+(`key` + `mac` override) use, so a default is defined once and never drifts
+between three hand-kept keymaps.
+
+| what differs | where it is decided | everything else reads |
+|---|---|---|
+| keyboard conventions (⌘ vs ctrl as the accelerator, ⌥/⌘ vs ctrl word/line motion) | `mayag::native_keymap()`, once | `Mods.keymap` on every key event, `Env.keymap` for hints |
+| how a shortcut is written (⇧⌘P vs Ctrl+Shift+P) | `mayag::dsl::chord_text(chord)` | every hint is built from the chord it describes |
+| how a shell quotes (sh, PowerShell, cmd) | `hand::shell_dialect(shell)` -- the SHELL's, not the OS's | `quote_word`, `cd_line` (`core/shellword.hpp`) |
+| the OS: pty, processes, home, time, files | `src/core` (`hand::plat`, `pty_*`, `proc_*`) | `plat::home_dir()`, `plat::local_time()`, ... |
+| what the OS's tools can do | `plat::ssh_can_share()` (ControlMaster) | `remote::control_dir`, the one place that decides |
+
+Because the keymap is data, the self-test presses BOTH conventions on every
+machine: the `editor` suite runs once with the Mac's keys and once with the
+PC's, `mac` checks ⌘ chords (and that the PC's Super is left to the desktop),
+`ssh` checks all three shell dialects and both hint spellings. A Linux CI run
+exercises the Mac's bindings and the other way round.
+
+`one_hand` (tests/one_hand.cmake) fails the build on a platform conditional
+(`_WIN32`, `__APPLE__`, `__linux__`, ...) anywhere outside `src/core` and
+`include/hand/core`, except the exact grants in `tests/allow_platform.txt`
+(test fixtures and the process entry point, each with its reason). mayag's
+`one_look` does the same for its graphics and keys; its only key decision is
+`native_keymap()`.
 
 When hand needs something only jaal has, it is added to mayag's vocabulary
 first (for example `mayag::Sendable`, `mayag::Sync` and `MAYAG_SYNC`), never

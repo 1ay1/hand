@@ -10,6 +10,8 @@
 #include "detail.hpp"
 #include "fx/fx.hpp"
 
+#include <hand/core/shellword.hpp>
+
 
 #include <mayag/widget/toast.hpp>
 
@@ -74,29 +76,16 @@ Place place_of(const Model& m) {
 }
 
 
-/// The path as a shell argument: PowerShell, cmd and POSIX quote differently.
-std::string shell_quote(const Model& m, const std::string& path) {
-    if (m.pane.where.empty()) {
-#if defined(_WIN32)
-        const std::string sh = lower((m.cfg.shell.empty() ? m.env.shell : m.cfg.shell));
-        if (sh.find("cmd") != std::string::npos) return "\"" + path + "\"";
-        std::string q = "'";   // PowerShell: '' is a quote
-        for (char ch : path) q += ch == '\'' ? std::string{"''"} : std::string(1, ch);
-        return q + "'";
-#endif
-    }
-    std::string q = "'";
-    for (char ch : path) q += ch == '\'' ? std::string{"'\\''"} : std::string(1, ch);
-    return q + "'";
+/// What the tab's shell speaks: the remote login shell is POSIX; here it is
+/// the configured (or default) shell's dialect -- whatever OS this is.
+Dialect tab_dialect(const Model& m) {
+    return m.pane.where.empty() ? shell_dialect(m.cfg.shell.empty() ? m.env.shell : m.cfg.shell) : Dialect::posix;
 }
 
-std::string cd_command(const Model& m, const std::string& path) {
-#if defined(_WIN32)
-    if (m.pane.where.empty() && lower((m.cfg.shell.empty() ? m.env.shell : m.cfg.shell)).find("cmd") != std::string::npos)
-        return "cd /d " + shell_quote(m, path);
-#endif
-    return "cd " + shell_quote(m, path);
-}
+/// The path as one shell word, for the shell that will read it.
+std::string shell_quote(const Model& m, const std::string& path) { return quote_word(tab_dialect(m), path); }
+
+std::string cd_command(const Model& m, const std::string& path) { return cd_line(tab_dialect(m), path); }
 
 }  // namespace
 

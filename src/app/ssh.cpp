@@ -4,6 +4,7 @@
 #include "fx/fx.hpp"
 
 #include <hand/core/shell.hpp>
+#include <hand/core/shellword.hpp>
 #include <hand/core/proc.hpp>
 #include <hand/ssh/sftp.hpp>
 
@@ -81,10 +82,9 @@ App::Cmd App::update(Model& m, HostsKey k) {
         m.ssh.picker.open = false;
         Cmd opened = update(m, NewTab{});
         if (m.tab().launch || m.tab().pty) {   // typed once its shell is up (the drain holds it till then)
-            std::string path = m.ssh.sources.ssh_config;
-            std::string q = "'";
-            for (char ch : path) q += ch == '\'' ? std::string{"'\\''"} : std::string(1, ch);
-            m.tab().input += m.env.editor + " " + q + "'\r";
+            // quoted for the shell that reads it (PowerShell, cmd, sh: one rule)
+            const Dialect d = shell_dialect(m.cfg.shell.empty() ? m.env.shell : m.cfg.shell);
+            m.tab().input += m.env.editor + " " + quote_word(d, m.ssh.sources.ssh_config) + "\r";
         }
         return opened;
     }
@@ -311,10 +311,7 @@ App::Cmd App::update(Model& m, Manager p) {
                 if (!known) break;
                 // a tab that starts in that directory: cd, then the login shell
                 Host h = m.ssh.book.hosts[static_cast<std::size_t>(a.host)];
-                std::string q = "'";
-                for (char ch : a.path) q += ch == '\'' ? std::string{"'\\''"} : std::string(1, ch);
-                q += "'";
-                h.command = "cd " + q + " && exec \"$SHELL\" -l";
+                h.command = cd_line(Dialect::posix, a.path) + " && exec \"$SHELL\" -l";   // the remote shell
                 m.ssh.manager.open = false;
                 cmds.push_back(update(m, ConnectHost{h, Where::new_tab}));
                 break;

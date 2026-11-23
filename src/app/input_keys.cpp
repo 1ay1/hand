@@ -59,8 +59,8 @@ static std::optional<App::Msg> editor_key(const App::Model& m, const KeyEvent& k
 /// encoding), so a ⌘ key that maps to nothing is simply consumed.
 static std::optional<KeyEvent> mac_chord(const KeyEvent& k) {
     const Mods md = k.mods;
-    if (!md.super || md.ctrl) return std::nullopt;
-    const auto as = [&](Key key, Mods mods) { return KeyEvent{key, mods, k.repeat}; };
+    if (!md.mac() || !md.super || md.ctrl) return std::nullopt;   // the PC's Super is the desktop's, never ours
+    const auto as = [&](Key key, Mods mods) { mods.keymap = md.keymap; return KeyEvent{key, mods, k.repeat}; };
     const Mods cs{.shift = true, .ctrl = true}, c{.ctrl = true};
     switch (k.key) {
         case Key::c: return as(Key::c, cs);                       // copy
@@ -87,24 +87,17 @@ static std::optional<KeyEvent> mac_chord(const KeyEvent& k) {
 
 std::optional<App::Msg> App::on(const Model& m, const KeyEvent& k_in) {
     const Session& se = m.tab();
-    // ⌘P (ctrl+P off the Mac): quick open, from any tab. While it is open it
-    // has the keyboard -- arrows move, enter opens, esc closes, keys edit.
+    // ⌘P on the Mac (ctrl+P on the PC): quick open, from any tab. While it
+    // is open it has the keyboard -- arrows move, enter opens, esc closes.
+    // Which convention is the key's own (Mods.keymap), not the build's: one
+    // implementation, and the self-test presses both on every machine.
     if (!m.settings.open && !m.ssh.picker.open && !m.ssh.manager.open && !m.dialog.ask) {
         const Mods q = k_in.mods;
-        const bool quick_chord = k_in.key == Key::p && !q.alt && !q.shift &&
-#if defined(__APPLE__)
-                                 q.super && !q.ctrl;
-#else
-                                 q.ctrl && !q.super && se.file.has_value();   // in a shell, ctrl+P is the shell's (history)
-#endif
-        if (quick_chord) return QuickOpen{};
-        const bool search_chord = k_in.key == Key::f && q.shift && !q.alt &&
-#if defined(__APPLE__)
-                                  q.super && !q.ctrl;
-#else
-                                  q.ctrl && !q.super && se.file.has_value();   // in a shell tab, ctrl+shift+F searches its scrollback
-#endif
-        if (search_chord) return SearchAll{};
+        // on the PC, in a shell, ctrl+P / ctrl+shift+F are the shell's (history,
+        // scrollback search): only an editor tab takes them
+        const bool accel = q.mac() ? (q.super && !q.ctrl) : (q.ctrl && !q.super && se.file.has_value());
+        if (k_in.key == Key::p && !q.alt && !q.shift && accel) return QuickOpen{};
+        if (k_in.key == Key::f && q.shift && !q.alt && accel) return SearchAll{};
         if (m.search_all.open) {
             if (k_in.key == Key::ctrl || k_in.key == Key::shift || k_in.key == Key::alt || k_in.key == Key::super) return std::nullopt;
             return SearchAllKey{k_in.key, k_in.mods};
@@ -174,7 +167,8 @@ std::optional<App::Msg> App::on(const Model& m, const KeyEvent& k_in) {
             default: return Swallow{};   // nothing reaches the shell in copy mode
         }
     }
-    if (k.key == Key::ctrl && !m.ctrl_held) return ModifierDown{Modifier::ctrl};
+    // the accelerator alone (⌘ on the Mac, ctrl on the PC) arms links
+    if ((k.mods.mac() ? k.key == Key::super : k.key == Key::ctrl) && !m.ctrl_held) return ModifierDown{Modifier::ctrl};
     // ── tabs: kitty/foot-style chords, plus the browser ones ──────────────
     if (k.key == Key::alt && m.tab_count() > 1 && !m.strip.show_numbers) return ModifierDown{Modifier::alt};
     if (cs && k.key == Key::t) return NewTab{};

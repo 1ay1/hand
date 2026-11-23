@@ -27,6 +27,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
+#include <ctime>
 
 namespace hand::plat {
 
@@ -69,6 +71,21 @@ bool glob_match(const std::string& pat, const std::string& s) {
     }
     while (p < pat.size() && pat[p] == '*') ++p;
     return p == pat.size();
+}
+
+std::tm local_time(std::time_t t) {
+    std::tm tm{};
+    ::localtime_s(&tm, &t);
+    return tm;
+}
+
+std::string home_dir() {
+    // %USERPROFILE%, never $HOME: Microsoft's OpenSSH reads %USERPROFILE%\.ssh
+    const char* u = std::getenv("USERPROFILE");
+    std::string s = u && *u ? u : "";
+    for (char& ch : s) if (ch == '\\') ch = '/';
+    while (s.size() > 1 && s.back() == '/') s.pop_back();
+    return s;
 }
 
 std::string user_token() {

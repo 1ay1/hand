@@ -157,7 +157,9 @@ struct Config {
 
 // ── the table ──────────────────────────────────────────────────────────────
 [[nodiscard]] std::size_t setting_count();
-[[nodiscard]] std::vector<mayag::dsl::SettingSpec> setting_specs(const Config& c);
+/// Every setting as the panel shows it; shortcut words in the hints ({cmd},
+/// {newtab}) are written for `keymap` -- ⌘ on the Mac, ctrl on the PC.
+[[nodiscard]] std::vector<mayag::dsl::SettingSpec> setting_specs(const Config& c, mayag::Keymap keymap = mayag::native_keymap());
 /// A hash of every value the settings table shows (for memoising the panel).
 [[nodiscard]] std::uint64_t settings_key(const Config& c);
 /// Apply a panel edit. Returns true when the config changed.

@@ -43,6 +43,10 @@ struct Env {
     std::string   config_path;     ///< hand.vibe (hosts.vibe sits beside it)
     std::int64_t  wall_epoch_ms = 0;   ///< the wall clock when the run began (unix ms)
     std::uint64_t entropy = 0;     ///< seeds what must be unguessable (DEC 2034 tokens)
+    /// The keyboard conventions shortcuts are SHOWN in (⌘P vs Ctrl+P). Keys
+    /// themselves carry theirs (Mods.keymap); a test sets this to draw the
+    /// other platform's hints on any machine.
+    mayag::Keymap keymap = mayag::native_keymap();
 };
 
 /// The window: config, its tabs, and what sits over and beside them.

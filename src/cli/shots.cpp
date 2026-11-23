@@ -441,26 +441,17 @@ if (shot == "editor" || shot == "editor-find" || shot == "editor-deep" || shot =
     rt.press_key(mayag::Key::end, {});
     rt.type("  // edited");
     if (shot == "editor-find") {
-#if defined(__APPLE__)
-        rt.press_key(mayag::Key::f, mayag::Mods{.super = true});
-#else
-        rt.press_key(mayag::Key::f, mayag::Mods{.ctrl = true});
-#endif
+        rt.press_key(mayag::Key::f, mayag::Mods::cmd());
         rt.type("Model");
     }
-#if defined(__APPLE__)
-    const mayag::Mods prim{.super = true};
-#else
-    const mayag::Mods prim{.ctrl = true};
-#endif
     if (shot == "editor-complete") {   // completion at the caret
         rt.press_key(mayag::Key::enter, {});
         rt.type("    up");
     }
-    if (shot == "editor-symbols") rt.press_key(mayag::Key::o, mayag::Mods{.shift = true, .ctrl = prim.ctrl, .super = prim.super});
+    if (shot == "editor-symbols") rt.press_key(mayag::Key::o, mayag::Mods::cmd(true));
     if (shot == "editor-changed") rt.send(hand::App::Msg{hand::App::FileStat{rt.model().tab().sid, 1}});
     if (shot == "search-all") {   // the real search over this repo, fed back as its answer
-        rt.press_key(mayag::Key::f, mayag::Mods{.shift = true, .ctrl = prim.ctrl, .super = prim.super});
+        rt.press_key(mayag::Key::f, mayag::Mods::cmd(true));
         rt.type("cmd::task");
         hand::App::SearchAllDone done{.token = rt.model().search_all.token};
         {   // the same command fx::search_project runs
@@ -484,7 +475,7 @@ if (shot == "editor" || shot == "editor-find" || shot == "editor-deep" || shot =
         rt.press_key(mayag::Key::down, {});
     }
     if (shot == "quick-open") {
-        rt.press_key(mayag::Key::p, prim);
+        rt.press_key(mayag::Key::p, mayag::Mods::cmd());
         { // the demo never lists (no task): list this repo the way fx::list_project does
             const auto g = hand::proc::run({"git", "-C", here, "ls-files"}, {}, 4000);
             std::vector<std::string> files; std::string l;

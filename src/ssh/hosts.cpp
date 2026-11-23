@@ -24,21 +24,9 @@ namespace {
 
 namespace fs = std::filesystem;
 
-/// The home ssh resolves `~` against. On Windows that is %USERPROFILE%,
-/// ALWAYS: Microsoft's OpenSSH reads %USERPROFILE%\.ssh and ignores $HOME.
-/// Taking $HOME (set by MSYS2 / Git Bash, here to AppData\Roaming) read a
-/// ~/.ssh/config that ssh never uses, and missed the real one.
-std::string home() {
-#if defined(_WIN32)
-    if (const char* u = std::getenv("USERPROFILE"); u && *u) {
-        std::string s = u;
-        for (char& ch : s) if (ch == '\\') ch = '/';
-        return s;
-    }
-#endif
-    const char* h = std::getenv("HOME");
-    return h && *h ? h : "";
-}
+/// The home ssh resolves `~` against (plat::home_dir: %USERPROFILE% on
+/// Windows, whatever $HOME says).
+std::string home() { return plat::home_dir(); }
 
 std::string expand_tilde(std::string p) {
     if (!p.empty() && p[0] == '~') p = home() + p.substr(1);
@@ -764,17 +752,16 @@ std::optional<Host> ssh_destination(const std::vector<std::string>& argv) {
 std::vector<std::string> ssh_argv(const Host& host, const HostBook& book, SshFlags f) {
     const Host h = effective_host(host, book);   // folder defaults: user, jump, key, port
     std::vector<std::string> a{"ssh"};
-    // Connection sharing (ControlMaster) rides on Unix sockets. Microsoft's
-    // OpenSSH for Windows does not support it: with these options every
-    // connection died at once with "getsockname failed: Not a socket".
-#if !defined(_WIN32)
+    // Connection sharing: remote::control_opts decides, for the terminal's ssh
+    // and for every file action alike (one place: it is empty where sharing
+    // can't work -- Windows' OpenSSH has no Unix-socket ControlMaster, and
+    // with the options every connection died with "getsockname failed").
     if (f.multiplex) {
         // one TCP+auth per host, shared with everything else hand does there
         // (files, saves, search): a second tab opens instantly, one prompt
         const auto c = remote::control_opts(book);
         a.insert(a.end(), c.begin(), c.end());
     }
-#endif
     if (f.keepalive && !book.sets_alive && (!f.multiplex || remote::control_opts(book).empty()))   // shared: control_opts carries it
         a.insert(a.end(), {"-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4"});
     // the host manager's forwards: -L / -R / -D, each checked on save and again here

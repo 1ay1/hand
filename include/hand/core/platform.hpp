@@ -19,6 +19,7 @@
 // src/core/platform_win.cpp).
 
 #include <cstdint>
+#include <ctime>
 #include <string>
 #include <vector>
 
@@ -65,6 +66,29 @@ namespace hand::plat {
 // ── 3. how much memory we used ──────────────────────────────────────────
 /// Peak resident set size in bytes, 0 when the OS will not say.
 [[nodiscard]] std::uint64_t peak_rss();
+
+/// The user's home, with '/' separators: what `~` means to hand AND to ssh.
+/// $HOME on POSIX. %USERPROFILE% on Windows, ALWAYS: Microsoft's OpenSSH
+/// reads %USERPROFILE%\.ssh and ignores $HOME (MSYS2 / Git Bash point it at
+/// AppData\Roaming, a ~/.ssh ssh never reads). The one definition -- env,
+/// ssh config, tilde expansion and the shared-connection directory all ask
+/// here. "" when unknown.
+[[nodiscard]] std::string home_dir();
+
+/// Local broken-down time, thread-safe (localtime_r / localtime_s).
+[[nodiscard]] std::tm local_time(std::time_t t);
+
+/// Can this OS's OpenSSH share a connection (ControlMaster over a Unix
+/// socket)? POSIX yes; Microsoft's OpenSSH for Windows no -- every
+/// connection with the options died with "getsockname failed: Not a socket".
+/// A capability, asked by the one place that decides (remote::control_dir).
+[[nodiscard]] constexpr bool ssh_can_share() noexcept {
+#if defined(_WIN32)
+    return false;
+#else
+    return true;
+#endif
+}
 
 // ── 4/5. readiness ──────────────────────────────────────────────────────
 //

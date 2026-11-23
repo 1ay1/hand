@@ -34,6 +34,7 @@ Node editor(const Ctx& c, const Model& m) {
 
     TextEditorProps props;
     props.path = d.path;
+    props.keymap = m.env.keymap;
     props.shown_path = d.path.empty() ? d.path : (d.host ? d.path : short_path(m, d.path));
     if (d.host) {
         props.host = d.host->alias;

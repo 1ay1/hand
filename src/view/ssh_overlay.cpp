@@ -19,7 +19,7 @@ void ssh_overlays(const Ctx& c, const Model& m) {
         const auto hosts = picker_hosts(m);
         ssh_hosts(c, "hosts", m.ssh.picker.query, hosts, rank_hosts(hosts, m.ssh.picker.query.text, unix_now(m)), m.ssh.picker.sel,
                   SshHostsProps{.now = unix_now(m), .source = m.ssh.book.config_label.empty() ? "~/.ssh/config" : m.ssh.book.config_label,
-                                .action = "new tab", .width = std::min(720.0f, m.win.x - 48.0f)});
+                                .action = "new tab", .width = std::min(720.0f, m.win.x - 48.0f), .keymap = m.env.keymap});
     }
     if (m.ssh.manager.open || m.ssh.manager.t > 0.0f) {
         const float e = 1.0f - (1.0f - m.ssh.manager.t) * (1.0f - m.ssh.manager.t);   // ease-out

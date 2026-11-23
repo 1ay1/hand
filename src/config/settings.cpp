@@ -65,16 +65,16 @@ const std::vector<Row>& rows() {
         {"font", "family", "the monospace face (found on this machine)", Kind::cycle, 0, 0, 0, 0, "", 1,
          [](const Config& c) { return c.fonts.empty() ? std::vector<std::string>{"default"} : c.fonts; },
          GET(c.font_family), SET(c.font_family = static_cast<int>(v))},
-        {"font", "size", "the terminal's text, px (ctrl +/- / 0)", Kind::number, 6, 32, 0.5f, 1, "px", 1, none,
+        {"font", "size", "the terminal's text, px ({cmd} +/- / 0)", Kind::number, 6, 32, 0.5f, 1, "px", 1, none,
          GET(c.font_size), SET(c.font_size = v)},
         {"font", "line_height", "row height as a multiple of the size", Kind::number, 1.0f, 2.0f, 0.05f, 2, "\u00D7", 1, none,
          GET(c.line_height), SET(c.line_height = v)},
         {"font", "ui", "the face of tabs, panels and dialogs (found on this machine)", Kind::cycle, 0, 0, 0, 0, "", 1,
          [](const Config& c) { return c.ui_fonts.empty() ? std::vector<std::string>{"default"} : c.ui_fonts; },
          GET(c.ui_font), SET(c.ui_font = static_cast<int>(v))},
-        {"font", "ui_size", "tabs, panels, menus and dialogs, px (ctrl+shift +/- / 0)", Kind::number, 9, 20, 0.5f, 1, "px", 1, none,
+        {"font", "ui_size", "tabs, panels, menus and dialogs, px ({cmd}+shift +/- / 0)", Kind::number, 9, 20, 0.5f, 1, "px", 1, none,
          GET(c.ui_font_size), SET(c.ui_font_size = v)},
-        {"font", "ui_follows", "ctrl +/- zooms the interface too, like a browser", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+        {"font", "ui_follows", "{cmd} +/- zooms the interface too, like a browser", Kind::toggle, 0, 1, 1, 0, "", 1, none,
          GET(c.ui_follows), SET(c.ui_follows = v > 0.5f)},
 
         {"colors", "scheme", "913 schemes from iTerm2-Color-Schemes", Kind::cycle, 0, 0, 0, 0, "", 1, scheme_names,
@@ -144,7 +144,7 @@ const std::vector<Row>& rows() {
          GET(c.decorations), SET(c.decorations = v > 0.5f)},
         {"keyboard", "option_as_alt", "macOS: \u2325 is Alt/Meta for the shell (\u2325b, \u2325f in readline) instead of typing \u00E9 \u2122 \u2026 (restart to apply)", Kind::toggle, 0, 1, 1, 0, "", 1, none,
          GET(c.option_as_alt), SET(c.option_as_alt = v > 0.5f)},
-        {"tabs", "always", "show the tab strip even with a single tab (ctrl+shift+t opens a tab)", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+        {"tabs", "always", "show the tab strip even with a single tab ({newtab} opens a tab)", Kind::toggle, 0, 1, 1, 0, "", 1, none,
          GET(c.tabs_always), SET(c.tabs_always = v > 0.5f)},
         {"tabs", "style", "line: compact mono cells, tmux-like; pill: a lifted card; underline: a sliding bar; flat: a filled block", Kind::choice, 0, 3, 1, 0, "", 1,
          [](const Config&) { return std::vector<std::string>{"pill", "underline", "flat", "line"}; },
@@ -192,7 +192,7 @@ const std::vector<Row>& rows() {
 
         {"mouse", "copy_on_select", "selecting text copies it", Kind::toggle, 0, 1, 1, 0, "", 1, none,
          GET(c.copy_on_select), SET(c.copy_on_select = v > 0.5f)},
-        {"mouse", "links_need_ctrl", "links open on ctrl+click (off: any click)", Kind::toggle, 0, 1, 1, 0, "", 1, none,
+        {"mouse", "links_need_ctrl", "links open on {cmd}+click (off: any click)", Kind::toggle, 0, 1, 1, 0, "", 1, none,
          GET(c.links_need_ctrl), SET(c.links_need_ctrl = v > 0.5f)},
 
         {"bell", "visual", "flash the screen on BEL", Kind::toggle, 0, 1, 1, 0, "", 1, none,
@@ -293,7 +293,21 @@ const std::vector<std::array<std::uint32_t, 8>>& scheme_swatches() {
     return v;
 }
 
-dsl::SettingSpec spec_of(const Row& r, const Config& c, const Config& d) {
+/// A hint's shortcut words for a keymap: {cmd} is ⌘ on the Mac and ctrl on
+/// the PC; {newtab} the new-tab chord (⌘T / ctrl+shift+t). One table, both
+/// platforms' text -- the hint names the key that actually works.
+std::string key_words(std::string_view hint, mayag::Keymap k) {
+    const bool mac = k == mayag::Keymap::mac;
+    std::string s{hint};
+    const auto put = [&](std::string_view tag, std::string_view with) {
+        for (std::size_t at; (at = s.find(tag)) != std::string::npos;) s.replace(at, tag.size(), with);
+    };
+    put("{newtab}", mac ? "\u2318T" : "ctrl+shift+t");
+    put("{cmd}", mac ? "\u2318" : "ctrl");
+    return s;
+}
+
+dsl::SettingSpec spec_of(const Row& r, const Config& c, const Config& d, mayag::Keymap keymap = mayag::native_keymap()) {
     dsl::SettingSpec s;
     s.section = r.section;
     s.section_icon = icon_of(r.section, c);
@@ -316,7 +330,7 @@ dsl::SettingSpec spec_of(const Row& r, const Config& c, const Config& d) {
     if (sec == "font" && std::string_view{r.key} == "family") s.label = "Terminal font";
     if (sec == "font" && std::string_view{r.key} == "size") s.label = "Terminal size";
     if (sec == "font" && std::string_view{r.key} == "ui_follows") s.label = "Scale interface with terminal";
-    s.hint = r.hint;
+    s.hint = key_words(r.hint, keymap);
     s.kind = r.kind;
     s.value = r.get(c);
     s.lo = r.lo; s.hi = r.hi; s.step = r.step;
@@ -354,11 +368,11 @@ std::uint64_t settings_key(const Config& c) {
     return h;
 }
 
-std::vector<dsl::SettingSpec> setting_specs(const Config& c) {
+std::vector<dsl::SettingSpec> setting_specs(const Config& c, mayag::Keymap keymap) {
     const Config d{};
     std::vector<dsl::SettingSpec> v;
     v.reserve(rows().size());
-    for (const auto& r : rows()) v.push_back(spec_of(r, c, d));
+    for (const auto& r : rows()) v.push_back(spec_of(r, c, d, keymap));
     return v;
 }
 

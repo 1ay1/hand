@@ -1,6 +1,8 @@
 // hand::remote — see remote.hpp.
 
 #include <hand/ssh/remote.hpp>
+#include <hand/core/platform.hpp>
+#include <hand/core/shellword.hpp>
 
 #include <cstdlib>
 #include <filesystem>
@@ -12,13 +14,7 @@ namespace fs = std::filesystem;
 
 namespace {
 
-std::string home_dir() {
-#if defined(_WIN32)
-    if (const char* u = std::getenv("USERPROFILE"); u && *u) return u;
-#endif
-    const char* h = std::getenv("HOME");
-    return h ? h : "";
-}
+std::string home_dir() { return plat::home_dir(); }   // the one definition of ~ (ssh's too)
 
 /// Where to reach `h`: its alias when ~/.ssh/config defines it (config
 /// supplies the rest), else user@host with hand's own -p / -J / -i.
@@ -38,15 +34,12 @@ void destination(const Host& host, const HostBook& book, std::vector<std::string
 }  // namespace
 
 std::string control_dir() {
-#if defined(_WIN32)
-    return {};
-#else
+    if (!plat::ssh_can_share()) return {};   // no shared connections here: every action connects on its own
     const std::string d = home_dir() + "/.cache/hand/ssh";
     std::error_code ec;
     fs::create_directories(d, ec);
     fs::permissions(d, fs::perms::owner_all, fs::perm_options::replace, ec);
     return d;
-#endif
 }
 
 std::vector<std::string> control_opts(const HostBook& book) {
@@ -113,11 +106,7 @@ proc::Result exec(const Host& h, const HostBook& book, const std::string& comman
     return r;
 }
 
-std::string sh_quote(std::string_view s) {
-    std::string q = "'";
-    for (char ch : s) { if (ch == '\'') q += "'\\''"; else q += ch; }
-    return q + "'";
-}
+std::string sh_quote(std::string_view s) { return quote_word(Dialect::posix, s); }   // a remote login shell is POSIX
 
 std::string explain(std::string_view err, int code) {
     const std::string e{err};

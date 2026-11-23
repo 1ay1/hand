@@ -4,6 +4,7 @@
 
 #include "fx.hpp"
 
+#include <hand/core/platform.hpp>
 #include <hand/core/proc.hpp>
 
 #include <mayag/widget/file_pane.hpp>
@@ -52,12 +53,7 @@ std::int64_t mtime_ticks(const std::string& path) {
 
 std::string when_of(std::int64_t epoch_s) {   // not `unix`: a predefined macro in GNU mode
     const std::time_t tt = static_cast<std::time_t>(epoch_s);
-    std::tm tm{};
-#if defined(_WIN32)
-    localtime_s(&tm, &tt);
-#else
-    localtime_r(&tt, &tm);
-#endif
+    const std::tm tm = plat::local_time(tt);
     char b[32];
     std::strftime(b, sizeof b, "%Y-%m-%d %H:%M", &tm);
     return b;

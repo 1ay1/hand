@@ -5,6 +5,9 @@
 #include "../../app/detail.hpp"
 #include <hand/ssh/sftp.hpp>
 #include <hand/core/platform.hpp>
+#include <hand/core/shellword.hpp>
+
+#include <mayag/widget/keybind.hpp>
 
 #include <algorithm>
 #include <array>
@@ -24,6 +27,25 @@ namespace hand::cli::checks {
 using namespace mayag;
 
 void ssh([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& ok) {
+    {   // one quoting rule per SHELL, not per OS: all three dialects, on every machine
+        using hand::Dialect;
+        ok(hand::shell_dialect("/bin/zsh") == Dialect::posix && hand::shell_dialect("C:/Program Files/PowerShell/7/pwsh.exe") == Dialect::powershell &&
+           hand::shell_dialect("powershell") == Dialect::powershell && hand::shell_dialect("C:\\Windows\\System32\\CMD.EXE") == Dialect::cmd &&
+           hand::shell_dialect("/usr/local/bin/pwsh") == Dialect::powershell && hand::shell_dialect("fish") == Dialect::posix,
+           "a shell's dialect comes from the shell (pwsh on a Mac is PowerShell; bash on Windows is POSIX)");
+        const std::string odd = "it's $HOME; a b";
+        ok(hand::quote_word(Dialect::posix, odd) == "'it'\\''s $HOME; a b'" &&
+           hand::quote_word(Dialect::powershell, odd) == "'it''s $HOME; a b'" &&
+           hand::quote_word(Dialect::cmd, "C:/My Files") == "\"C:/My Files\"" &&
+           hand::cd_line(Dialect::cmd, "D:/x") == "cd /d \"D:/x\"" && hand::cd_line(Dialect::posix, "/x") == "cd '/x'",
+           "quoting and cd, per dialect: sh, PowerShell, cmd");
+    }
+    {   // shortcut hints come from the chord and its keymap: both platforms' text, here
+        using mayag::dsl::Chord; using mayag::Keymap; using mayag::Key;
+        const auto mac = mayag::dsl::chord_text(Chord{Key::p, mayag::Mods::cmd(true, Keymap::mac)});
+        const auto pc = mayag::dsl::chord_text(Chord{Key::p, mayag::Mods::cmd(true, Keymap::pc)});
+        ok(mac == "\u21E7\u2318P" && pc == "Ctrl+Shift+P", "one chord, written each platform's way (\u21e7\u2318P / Ctrl+Shift+P)");
+    }
     // ── ssh: ~/.ssh/config the way ssh reads it, hosts.vibe, the picker ──
     using K = mayag::Key;
     const std::string dir = (std::filesystem::temp_directory_path() / ("hand-ssh-" + std::to_string(hand::self_pid()))).string();
@@ -54,12 +76,10 @@ void ssh([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& ok) {
        s && s->hostname == "box.lan" && s->user == "me" && s->port == 2022, "destinations: typed user@host:port, and a running ssh's argv");
     const auto argv = hand::ssh_argv(*gpu, book, {});
     const bool muxed = std::find(argv.begin(), argv.end(), "ControlMaster=auto") != argv.end();
-#if defined(_WIN32)
-    ok(argv.back() == "gpu-box" && !muxed,
-       "a config host runs as `ssh <alias>`; never multiplexed on Windows (its OpenSSH has no ControlMaster)");
-#else
-    ok(argv.back() == "gpu-box" && muxed, "a config host runs as `ssh <alias>`, multiplexed");
-#endif
+    // shared exactly where the OS's ssh can share (plat::ssh_can_share: not
+    // Windows' OpenSSH, which has no ControlMaster) -- one rule, checked as such
+    ok(argv.back() == "gpu-box" && muxed == hand::plat::ssh_can_share(),
+       "a config host runs as `ssh <alias>`, its connection shared where this OS's ssh can share one");
     hand::hosts_record_use(src, *gpu, 1000);
     hand::hosts_record_use(src, *gpu, 2000);
     hand::hosts_set_pinned(src, *db, true);

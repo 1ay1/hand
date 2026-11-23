@@ -13,6 +13,8 @@
 
 #include "../../app/detail.hpp"   // quick_open_ranked
 
+#include <algorithm>
+#include <cstdio>
 #include <string>
 
 namespace hand::cli::checks {
@@ -21,16 +23,27 @@ using namespace mayag;
 using namespace mayag::dsl;
 
 namespace {
-Mods primary() {
-#if defined(__APPLE__)
-    return Mods{.super = true};
-#else
-    return Mods{.ctrl = true};
-#endif
-}
+// The editor's chords, in the keymap this pass presses them in: ⌘ on the
+// Mac's, ctrl on the PC's. The suite runs both on every machine -- one
+// implementation, checked for each convention, wherever it builds.
+Keymap g_km = native_keymap();
+Mods primary(bool shift = false) { return Mods::cmd(shift, g_km); }
+Mods with(Mods m) { m.keymap = g_km; return m; }
+
+void editor_in(Runtime& rt, Check& ok);
 }  // namespace
 
 void editor(Runtime& rt, Vec2, Check& ok) {
+    for (const Keymap km : {Keymap::mac, Keymap::pc}) {
+        g_km = km;
+        std::printf("    (the %s's keys)\n", km == Keymap::mac ? "Mac" : "PC");
+        editor_in(rt, ok);
+    }
+    g_km = native_keymap();
+}
+
+namespace {
+void editor_in(Runtime& rt, Check& ok) {
     const std::size_t tabs0 = rt.model().tab_count();
     const std::size_t shell_tab = rt.model().active();
     const std::string path = "/tmp/hand-selftest/notes.cpp";
@@ -85,13 +98,13 @@ void editor(Runtime& rt, Vec2, Check& ok) {
     ok(d().st.disk_changed, "an outside change to an edited file is announced, the edits kept");
 
     // the window keeps its chords: ctrl+tab goes back to the shell and returns
-    rt.press_key(Key::tab, Mods{.shift = true, .ctrl = true});
+    rt.press_key(Key::tab, with(Mods{.shift = true, .ctrl = true}));
     ok(!rt.model().tab().file, "ctrl+shift+tab still switches tabs from an editor");
-    rt.press_key(Key::tab, Mods{.ctrl = true});
+    rt.press_key(Key::tab, with(Mods{.ctrl = true}));
     ok(rt.model().tab().file.has_value(), "...and back");
 
     // close with unsaved edits: asked, even though close.confirm may be never
-    rt.press_key(Key::w, Mods{.shift = true, .ctrl = true});
+    rt.press_key(Key::w, with(Mods{.shift = true, .ctrl = true}));
     ok(rt.model().dialog.ask && rt.model().dialog.ask->kind == Ask::Kind::close_file, "closing unsaved edits asks first");
     rt.press_key(Key::escape);
     ok(rt.model().tab_count() == tabs0 + 1 && d().st.ed.dirty(), "cancel keeps the tab and the edits");
@@ -100,7 +113,7 @@ void editor(Runtime& rt, Vec2, Check& ok) {
     rt.press_key(Key::s, primary());
     for (int i = 0; i < 3; ++i) rt.tick();
     ok(!d().st.ed.dirty(), "the save key saves");
-    rt.press_key(Key::w, Mods{.shift = true, .ctrl = true});
+    rt.press_key(Key::w, with(Mods{.shift = true, .ctrl = true}));
     for (int i = 0; i < 3; ++i) rt.tick();
     if (rt.model().dialog.ask) rt.press_key(Key::escape);   // a close.confirm = always run
     for (int i = 0; i < 3; ++i) rt.tick();
@@ -112,13 +125,21 @@ void editor(Runtime& rt, Vec2, Check& ok) {
         rt.send(App::Msg{App::FileLoaded{rt.model().tab().sid, path, "x\n", "", false}});
         rt.window().type("y");
         rt.tick();
-        rt.press_key(Key::w, Mods{.shift = true, .ctrl = true});
+        rt.press_key(Key::w, with(Mods{.shift = true, .ctrl = true}));
         rt.press_key(Key::enter);   // the focused action: save
         for (int i = 0; i < 4; ++i) rt.tick();
         ok(rt.model().tab_count() == tabs0, "\"save\" in the dialog saves, then closes the tab");
     }
 
-    // ⌘P: the project's files, fuzzy-found, from any tab
+    // ⌘P: the project's files, fuzzy-found. On the Mac from any tab; on the
+    // PC ctrl+P in a shell is the shell's (history), so from an editor tab.
+    const bool mac = g_km == Keymap::mac;
+    if (!mac) {
+        rt.press_key(Key::p, primary());
+        ok(!rt.model().quick.open, "on the PC, ctrl+P in a shell stays the shell's");
+        rt.send(App::Msg{App::OpenFile{"/tmp/hand-selftest/other.cpp"}});
+        rt.send(App::Msg{App::FileLoaded{rt.model().tab().sid, "/tmp/hand-selftest/other.cpp", "x\n", "", false}});
+    }
     rt.press_key(Key::p, primary());
     ok(rt.model().quick.open, "the quick-open key opens the file finder");
     rt.send(App::Msg{App::QuickListed{"/tmp/hand-selftest", {"src/app/editor.cpp", "src/app/pane.cpp", "README.md"}, false}});
@@ -131,17 +152,15 @@ void editor(Runtime& rt, Vec2, Check& ok) {
     ok(!rt.model().quick.open, "escape closes it");
 
     // ⌘⇧F: text across the project, landing on the line
-#if defined(__APPLE__)
-    rt.press_key(Key::f, Mods{.shift = true, .super = true});
-#else
-    rt.press_key(Key::f, Mods{.shift = true, .ctrl = true});
-#endif
+    rt.press_key(Key::f, primary(true));
     ok(rt.model().search_all.open, "the project-search key opens the search");
     rt.window().type("needle");
     rt.tick();
     const std::uint64_t tok = rt.model().search_all.token;
     rt.send(App::Msg{App::SearchAllDone{tok - 1, "/tmp/hand-selftest", {{"stale.cpp", 0, 0, 6, "needle"}}, false, ""}});
-    ok(rt.model().search_all.hits.empty(), "an older query's answer is dropped");
+    ok(std::none_of(rt.model().search_all.hits.begin(), rt.model().search_all.hits.end(),
+                    [](const auto& h) { return h.file == "stale.cpp"; }),
+       "an older query's answer is dropped");
     rt.send(App::Msg{App::SearchAllDone{tok, "/tmp/hand-selftest", {{"notes.cpp", 2, 4, 6, "    needle();"}}, false, ""}});
     ok(rt.model().search_all.hits.size() == 1, "the current query's answer is shown");
     rt.press_key(Key::enter);
@@ -154,6 +173,9 @@ void editor(Runtime& rt, Vec2, Check& ok) {
            "...with the match selected on its line");
     }
     rt.send(App::Msg{App::CloseTab{TabIndex{rt.model().active()}, Confirm::given}});
+    if (!mac && rt.model().tab_count() > tabs0)   // other.cpp, opened for the PC's keys
+        for (std::size_t i = 0; i < rt.model().tab_count(); ++i)
+            if (rt.model().at(i).file) { rt.send(App::Msg{App::CloseTab{TabIndex{i}, Confirm::given}}); break; }
 
     // a binary is not a tab: it goes to its app and the waiting tab closes
     rt.send(App::Msg{App::OpenFile{"/tmp/hand-selftest/logo.png"}});
@@ -162,5 +184,6 @@ void editor(Runtime& rt, Vec2, Check& ok) {
     ok(rt.model().tab_count() == tabs0 && !rt.model().tab().file, "a binary goes to its own app, no tab left behind");
     if (rt.model().active() != shell_tab) rt.send(App::Msg{App::SelectTab{TabIndex{shell_tab}}});
 }
+}  // namespace
 
 }  // namespace hand::cli::checks

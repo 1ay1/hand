@@ -20,9 +20,9 @@ void settings_overlay(const Ctx& c, const Model& m) {
     const MemoKey key = MemoKey{}
         .add(settings_key(m.cfg)).add(ui.selected).add(ui.query).add(ui.filtering)
         .add(ui.scroll.offset.y).add(ui.menu).add(ui.menu_query).add(ui.menu_hot).add(ui.menu_scroll.offset.y)
-        .add(ui.menu_origin).add(m.win.x).add(m.win.y).add(m.cursor_on).add(m.cfg.roundness).add(m.env.config_path);
+        .add(ui.menu_origin).add(m.win.x).add(m.win.y).add(m.cursor_on).add(m.cfg.roundness).add(m.env.config_path).add(static_cast<int>(m.env.keymap));
     Node panel = memo(key, [&] {
-        return settings_panel(c, "settings", setting_specs(m.cfg), ui, settings_props(c, m),
+        return settings_panel(c, "settings", setting_specs(m.cfg, m.env.keymap), ui, settings_props(c, m),
                               [](SettingsOp op) -> App::Msg { return App::Panel{std::move(op)}; });
     });
     c.overlay(Overlay{

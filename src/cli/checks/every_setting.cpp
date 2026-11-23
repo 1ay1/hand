@@ -14,6 +14,16 @@ void every_setting([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Che
     using K = mayag::Key;
     using SE = dsl::SettingEdit;
     const auto specs = hand::setting_specs(rt.model().cfg);
+    {   // the hints name the key that works on each keyboard, from one table
+        bool clean = true, both = false;
+        const auto mac = hand::setting_specs(rt.model().cfg, mayag::Keymap::mac), pc = hand::setting_specs(rt.model().cfg, mayag::Keymap::pc);
+        for (std::size_t i = 0; i < mac.size(); ++i) {
+            clean = clean && mac[i].hint.find('{') == std::string::npos && pc[i].hint.find('{') == std::string::npos;
+            if (mac[i].section == "font" && mac[i].key == "size")
+                both = mac[i].hint.find("\u2318 +/-") != std::string::npos && pc[i].hint.find("ctrl +/-") != std::string::npos;
+        }
+        ok(clean && both, "settings hints name each keyboard's key (\u2318 +/- on the Mac, ctrl +/- on the PC), from one table");
+    }
     int changed = 0, total = 0;
     std::string stuck;
     for (std::size_t i = 0; i < specs.size(); ++i) {

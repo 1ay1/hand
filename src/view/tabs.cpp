@@ -108,7 +108,8 @@ Node tabs(const Ctx& c, const Model& m, float height) {
                       .radius = cfg.tab_radius >= 0.0f ? cfg.tab_radius : 3.0f * cfg.roundness,
                       .icon = cfg.tab_icon, .subtitle = cfg.tab_subtitle && height >= 36.0f,
                       .activity = cfg.tab_activity, .hue = cfg.tab_colors, .new_button = cfg.tab_new_button,
-                      .close = cfg.tab_close, .motion = cfg.tab_anim, .number_prefix = "alt+",
+                      .close = cfg.tab_close, .motion = cfg.tab_anim,
+                      .number_prefix = m.env.keymap == mayag::Keymap::mac ? "\u2318" : "alt+",   // ⌘1..9 / alt+1..9: the key that works
                       .bottom = cfg.tab_bottom, .window_controls = !cfg.decorations});
 }
 

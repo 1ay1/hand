@@ -5,6 +5,7 @@
 
 #include "cli.hpp"
 
+#include <hand/core/platform.hpp>
 #include <hand/core/proc.hpp>
 #include <hand/core/pty.hpp>
 
@@ -21,13 +22,7 @@ Env read_env(bool scripted) {
         const char* v = std::getenv(k);
         return v && *v ? v : "";
     };
-#if defined(_WIN32)
-    e.home = var("USERPROFILE");   // ssh's ~ on Windows, whatever $HOME says (MSYS2 points it at AppData)
-    for (char& ch : e.home) if (ch == '\\') ch = '/';
-#else
-    e.home = var("HOME");
-#endif
-    while (e.home.size() > 1 && e.home.back() == '/') e.home.pop_back();
+    e.home = plat::home_dir();   // ~ for hand and for ssh, one definition (core/platform.hpp)
     e.editor = var("VISUAL");
     if (e.editor.empty()) e.editor = var("EDITOR");
     if (e.editor.empty()) e.editor = "vi";

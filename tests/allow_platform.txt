@@ -1,0 +1,16 @@
+# tests/allow_platform.txt -- the only platform conditionals in hand outside
+# the OS seam (src/core, include/hand/core). Checked by tests/one_hand.cmake.
+# Each line is `file: count`, exact, with the reason above it. Each is a TEST
+# FIXTURE or the process entry point, never app behaviour.
+
+# The --emit-red / --cat-v fixtures hand runs as a child to test its own pty:
+# they talk to the console the child got (a Windows console mode vs termios).
+src/cli/fixtures.cpp: 3
+
+# The pty self-test: on Windows the child is hand's own --emit-red (conhost
+# re-renders shell output); POSIX-only checks of signals inherited across exec.
+src/cli/checks/pty.cpp: 3
+
+# --cat-v as a run mode: the console headers for raw mode.
+src/cli/shots.cpp: 1
+src/main.cpp: 1

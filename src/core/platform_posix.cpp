@@ -11,7 +11,9 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
 #include <system_error>
 
@@ -27,7 +29,20 @@ bool glob_match(const std::string& pat, const std::string& s) {
 
 std::string user_token() { return std::to_string(::getuid()); }
 
+std::string home_dir() {
+    const char* h = std::getenv("HOME");
+    std::string s = h && *h ? h : "";
+    while (s.size() > 1 && s.back() == '/') s.pop_back();
+    return s;
+}
+
 int self_pid() { return static_cast<int>(::getpid()); }
+
+std::tm local_time(std::time_t t) {
+    std::tm tm{};
+    ::localtime_r(&t, &tm);
+    return tm;
+}
 
 std::string self_exe() {
 #if defined(__APPLE__)

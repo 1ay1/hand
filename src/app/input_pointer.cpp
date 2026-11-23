@@ -73,7 +73,7 @@ std::optional<App::Msg> App::on(const Model& m, const MouseDown& e_win) {
         return ReportPress{btn, std::move(bytes)};
     }
     if (btn == 1) return PasteReq{};   // middle click pastes, as everywhere on Linux
-    if (btn == 0 && e.click_count == 1 && (e.mods.ctrl || !m.cfg.links_need_ctrl)) {
+    if (btn == 0 && e.click_count == 1 && (e.mods.primary() || !m.cfg.links_need_ctrl)) {   // ⌘-click on the Mac, ctrl+click on the PC
         if (auto url = se.term->link_at(col, row); !url.empty()) return OpenUrl{std::move(url)};
     }
     if (btn == 0) {
@@ -144,8 +144,9 @@ std::optional<App::Msg> App::on(const Model& m, const MouseMove& e_win) {
         }
     }
     if (!se.selecting && se.mouse_button < 0) {
-        // links read as clickable while ctrl is held (or always, when they need no ctrl)
-        const bool armed = e.mods.ctrl || !m.cfg.links_need_ctrl;
+        // links read as clickable while the accelerator is held (⌘ / ctrl), or
+        // always when they need none
+        const bool armed = e.mods.primary() || !m.cfg.links_need_ctrl;
         const int col = cell_of(e.position.x, m.metrics.origin_x, m.metrics.cell_w, se.term->cols());
         const int row = cell_of(e.position.y, m.metrics.origin_y, m.metrics.cell_h, se.term->rows());
         std::string url = armed ? se.term->link_at(col, row) : std::string{};
