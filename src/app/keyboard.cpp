@@ -11,6 +11,7 @@ App::Cmd App::update(Model& m, Typed t) {
     Session& se = m.tab();
     se.fx.typed_at = se.active_at = m.time;   // the motion effects follow keystrokes, pty or not
     ++m.keys_typed;                           // wakes a resting cursor blink
+    m.blinks_idle = 0;
     if (t.bytes.find('\r') != std::string::npos) se.fx.enter_at = m.time;
     if (!se.pty && !se.starting) return {};
     se.term->select_clear();
@@ -73,6 +74,7 @@ App::Cmd App::update(Model& m, Focused f) {
     Session& se = m.tab();
     m.focused = f.focused;
     m.cursor_on = true;
+    m.blinks_idle = 0;
     se.cur_a = 1.0f;
     if (!f.report.empty() && se.pty) se.input += f.report;
     return {};

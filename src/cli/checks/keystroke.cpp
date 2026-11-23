@@ -54,8 +54,10 @@ void keystroke([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& 
         ok(rt.model().blinks_idle >= n - 2 && rt.model().cursor_on && rt.model().tab().cur_a == 1.0f && !rt.host().frames_on(),
            "an idle window stops blinking: the cursor rests solid and no frames are drawn");
         rt.send(App::Msg{App::Typed{"x"}});
-        rt.send(App::Msg{App::Blink{}});
         ok(rt.model().blinks_idle == 0, "...and a key wakes the blink");
+        for (int i = 0; i < n; ++i) rt.send(App::Msg{App::Blink{}});
+        rt.send(App::Msg{App::Output{"done\r\n"}});
+        ok(rt.model().blinks_idle == 0, "...and so does output (a resting window has no blink timer to notice it)");
     }
 }
 

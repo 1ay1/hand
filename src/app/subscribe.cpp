@@ -42,7 +42,9 @@ App::Sub App::subscribe(const Model& m) {
     if (m.tab().file && !m.tab().file->loading && m.tab().file->error.empty())
         s.push_back(Sub::every(std::chrono::milliseconds(1500), Msg{FileWatch{}}));
     if (m.pane.open && m.tab_count() < 2) s.push_back(Sub::every(std::chrono::milliseconds(1000), Msg{Second{}}));
-    if (m.focused && m.cfg.cursor_blink)
+    // the blink, until it rests (then keys, output and focus wake it: an idle
+    // window has no timer left and draws nothing)
+    if (m.focused && m.cfg.cursor_blink && !blink_resting(m))
         s.push_back(Sub::every(std::chrono::milliseconds(static_cast<int>(m.cfg.blink_ms)), Msg{Blink{}}));
     const auto cur = m.tab().term->cursor();
     const bool gliding = m.cfg.cursor_anim != CursorAnim::none &&

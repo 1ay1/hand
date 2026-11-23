@@ -251,6 +251,7 @@ App::Cmd App::update(Model& m, Output o) {
         return probe_soon(m);
     }
     m.tab().bytes += o.bytes.size();
+    m.blinks_idle = 0;   // output wakes a resting cursor blink
     const int off0 = m.tab().term->scroll_offset(), hist0 = m.tab().term->history();
     const Effects fx = m.tab().term->feed(o.bytes, m.wall_ms);
     settle_typed_cursor(m, m.tab());
@@ -359,7 +360,10 @@ App::Cmd App::update(Model& m, Msg msg, Time now) {
     if (m.began == Time{}) m.began = now;
     m.now = now;
     m.wall_ms = m.env.wall_epoch_ms + std::chrono::duration_cast<std::chrono::milliseconds>(now - m.began).count();
-    return step(m, std::move(msg));
+    const auto front = m.tab().sid;
+    auto cmd = step(m, std::move(msg));
+    if (m.tab().sid != front) m.blinks_idle = 0;   // another tab in front: its cursor blinks again
+    return cmd;
 }
 
 App::Cmd App::step(Model& m, Msg msg) {
