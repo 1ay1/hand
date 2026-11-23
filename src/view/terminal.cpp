@@ -135,7 +135,9 @@ void remote(std::vector<Node>& layers, const Ctx& c, const Model& m, const TermB
     if (!r) return;
     if (m.tab().link.dropped) {
         layers.push_back(connection_lost(c, "ssh", b, {.alias = r->alias, .command = ssh_command(*r),
-                                                       .gone = m.time - m.tab().link.dropped_at, .motion = m.cfg.motion}));
+                                                       .gone = m.time - m.tab().link.dropped_at, .motion = m.cfg.motion,
+                                                       .retry_in = m.tab().link.retry_at >= 0.0 ? m.tab().link.retry_at - m.time : -1.0,
+                                                       .attempt = m.tab().link.attempts}));
     } else if (m.cfg.ssh_prod_guard && remote_env(m, *r) == HostEnv::prod) {
         push_all(layers, remote_guard(c, "ssh.prod", b, {.who = (r->user.empty() ? "" : r->user + "@") + r->alias}));
     }

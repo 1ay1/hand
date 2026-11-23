@@ -24,17 +24,21 @@ Node editor(const Ctx& c, const Model& m) {
         const Color<Srgb> paper = rgb(p.bg), ink = rgb(p.fg);
         const std::string name = d.path.substr(d.path.find_last_of("/\\") + 1);
         Node msg = d.loading
-            ? (text_owned("Opening " + name + "\u2026") | type(Tier::body) | fg(mix(ink, paper, 0.4f))).build()
+            ? (text_owned("Opening " + name + (d.host ? " on " + d.host->alias : std::string{}) + "\u2026") | type(Tier::body) | fg(mix(ink, paper, 0.4f))).build()
             : (v(text_owned("Can\u2019t open " + name) | type(Tier::large) | semibold | fg(ink),
                  text_owned(d.error) | type(Tier::body) | fg(mix(ink, paper, 0.35f)),
-                 text_owned(short_path(m, d.path)) | type(Tier::small) | fg(mix(ink, paper, 0.55f)))
+                 text_owned(d.host ? d.host->alias + ":" + d.path : short_path(m, d.path)) | type(Tier::small) | fg(mix(ink, paper, 0.55f)))
                | gap(c.theme.spaced(6)) | align(Align::center)).build();
         return (h(node(std::move(msg))) | center | size(m.size.x, m.size.y) | bg(paper)).build();
     }
 
     TextEditorProps props;
     props.path = d.path;
-    props.shown_path = short_path(m, d.path);
+    props.shown_path = d.path.empty() ? d.path : (d.host ? d.path : short_path(m, d.path));
+    if (d.host) {
+        props.host = d.host->alias;
+        props.host_danger = m.cfg.ssh_prod_guard && remote_env(m, *d.host) == HostEnv::prod;
+    }
     props.font_size = m.font_size;   // the terminal's size and face: code reads the same in both
     props.line_height = std::max(m.cfg.line_height, 1.3f);
     props.family = family_of(m.cfg);

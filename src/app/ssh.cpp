@@ -395,14 +395,32 @@ App::Cmd App::update(Model& m, HostsLoaded h) {
     return {};
 }
 
-App::Cmd App::update(Model& m, Reconnect) {
-    if (!m.tab().link.dropped || !m.tab().remote) return {};
-    (void)m.tab().term->feed("\r\n\x1b[2m\u21C4 reconnecting to " + m.tab().remote->alias + "\u2026\x1b[0m\r\n");
-    m.tab().sid = m.session_ids.next();   // a new reader stream for the new pty
-    start_ssh(m, m.tab(), *m.tab().remote);
-    m.tab().grid_key = 0;
-    settle_scroll(m);
+App::Cmd App::update(Model& m, Reconnect r) {
+    const auto found = r.sid == kNoSession ? std::optional{m.active()} : m.tabs.find(r.sid);
+    if (!found) return {};
+    Session& se = m.at(*found);
+    if (!se.link.dropped || !se.remote) return {};
+    if (r.sid == kNoSession) se.link.attempts = 0;   // asked for now: the schedule starts over
+    se.link.retry_at = -1.0;
+    (void)se.term->feed("\r\n\x1b[2m\u21C4 reconnecting to " + se.remote->alias + "\u2026\x1b[0m\r\n");
+    se.sid = m.session_ids.next();   // a new reader stream for the new pty
+    // a live terminal at once: a host that asks for a password (or a 2FA
+    // code) on the way back in gets its keys. A try that fails within
+    // seconds comes back as Exited 255 and backs off (session.cpp).
+    start_ssh(m, se, *se.remote);   // clears `dropped`: the terminal is live again (attempts remember the backoff)
+    se.grid_key = 0;
+    if (*found == m.active()) settle_scroll(m);
     return {};
+}
+
+App::Cmd App::update(Model& m, RetryTick) {
+    std::vector<Cmd> cmds;
+    for (std::size_t i = 0; i < m.tab_count(); ++i) {
+        Session& se = m.at(i);
+        if (se.link.dropped && se.link.retry_at >= 0.0 && m.time >= se.link.retry_at && !se.pty && !se.launch && !se.starting)
+            cmds.push_back(update(m, Reconnect{se.sid}));
+    }
+    return Cmd::batch(std::move(cmds));
 }
 
 }  // namespace hand

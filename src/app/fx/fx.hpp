@@ -84,6 +84,23 @@ void list_project(Sink out, std::string root);
 /// Search the project (from `root`'s repo top) for `query`: git grep in a
 /// repo, grep elsewhere; plain text, case-insensitive unless it has capitals.
 void search_project(Sink out, std::uint64_t token, std::string root, std::string query);
+// ── the same, on another machine (src/app/fx/remote_files.cpp) ───────────────────
+// One command each over the host's shared connection (hand::remote).
+void read_remote_file(Sink out, SessionId sid, Host h, HostBook book, std::string path);
+void reread_remote_file(Sink out, SessionId sid, Host h, HostBook book, std::string path);
+void stat_remote_file(Sink out, SessionId sid, Host h, HostBook book, std::string path);
+void write_remote_file(Sink out, SessionId sid, Host h, HostBook book, std::string path, std::string text, std::uint64_t point);
+void list_remote_project(Sink out, Host h, HostBook book, std::string dir);
+void search_remote_project(Sink out, std::uint64_t token, Host h, HostBook book, std::string dir, std::string query);
+/// What each of those does, as plain functions returning the message (the
+/// opt-in self-test drives them against a real host).
+namespace remote_ops {
+App::FileLoaded read_file(SessionId sid, const Host& h, const HostBook& book, const std::string& path, bool reload);
+std::optional<App::FileStat> stat_file(SessionId sid, const Host& h, const HostBook& book, const std::string& path);
+App::FileSaved write_file(SessionId sid, const Host& h, const HostBook& book, const std::string& path, const std::string& text, std::uint64_t point);
+App::QuickListed list_project(const Host& h, const HostBook& book, const std::string& dir);
+App::SearchAllDone search_project(std::uint64_t token, const Host& h, const HostBook& book, const std::string& dir, const std::string& query);
+}  // namespace remote_ops
 /// Write `text` to `path` atomically (a sibling temp file, renamed over it,
 /// keeping the file's permissions), then FileSaved{sid, point}.
 void write_file(Sink out, SessionId sid, std::string path, std::string text, std::uint64_t point);

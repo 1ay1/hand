@@ -34,6 +34,42 @@ FileDoc* doc_of(Model& m, SessionId sid) {
     return &*m.at(*i).file;
 }
 
+/// The effects that touch a file, on whichever machine it lives.
+App::Cmd read_doc(const Model& m, SessionId sid, const FileDoc& d, bool reload) {
+    if (d.host) return reload ? App::Cmd::task(fx::reread_remote_file, sid, *d.host, m.ssh.book, d.path)
+                              : App::Cmd::task(fx::read_remote_file, sid, *d.host, m.ssh.book, d.path);
+    return reload ? App::Cmd::task(fx::reread_file, sid, d.path) : App::Cmd::task(fx::read_file, sid, d.path);
+}
+
+/// Where ⌘P and ⌘⇧F look: the machine and folder you are working in -- the
+/// front file's, the remote pane's, or the front shell's (over ssh: its host).
+struct Site { std::optional<Host> host; std::string dir; };
+Site where_now(const Model& m) {
+    const Session& se = m.tab();
+    if (se.file) {
+        const auto s = se.file->path.find_last_of('/');
+        return {se.file->host, s == std::string::npos ? std::string{"."} : se.file->path.substr(0, std::max<std::size_t>(s, 1))};
+    }
+    if (m.pane.open && !m.pane.where.empty() && m.pane.host) return {m.pane.host, m.pane.path.empty() ? "." : m.pane.path};
+    if (const auto& r = remote_of(se); r && !se.link.dropped) {
+        const Host h = m.ssh.book.find(r->alias) ? *m.ssh.book.find(r->alias) : *r;
+        // the remote shell's OSC 7 names its directory; else its login dir
+        std::string dir = se.term ? se.term->cwd() : std::string{};
+        const std::string ch = se.term ? se.term->cwd_host() : std::string{};
+        if (dir.empty() || ch.empty() || ch == "localhost" || ch == m.env.host_name) dir = ".";
+        return {h, dir};
+    }
+    std::string dir = se.term ? se.term->cwd() : std::string{};
+    return {std::nullopt, dir.empty() ? m.env.cwd : dir};
+}
+
+/// A file's name for its tab, and with the host for a remote one.
+std::string shown_name(const std::string& path, const std::optional<Host>& h) {
+    const auto s = path.find_last_of("/\\");
+    const std::string n = s == std::string::npos ? path : path.substr(s + 1);
+    return h ? n + " \u2014 " + h->alias : n;
+}
+
 std::string name_of(const std::string& path) {
     const auto s = path.find_last_of("/\\");
     return s == std::string::npos ? path : path.substr(s + 1);
@@ -47,7 +83,8 @@ App::Cmd App::update(Model& m, OpenFile o) {
         : std::optional{editor::Range{{o.line, o.col}, {o.line, o.col + o.len}}};
     // already open: that tab
     for (std::size_t i = 0; i < m.tab_count(); ++i)
-        if (m.at(i).file && m.at(i).file->path == o.path) {
+        if (m.at(i).file && m.at(i).file->path == o.path &&
+            (m.at(i).file->host ? m.at(i).file->host->alias : std::string{}) == (o.host ? o.host->alias : std::string{})) {
             activate(m, i);
             m.pane.ui.focused = false;
             if (jump) {
@@ -63,7 +100,7 @@ App::Cmd App::update(Model& m, OpenFile o) {
     // "the active tab's screen" still has a screen to ask
     se.term = std::make_shared<Term>(2, 1, m.palette, 0, m.env.entropy ^ se.sid.get());
     se.title = name_of(o.path);
-    se.file = FileDoc{.path = o.path};
+    se.file = FileDoc{.path = o.path, .host = o.host};
     se.file->jump = jump;
     const SessionId sid = se.sid;
     const bool first_split = m.tab_count() == 1 && !m.cfg.strip_always();
@@ -75,7 +112,7 @@ App::Cmd App::update(Model& m, OpenFile o) {
     m.pane.ui.focused = false;   // the editor has the keyboard
     fit(m);
     if (m.cfg.demo) return SetTitle{name_of(o.path)};
-    return Cmd::batch(Cmd::task(fx::read_file, sid, o.path), Cmd{SetTitle{name_of(o.path)}});
+    return Cmd::batch(read_doc(m, sid, *m.tab().file, false), Cmd{SetTitle{shown_name(o.path, o.host)}});
 }
 
 App::Cmd App::update(Model& m, FileLoaded l) {
@@ -136,7 +173,7 @@ App::Cmd App::editor_actions(Model& m) {
                 break;
             }
             case TextEditorAction::Kind::reload:
-                if (!m.cfg.demo) cmds.push_back(Cmd::task(fx::reread_file, se.sid, se.file->path));
+                if (!m.cfg.demo) cmds.push_back(read_doc(m, se.sid, *se.file, true));
                 break;
         }
     }
@@ -153,6 +190,7 @@ App::Cmd App::save_file(Model& m, std::size_t i) {
     if (m.cfg.demo) {   // shots and the self-test never write: the save simply lands
         return update(m, FileSaved{m.at(i).sid, point, {}});
     }
+    if (d.host) return Cmd::task(fx::write_remote_file, m.at(i).sid, *d.host, m.ssh.book, d.path, text_editor_ops::file_text(d.st), point);
     return Cmd::task(fx::write_file, m.at(i).sid, d.path, text_editor_ops::file_text(d.st), point);
 }
 
@@ -189,6 +227,7 @@ App::Cmd App::update(Model& m, EditorPasted p) {
 App::Cmd App::update(Model& m, FileWatch) {
     const Session& se = m.tab();
     if (!se.file || se.file->loading || !se.file->error.empty() || se.file->saving || m.cfg.demo) return {};
+    if (se.file->host) return Cmd::task(fx::stat_remote_file, se.sid, *se.file->host, m.ssh.book, se.file->path);
     return Cmd::task(fx::stat_file, se.sid, se.file->path);
 }
 
@@ -197,7 +236,7 @@ App::Cmd App::update(Model& m, FileStat s) {
     if (d == nullptr || d->saving || s.mtime == 0 || s.mtime == d->disk_mtime) return {};
     // changed by someone else. Unedited: just take it. Edited: say so and
     // keep the edits until the user chooses (the banner's "reload").
-    if (!d->st.ed.dirty()) return Cmd::task(fx::reread_file, s.sid, d->path);
+    if (!d->st.ed.dirty()) return read_doc(m, s.sid, *d, true);
     d->disk_mtime = s.mtime;   // asked once per change, not every poll
     d->st.disk_changed = true;
     return {};
@@ -229,12 +268,6 @@ std::vector<std::pair<int, FuzzyMatch>> quick_ranked(const Model& m) {
     return out;
 }
 /// Where ⌘P starts: the front tab's folder (list_project climbs to its repo's top).
-std::string quick_root(const Model& m) {
-    const Session& se = m.tab();
-    std::string dir = se.file ? se.file->path.substr(0, se.file->path.find_last_of('/')) : se.term ? se.term->cwd() : std::string{};
-    if (dir.empty()) dir = m.env.cwd;
-    return dir;
-}
 }  // namespace
 
 App::Cmd App::update(Model& m, QuickOpen) {
@@ -243,12 +276,18 @@ App::Cmd App::update(Model& m, QuickOpen) {
     m.search_all.open = false;
     m.quick.q.set({});
     m.quick.sel = 0;
-    const std::string root = quick_root(m);
-    if (!m.quick.files.empty() && (root == m.quick.root || root.rfind(m.quick.root + "/", 0) == 0)) return {};   // still inside the listed project
+    const Site w = where_now(m);
+    const std::string alias = w.host ? w.host->alias : std::string{};
+    const bool same_machine = alias == (m.quick.host ? m.quick.host->alias : std::string{});
+    if (!m.quick.files.empty() && same_machine && (w.dir == m.quick.root || w.dir.rfind(m.quick.root + "/", 0) == 0))
+        return {};   // still inside the listed project
     m.quick.loading = true;
     m.quick.files.clear();
+    m.quick.host = w.host;
+    m.quick.root = w.dir;
     if (m.cfg.demo) return {};
-    return Cmd::task(fx::list_project, root);
+    if (w.host) return Cmd::task(fx::list_remote_project, *w.host, m.ssh.book, w.dir);
+    return Cmd::task(fx::list_project, w.dir);
 }
 
 App::Cmd App::update(Model& m, QuickListed l) {
@@ -280,7 +319,7 @@ App::Cmd App::update(Model& m, QuickPick p) {
     m.quick.open = false;
     if (p.index < 0 || p.index >= static_cast<int>(r.size())) return {};
     const std::string& rel = m.quick.files[static_cast<std::size_t>(r[static_cast<std::size_t>(p.index)].first)];
-    return update(m, OpenFile{m.quick.root + "/" + rel});
+    return update(m, OpenFile{.path = m.quick.root + "/" + rel, .host = m.quick.host});
 }
 
 std::vector<std::pair<int, FuzzyMatch>> quick_open_ranked(const Model& m) { return quick_ranked(m); }
@@ -295,8 +334,11 @@ App::Cmd search_now(Model& m) {
     ++s.token;
     if (s.q.text.size() < 2) { s.hits.clear(); s.searching = false; s.error.clear(); s.truncated = false; return {}; }
     s.searching = true;
+    const Site w = where_now(m);
+    s.host = w.host;
     if (m.cfg.demo) return {};
-    return App::Cmd::task(fx::search_project, s.token, quick_root(m), s.q.text);
+    if (w.host) return App::Cmd::task(fx::search_remote_project, s.token, *w.host, m.ssh.book, w.dir, s.q.text);
+    return App::Cmd::task(fx::search_project, s.token, w.dir, s.q.text);
 }
 }  // namespace
 
@@ -349,7 +391,7 @@ App::Cmd App::update(Model& m, SearchAllPick p) {
     if (p.index < 0 || p.index >= static_cast<int>(s.hits.size())) return {};
     const SearchHit h = s.hits[static_cast<std::size_t>(p.index)];
     s.open = false;
-    return update(m, OpenFile{s.root + "/" + h.file, h.line, h.col, h.len});
+    return update(m, OpenFile{s.root + "/" + h.file, h.line, h.col, h.len, s.host});
 }
 
 }  // namespace hand

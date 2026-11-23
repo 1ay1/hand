@@ -61,7 +61,8 @@ struct Launch {
 /// is a tiny blank grid, so code that asks any tab for its screen still
 /// works), and the keyboard, the pointer and the view belong to the editor.
 struct FileDoc {
-    std::string                    path;          ///< absolute, local
+    std::string                    path;          ///< absolute, on `host` (local when none)
+    std::optional<Host>            host;          ///< the machine it lives on: read and saved over its shared ssh connection
     mayag::dsl::TextEditorState    st;            ///< the text, cursors, find
     bool                           loading = true;
     std::string                    error;         ///< could not open it (the tab says why, and edits nothing)
@@ -79,6 +80,7 @@ struct QuickOpenModel {
     mayag::TextEditState     q;
     int                      sel = 0;
     std::string              root;              ///< absolute; files are relative to it
+    std::optional<Host>      host;              ///< the machine listed (none: this one)
     std::vector<std::string> files;
     bool                     truncated = false; ///< the project has more than the list holds
 };
@@ -95,6 +97,7 @@ struct SearchAllModel {
     int                        sel = 0;
     std::uint64_t              token = 0;        ///< the newest query asked
     std::string                root;             ///< hits' files are relative to it
+    std::optional<Host>        host;             ///< the machine searched (none: this one)
     std::vector<SearchHit>     hits;
     bool                       truncated = false;
     std::string                error;

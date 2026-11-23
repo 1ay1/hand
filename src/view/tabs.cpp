@@ -47,8 +47,13 @@ TermTabInfo tab_info(const Model& m, std::size_t i) {
         const std::string& p = se.file->path;
         const auto slash = p.find_last_of("/\\");
         ti.title = se.name.empty() ? p.substr(slash == std::string::npos ? 0 : slash + 1) : se.name;
-        ti.cwd = short_path(m, slash == std::string::npos ? std::string{} : p.substr(0, slash));
+        ti.cwd = se.file->host ? (slash == std::string::npos ? std::string{} : p.substr(0, slash))
+                               : short_path(m, slash == std::string::npos ? std::string{} : p.substr(0, slash));
         ti.process = "edit";
+        if (const auto& h = se.file->host) {   // on another machine: the tab says which, like its ssh tab
+            ti.host = (h->user.empty() ? "" : h->user + "@") + (h->hostname.empty() ? h->alias : h->hostname);
+            ti.host_danger = m.cfg.ssh_prod_guard && remote_env(m, *h) == HostEnv::prod;
+        }
         ti.dirty = !se.file->loading && se.file->st.ed.dirty();
         ti.running = se.file->saving.has_value();
         return ti;

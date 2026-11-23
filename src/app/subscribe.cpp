@@ -31,6 +31,9 @@ App::Sub App::subscribe(const Model& m) {
         if (se.pty) s.push_back(Sub::stream("pty." + std::to_string(se.sid.get()), fx::read_pty, se.pty.share(), se.sid));
     }
     if (m.tab_count() > 1) s.push_back(Sub::every(std::chrono::milliseconds(1000), Msg{Second{}}));   // activity sparklines
+    // a dropped ssh tab reconnects by itself, on a schedule
+    if (std::any_of(m.tabs.begin(), m.tabs.end(), [](const Session& se) { return se.link.dropped && se.link.retry_at >= 0.0; }))
+        s.push_back(Sub::every(std::chrono::milliseconds(250), Msg{RetryTick{}}));
     // the host manager's live tunnel status: who listens on each -L / -D port
     if (m.ssh.manager.open) s.push_back(Sub::every(std::chrono::milliseconds(900), Msg{TunnelProbe{}}));
     // the file pane: re-read its folder (new and changed files glow), and follow `ssh` started in a tab

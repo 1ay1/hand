@@ -1,6 +1,7 @@
 // hand::hosts — ~/.ssh/config, known_hosts and hosts.vibe.
 
 #include <hand/ssh/hosts.hpp>
+#include <hand/ssh/remote.hpp>
 #include <hand/core/proc.hpp>
 
 #include <vibe.h>
@@ -767,17 +768,14 @@ std::vector<std::string> ssh_argv(const Host& host, const HostBook& book, SshFla
     // OpenSSH for Windows does not support it: with these options every
     // connection died at once with "getsockname failed: Not a socket".
 #if !defined(_WIN32)
-    if (f.multiplex && !book.sets_control) {
-        // one TCP+auth per host: a second tab opens instantly, and only one
-        // password / 2FA prompt. Sockets live in a private per-user dir.
-        std::string dir = home() + "/.cache/hand/ssh";
-        std::error_code ec;
-        fs::create_directories(dir, ec);
-        fs::permissions(dir, fs::perms::owner_all, fs::perm_options::replace, ec);
-        a.insert(a.end(), {"-o", "ControlMaster=auto", "-o", "ControlPath=" + dir + "/%C", "-o", "ControlPersist=10m"});
+    if (f.multiplex) {
+        // one TCP+auth per host, shared with everything else hand does there
+        // (files, saves, search): a second tab opens instantly, one prompt
+        const auto c = remote::control_opts(book);
+        a.insert(a.end(), c.begin(), c.end());
     }
 #endif
-    if (f.keepalive && !book.sets_alive)
+    if (f.keepalive && !book.sets_alive && (!f.multiplex || remote::control_opts(book).empty()))   // shared: control_opts carries it
         a.insert(a.end(), {"-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4"});
     // the host manager's forwards: -L / -R / -D, each checked on save and again here
     for (const auto& fw : h.forwards)

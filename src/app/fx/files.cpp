@@ -319,6 +319,39 @@ std::string repo_top(const std::string& dir) {
 }
 }  // namespace
 
+/// git grep / grep output (path:line:text) -> hits, the match located on
+/// each line (smart case, as searched). Shared by the local and remote search.
+void parse_grep(const std::string& out, const std::string& root, const std::string& query, App::SearchAllDone& r) {
+    const bool fold = std::none_of(query.begin(), query.end(), [](char c) { return c >= 'A' && c <= 'Z'; });
+    const auto lower = [](std::string s) { for (char& ch : s) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch))); return s; };
+    const std::string needle = fold ? lower(query) : query;
+    constexpr std::size_t kMax = 2000;
+    std::size_t a = 0;
+    for (std::size_t i = 0; i <= out.size(); ++i) {
+        if (i < out.size() && out[i] != '\n') continue;
+        std::string_view l{out.data() + a, i - a};
+        a = i + 1;
+        // path:line:text (the path may hold ':' only in pathological cases)
+        const auto c1 = l.find(':');
+        if (c1 == std::string_view::npos) continue;
+        const auto c2 = l.find(':', c1 + 1);
+        if (c2 == std::string_view::npos) continue;
+        SearchHit h;
+        h.file = std::string{l.substr(0, c1)};
+        if (h.file.rfind(root + "/", 0) == 0) h.file = h.file.substr(root.size() + 1);   // grep's absolute paths
+        if (h.file.rfind("./", 0) == 0) h.file = h.file.substr(2);
+        h.line = std::atoi(std::string{l.substr(c1 + 1, c2 - c1 - 1)}.c_str()) - 1;
+        std::string text{l.substr(c2 + 1)};
+        if (!text.empty() && text.back() == '\r') text.pop_back();
+        const auto at = (fold ? lower(text) : text).find(needle);
+        h.col = at == std::string::npos ? 0 : static_cast<int>(at);
+        h.len = at == std::string::npos ? 0 : static_cast<int>(query.size());
+        h.text = std::move(text);
+        if (h.line >= 0) r.hits.push_back(std::move(h));
+        if (r.hits.size() >= kMax) { r.truncated = true; break; }
+    }
+}
+
 void search_project(Sink out, std::uint64_t token, std::string root, std::string query) {
     App::SearchAllDone r{.token = token};
     root = repo_top(root);
@@ -337,32 +370,7 @@ void search_project(Sink out, std::uint64_t token, std::string root, std::string
         g = proc::run(a, {}, 4000);
     }
     if (g.timed_out) r.error = "the search took too long; showing what was found";
-    const auto lower = [](std::string s) { for (char& ch : s) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch))); return s; };
-    const std::string needle = fold ? lower(query) : query;
-    constexpr std::size_t kMax = 2000;
-    std::size_t a = 0;
-    for (std::size_t i = 0; i <= g.out.size(); ++i) {
-        if (i < g.out.size() && g.out[i] != '\n') continue;
-        std::string_view l{g.out.data() + a, i - a};
-        a = i + 1;
-        // path:line:text (the path may hold ':' only in pathological cases)
-        const auto c1 = l.find(':');
-        if (c1 == std::string_view::npos) continue;
-        const auto c2 = l.find(':', c1 + 1);
-        if (c2 == std::string_view::npos) continue;
-        SearchHit h;
-        h.file = std::string{l.substr(0, c1)};
-        if (h.file.rfind(root + "/", 0) == 0) h.file = h.file.substr(root.size() + 1);   // grep's absolute paths
-        h.line = std::atoi(std::string{l.substr(c1 + 1, c2 - c1 - 1)}.c_str()) - 1;
-        std::string text{l.substr(c2 + 1)};
-        if (!text.empty() && text.back() == '\r') text.pop_back();
-        const auto at = (fold ? lower(text) : text).find(needle);
-        h.col = at == std::string::npos ? 0 : static_cast<int>(at);
-        h.len = at == std::string::npos ? 0 : static_cast<int>(query.size());
-        h.text = std::move(text);
-        if (h.line >= 0) r.hits.push_back(std::move(h));
-        if (r.hits.size() >= kMax) { r.truncated = true; break; }
-    }
+    parse_grep(g.out, root, query, r);
     out.send(App::Msg{std::move(r)});
 }
 

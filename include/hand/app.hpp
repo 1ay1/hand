@@ -66,7 +66,7 @@ struct App {
     using RequestQuit = msg::RequestQuit; using WindowAct = msg::WindowAct;
     using Panel = msg::Panel;           using ToggleSettings = msg::ToggleSettings;
     using OpenHosts = msg::OpenHosts;   using HostsKey = msg::HostsKey;     using ConnectHost = msg::ConnectHost;
-    using ConnectTyped = msg::ConnectTyped; using Reconnect = msg::Reconnect; using Where = msg::Where;
+    using ConnectTyped = msg::ConnectTyped; using Reconnect = msg::Reconnect; using RetryTick = msg::RetryTick; using Where = msg::Where;
     using ToggleManager = msg::ToggleManager; using Manager = msg::Manager;
     using FilesListed = msg::FilesListed; using FilesDone = msg::FilesDone; using UploadPicked = msg::UploadPicked;
     using TunnelProbe = msg::TunnelProbe; using TunnelScan = msg::TunnelScan;
@@ -187,6 +187,7 @@ struct App {
     static Cmd update(Model& m, ConnectHost c);
     static Cmd update(Model& m, ConnectTyped);
     static Cmd update(Model& m, Reconnect);
+    static Cmd update(Model& m, RetryTick);
     static Cmd update(Model& m, HostsLoaded h);
     static Cmd update(Model& m, ToggleManager);
     static Cmd update(Model& m, Manager);

@@ -330,13 +330,18 @@ App::Cmd App::update(Model& m, Exited e) {
         // connected: keep the tab and its scrollback, offer to reconnect. A
         // logout (the remote shell's status) closes it like any shell.
         if (se.link.launched && e.code == 255 && m.cfg.ssh_reconnect && se.remote) {
+            // a link that was up a while dropped: start the schedule over; one
+            // that died within seconds of a try: that try failed, back off
+            const bool was_up = m.time - se.link.connected_at > 10.0;
+            se.link.attempts = was_up ? 0 : se.link.attempts + 1;
+            se.link.retry_at = m.time + Remote::backoff(se.link.attempts);
+            if (was_up) se.link.dropped_at = m.time;   // the card's "how long" counts from the first drop, across failed tries
             se.link.dropped = true;
-            se.link.dropped_at = m.time;
             se.pty.reset();
             se.grid_key = 0;
-            if (i != m.active()) {
+            if (i != m.active() && was_up) {
                 se.unread = true;
-                m.toast.card = Toast{.title = "\u21C4 " + se.remote->alias + " disconnected", .body = "tab " + std::to_string(i + 1) + " \u00B7 enter there to reconnect",
+                m.toast.card = Toast{.title = "\u21C4 " + se.remote->alias + " disconnected", .body = "tab " + std::to_string(i + 1) + " \u00B7 reconnecting by itself",
                                 .kind = Toast::Kind::warning};
                 m.toast.at = m.time;
             }

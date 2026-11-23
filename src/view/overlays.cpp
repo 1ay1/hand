@@ -57,7 +57,7 @@ void overlays(const Ctx& c, const Model& m) {
             items.push_back({.label = name, .detail = slash == std::string::npos ? std::string{} : f.substr(0, slash),
                              .hint = open_tab ? "open" : "", .icon_name = name});
         }
-        const std::string where = m.quick.root.substr(m.quick.root.find_last_of('/') + 1);
+        const std::string where = m.quick.root.substr(m.quick.root.find_last_of('/') + 1) + (m.quick.host ? " on " + m.quick.host->alias : std::string{});
         picker(c, "quick", m.quick.q, items, rk, m.quick.sel,
                PickerStyle{.placeholder = m.quick.loading ? "Listing " + where + "\u2026" : "Open a file in " + where, .prefix = "\u2192",
                            .width = std::min(680.0f, m.win.x - 80.0f),
@@ -90,7 +90,8 @@ void overlays(const Ctx& c, const Model& m) {
         // how many files the hits are in
         std::size_t files = 0;
         for (std::size_t i = 0; i < s.hits.size(); ++i) files += i == 0 || s.hits[i].file != s.hits[i - 1].file ? 1 : 0;
-        const std::string where = s.root.empty() ? std::string{"the project"} : s.root.substr(s.root.find_last_of('/') + 1);
+        const std::string where = (s.root.empty() || s.root == "." ? std::string{"the project"} : s.root.substr(s.root.find_last_of('/') + 1)) +
+                                  (s.host ? " on " + s.host->alias : std::string{});
         picker(c, "search_all", s.q, items, rk, s.sel,
                PickerStyle{.placeholder = "Search the text of every file in " + where,
                            .prefix = "\u2315",

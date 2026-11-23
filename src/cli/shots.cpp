@@ -478,7 +478,7 @@ if (shot == "tabs") {
         for (int i = 0; i < 30; ++i) rt.tick();
     }
 }
-if (shot == "hosts" || shot == "ssh" || shot == "ssh-drop" || shot.rfind("manager", 0) == 0) {
+if (shot == "hosts" || shot == "ssh" || shot == "ssh-drop" || shot == "ssh-retry" || shot == "ssh-edit" || shot.rfind("manager", 0) == 0) {
     using E7 = mayag::Edit<hand::App::Model>;
     rt.send(hand::App::Msg{E7{[](hand::App::Model& m) {
         const std::int64_t now = static_cast<std::int64_t>(std::time(nullptr));
@@ -573,8 +573,23 @@ if (shot == "hosts" || shot == "ssh" || shot == "ssh-drop" || shot.rfind("manage
                 "\x1b[1;31mdeploy@prod-db\x1b[0m:\x1b[1;34m~\x1b[0m$ "}, hand::kNoSession}});
             rt.tick();
         }
-        if (shot == "ssh-drop")
-            rt.send(hand::App::Msg{E7{[](hand::App::Model& m) { (void)hand::App::update(m, hand::App::Exited{255, m.tab().sid}); m.tab().link.dropped_at = m.time - 10.0; }}});
+        if (shot == "ssh-drop" || shot == "ssh-retry")
+            rt.send(hand::App::Msg{E7{[shot](hand::App::Model& m) {
+                m.tab().link.connected_at = m.time - 120.0;   // it was up for a while
+                (void)hand::App::update(m, hand::App::Exited{255, m.tab().sid});
+                m.tab().link.dropped_at = m.time - 10.0;
+                if (shot == "ssh-retry") { m.tab().link.attempts = 2; m.tab().link.retry_at = m.time + 3.6; }   // the third try, 4 s away
+                else m.tab().link.retry_at = -1.0;   // waiting for you
+            }}});
+        if (shot == "ssh-edit") {   // a file on the remote host, open in the editor
+            rt.send(hand::App::Msg{hand::App::OpenFile{.path = "/etc/nginx/sites-available/app.conf", .host = rt.model().tab().remote}});
+            rt.send(hand::App::Msg{hand::App::FileLoaded{rt.model().tab().sid, "/etc/nginx/sites-available/app.conf",
+                "server {\n    listen 443 ssl http2;\n    server_name app.example.com;\n\n    location / {\n"
+                "        proxy_pass http://127.0.0.1:8080;\n        proxy_set_header Host $host;\n    }\n}\n", "", false, 1}});
+            rt.press_key(mayag::Key::down, {});
+            rt.press_key(mayag::Key::end, {});
+            rt.type(" # edited");
+        }
         rt.send(hand::App::Msg{E7{[](hand::App::Model& m) { m.strip.t = 1.0f; m.strip.switch_t = 1.0f; hand::App::fit(m); }}});
     }
     for (int i = 0; i < 8; ++i) rt.tick();

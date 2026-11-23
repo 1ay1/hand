@@ -183,11 +183,14 @@ struct OpenHosts {};                                               ///< ctrl+shi
 struct HostsKey { mayag::Key key; mayag::Mods mods; };
 struct ConnectHost { Host host; Where where = Where::new_tab; };
 struct ConnectTyped {};                                            ///< the picker's query as a destination
-struct Reconnect {};                                               ///< the dropped ssh tab, again
+/// A dropped ssh tab, again (kNoSession: the front tab -- enter, the button).
+struct Reconnect { SessionId sid = kNoSession; };
+/// 1 Hz while a dropped tab waits to reconnect: are any due?
+struct RetryTick {};
 /// The host book came back from disk (~/.ssh/config, known_hosts, hosts.vibe;
 /// PuTTY and MobaXterm when the manager asked).
 struct HostsLoaded { HostBook book; std::optional<std::vector<ImportSource>> imports; };
-using SshMsg = std::variant<OpenHosts, HostsKey, ConnectHost, ConnectTyped, Reconnect, HostsLoaded>;
+using SshMsg = std::variant<OpenHosts, HostsKey, ConnectHost, ConnectTyped, Reconnect, RetryTick, HostsLoaded>;
 
 // ── ssh: the host manager ──────────────────────────────────────────────────
 struct ToggleManager {};                                           ///< ctrl+shift+h
@@ -218,7 +221,8 @@ using PaneMsg = std::variant<TogglePane, PaneOp, PaneListed, PaneResize, PaneWat
 // ── files in tabs: the editor ──────────────────────────────────────────────
 /// Open `path` in an editor tab (or bring its tab to the front); with a
 /// `line` (0-based), select [col, col+len) on it and centre it.
-struct OpenFile { std::string path; int line = -1; int col = 0; int len = 0; };
+/// `host`: the file is on that machine (read and saved over ssh).
+struct OpenFile { std::string path; int line = -1; int col = 0; int len = 0; std::optional<Host> host = std::nullopt; };
 /// The file's bytes arrived (or why they couldn't).
 /// `reload`: a re-read of an open file (it changed on disk, or "reload").
 struct FileLoaded { SessionId sid; std::string path; std::string text; std::string error; bool binary = false;

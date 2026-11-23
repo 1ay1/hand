@@ -33,6 +33,14 @@ struct Remote {
     bool   dropped = false;         ///< it ended badly: the tab stays, offering reconnect
     double dropped_at = -10.0;
     double connected_at = -10.0;
+    // reconnecting by itself: 1 2 4 8 15 30 30 ... s apart (a sleep, a Wi-Fi
+    // switch, a server reboot); enter tries now, esc gives up
+    int    attempts = 0;            ///< tries since the link was last up
+    double retry_at = -1.0;         ///< m.time of the next try; < 0: none scheduled
+    [[nodiscard]] static double backoff(int attempts) noexcept {
+        constexpr double steps[] = {1.0, 2.0, 4.0, 8.0, 15.0};
+        return attempts < 5 ? steps[attempts] : 30.0;
+    }
 };
 
 }  // namespace hand

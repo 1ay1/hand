@@ -48,9 +48,10 @@ struct Place {
 Place place_of(const Model& m) {
     const Session& se = m.tab();
     Place p;
-    if (se.file) {   // a file tab: the pane stays on the file's folder
+    if (se.file) {   // a file tab: the pane stays on the file's folder, on its machine
         const auto s = se.file->path.find_last_of("/\\");
         p.dir = s == std::string::npos ? m.env.cwd : se.file->path.substr(0, s == 0 ? 1 : s);
+        if (se.file->host) { p.where = se.file->host->alias; p.host = se.file->host; }
         return p;
     }
     const auto& r = remote_of(m.tab());
@@ -346,6 +347,8 @@ App::Cmd App::update(Model& m, PaneOp p) {
                     cmds.push_back(update(m, OpenFile{a.path}));
                     break;
                 }
+                // a remote one too: read and saved over the host's shared connection
+                if (m.pane.host) { cmds.push_back(update(m, OpenFile{.path = a.path, .host = m.pane.host})); break; }
                 [[fallthrough]];
             case A::Kind::download: {
                 if (m.pane.where.empty() || !m.pane.host || m.cfg.demo) break;

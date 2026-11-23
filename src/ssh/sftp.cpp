@@ -2,6 +2,7 @@
 
 #include <hand/ssh/sftp.hpp>
 #include <hand/core/proc.hpp>
+#include <hand/ssh/remote.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -14,16 +15,12 @@ namespace hand::sftp {
 
 namespace {
 
-std::string home_dir() {
-#if defined(_WIN32)
-    if (const char* u = std::getenv("USERPROFILE"); u && *u) return u;
-#endif
-    const char* h = std::getenv("HOME");
-    return h ? h : "";
-}
-
 /// Write `batch`, run sftp on it, clean up.
 proc::Result run_batch(const Host& h, const HostBook& book, const std::string& batch, int timeout_ms) {
+    // sftp runs ssh with -oControlMaster=no before our options (first value
+    // wins), so it can JOIN the host's shared connection but never start one:
+    // bring it up first (a ~30 ms check when the terminal's login already did).
+    (void)remote::warm(h, book);
     const std::string file = proc::temp_path("hand-sftp");
     {
         std::ofstream out{file, std::ios::binary};
@@ -43,21 +40,7 @@ std::string slashes(std::string p) {
 }  // namespace
 
 std::vector<std::string> argv(const Host& host, const HostBook& book, const std::string& batch_file) {
-    const Host h = effective_host(host, book);
-    std::vector<std::string> a{"sftp", "-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-b", batch_file};
-    if (h.source == HostSource::config) {
-        a.push_back(h.alias);   // ssh_config supplies the rest
-        return a;
-    }
-    if (h.port != 22) a.insert(a.end(), {"-P", std::to_string(h.port)});
-    if (!h.jump.empty()) a.insert(a.end(), {"-J", h.jump});
-    if (!h.identity.empty()) {
-        std::string id = h.identity;
-        if (id.rfind("~/", 0) == 0) id = home_dir() + id.substr(1);
-        a.insert(a.end(), {"-i", id});
-    }
-    a.push_back(h.user.empty() ? h.hostname : h.user + "@" + h.hostname);
-    return a;
+    return remote::sftp_args(host, book, batch_file);   // over the host's shared connection
 }
 
 std::string quote(std::string_view path) {
@@ -127,25 +110,8 @@ Listing parse_listing(std::string_view out) {
 }
 
 std::string explain(std::string_view err, int code) {
-    const std::string e{err};
-    const auto has = [&](const char* s) { return e.find(s) != std::string::npos; };
-    if (has("Permission denied (publickey") || has("Permission denied (") || has("keyboard-interactive"))
-        return "This host wants a password. Files need key login: add a key file to the host (or its folder), then ssh-copy-id it.";
-    if (has("Host key verification failed")) return "The host key is not trusted yet. Connect once in a tab to accept it, then try again.";
-    if (has("Could not resolve hostname")) return "The host name does not resolve. Check Host, or your VPN.";
-    if (has("timed out") || has("Connection timed out")) return "The connection timed out. Is the host up, and reachable from here?";
-    if (has("Connection refused")) return "Connection refused: nothing is listening on that port.";
-    if (has("No such file")) return "No such file or directory.";
-    if (has("subsystem request failed") || has("Connection closed")) return "The server does not offer SFTP.";
-    if (has("Couldn't canonicalize") || has("not a directory")) return "Not a directory.";
-    // otherwise the first meaningful line
-    std::istringstream in{e};
-    std::string line;
-    while (std::getline(in, line)) {
-        if (!line.empty() && line.back() == '\r') line.pop_back();
-        if (!line.empty() && line.rfind("sftp>", 0) != 0) return line;
-    }
-    return code == 127 || code < 0 ? std::string{"sftp is not installed or not on PATH."} : "sftp failed (" + std::to_string(code) + ").";
+    const std::string e = remote::explain(err, code);
+    return code == 127 || code < 0 ? std::string{"sftp is not installed or not on PATH."} : e;
 }
 
 Listing list(const Host& h, const HostBook& book, const std::string& path) {

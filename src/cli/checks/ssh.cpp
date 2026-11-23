@@ -103,6 +103,25 @@ void ssh([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& ok) {
     rt.press_key(K::enter);
     rt.tick();
     ok(!rt.model().tab().link.dropped, "enter reconnects");
+    {   // ...and by itself: a scheduled try that fails backs off, one that holds resets
+        const auto drop = [&](double up_for) {
+            rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[up_for](hand::App::Model& m) { m.tab().link.connected_at = m.time - up_for; }}});
+            rt.send(hand::App::Msg{hand::App::Exited{255, rt.model().tab().sid}});
+        };
+        drop(60.0);   // was up a minute, then dropped
+        const double first = rt.model().tab().link.retry_at - rt.model().time;
+        ok(rt.model().tab().link.dropped && first > 0.5 && first < 1.5, "a drop schedules a reconnect in about a second");
+        rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) { m.time = m.tab().link.retry_at + 0.01; }}});
+        rt.send(hand::App::Msg{hand::App::RetryTick{}});
+        ok(!rt.model().tab().link.dropped && rt.model().tab().launch.has_value() == false,
+           "when it is due, it reconnects by itself (a live terminal: a password prompt works)");
+        drop(1.0);    // that try died at once
+        const double second = rt.model().tab().link.retry_at - rt.model().time;
+        ok(rt.model().tab().link.attempts == 1 && second > 1.5 && second < 2.5, "a try that fails backs off (2 s, then 4, 8 ...)");
+        rt.press_key(K::enter);
+        rt.tick();
+        ok(!rt.model().tab().link.dropped && rt.model().tab().link.attempts == 0, "enter tries now and starts the schedule over");
+    }
     rt.send(hand::App::Msg{hand::App::Exited{0, rt.model().tab().sid}});
     for (int i = 0; i < 10; ++i) rt.tick();
     ok(rt.model().tab_count() == tabs0, "a clean logout closes the tab");
