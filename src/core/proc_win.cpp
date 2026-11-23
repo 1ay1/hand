@@ -1,8 +1,9 @@
 // hand::proc — Windows.
 
+#include <mayag/core/target.hpp>
 #include <hand/core/proc.hpp>
 
-#if defined(_WIN32)
+#if MAYAG_OS_WINDOWS
 
 #include <windows.h>
 #include <objbase.h>     // CoInitializeEx (WIN32_LEAN_AND_MEAN leaves it out)
@@ -257,12 +258,6 @@ std::string host_name() {
     if (::GetComputerNameW(buf, &n)) return narrow({buf, n});
     const char* c = std::getenv("COMPUTERNAME");
     return c ? c : "";
-}
-
-std::string temp_path(std::string_view stem) {
-    static unsigned n = 0;
-    return (std::filesystem::temp_directory_path() /
-            (std::string{stem} + "-" + std::to_string(::GetCurrentProcessId()) + "-" + std::to_string(++n) + ".txt")).string();
 }
 
 }  // namespace hand::proc

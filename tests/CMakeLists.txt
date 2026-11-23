@@ -13,6 +13,8 @@
 #   mayag_one_look               mayag's graphics are one source on every platform
 #   one_hand                     hand is one source on every platform: platform conditionals only in the
 #                                OS seam (src/core), the rest decides from data (tests/one_hand.cmake)
+#   one_os                       the OS is read in ONE file for hand, mayag and jaal
+#                                (jaal/meta/target.hpp); everything tests JAAL_OS_* / MAYAG_OS_*
 #   mayag_no_byte_hash           cache keys are values, never an object's padded bytes
 #   echo_latency                 keystroke -> pty -> echo -> frame, through the real loop (hand --echo):
 #                                fails if the median passes 8 ms (baseline ~1 ms release, ~2.3 ms dev)
@@ -58,6 +60,11 @@ add_test(NAME mayag_type_scale
 add_test(NAME one_hand
          COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR} -DALLOW=${CMAKE_SOURCE_DIR}/tests/allow_platform.txt
                  -P ${CMAKE_SOURCE_DIR}/tests/one_hand.cmake)
+add_test(NAME one_os
+         COMMAND ${CMAKE_COMMAND}
+                 "-DROOTS=${CMAKE_SOURCE_DIR}/src;${CMAKE_SOURCE_DIR}/include;${_MAYAG}/include;${_MAYAG}/third_party/jaal/include;${_MAYAG}/third_party/jaal/src"
+                 -DSOURCE=${_MAYAG}/third_party/jaal/include/jaal/meta/target.hpp
+                 -P ${_MAYAG}/third_party/jaal/tests/lint/one_os.cmake)
 set_tests_properties(layering purity concurrency_src concurrency_include_hand concurrency_allowlist_tight_src
                      concurrency_allowlist_tight_include_hand mayag_layering mayag_uses_jaal_public_api
-                     mayag_concurrency jaal_upward mayag_one_look mayag_no_byte_hash mayag_type_scale one_hand PROPERTIES LABELS "static")
+                     mayag_concurrency jaal_upward mayag_one_look mayag_no_byte_hash mayag_type_scale one_hand one_os PROPERTIES LABELS "static")

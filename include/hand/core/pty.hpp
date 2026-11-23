@@ -1,4 +1,5 @@
 #pragma once
+#include <mayag/core/target.hpp>
 // hand::Pty — a shell on a pseudo-terminal.
 //
 // Two implementations, one interface: forkpty on POSIX (src/core/pty.cpp) and
@@ -16,7 +17,7 @@
 #include <utility>
 #include <vector>
 
-#if defined(_WIN32)
+#if MAYAG_OS_WINDOWS
 // No <sys/types.h> on Windows. hand only ever stores a pid and compares it,
 // so a plain int is the honest type; on POSIX it stays the real pid_t.
 namespace hand {

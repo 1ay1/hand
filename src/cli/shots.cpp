@@ -2,6 +2,7 @@
 // `hand --bench`, `hand --flood CMD`): stage the model for one named scene,
 // render a frame, write the PNG.
 
+#include <mayag/core/target.hpp>
 #include "cli.hpp"
 
 #include "../app/detail.hpp"
@@ -34,7 +35,7 @@
 #include <hand/core/proc.hpp>
 #include <csignal>
 
-#if defined(_WIN32)
+#if MAYAG_OS_WINDOWS
 #  include <windows.h>   // --cat-v puts the console in raw mode
 #else
 #  include <termios.h>

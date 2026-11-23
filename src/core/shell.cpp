@@ -1,5 +1,6 @@
 // hand::shell_integration — the scripts, written to a private runtime dir.
 
+#include <mayag/core/target.hpp>
 #include <hand/core/shell.hpp>
 
 #include <hand/core/platform.hpp>
@@ -90,7 +91,7 @@ fi
 
 fs::path runtime_dir() {
     if (const char* x = std::getenv("XDG_RUNTIME_DIR"); x && *x) return fs::path{x} / "hand" / "shell";
-#if defined(_WIN32)
+#if MAYAG_OS_WINDOWS
     // %LOCALAPPDATA% is the per-user, non-roaming spot for generated files;
     // it survives reboots (unlike temp), which keeps the scripts stable.
     if (const char* l = std::getenv("LOCALAPPDATA"); l && *l) return fs::path{l} / "hand" / "shell";

@@ -4,6 +4,7 @@
 //   hand --emit-red   print red text and exit 7 (colour through a ConPTY)
 //   hand --cat-v      raw mode + mouse reporting, echo input in caret notation
 
+#include <mayag/core/target.hpp>
 #include "cli.hpp"
 
 #include <algorithm>
@@ -19,7 +20,7 @@
 #include <thread>
 #include <vector>
 
-#if defined(_WIN32)
+#if MAYAG_OS_WINDOWS
 #  include <windows.h>   // --cat-v puts the console in raw mode
 #else
 #  include <termios.h>
@@ -38,7 +39,7 @@ std::optional<int> fixture(int argc, char** argv) {
     // buffer rather than passing the original bytes through. This is the
     // Windows stand-in for `printf '\033[31mred\033[0m'` under /bin/sh.
     if (argc >= 2 && std::string_view{argv[1]} == "--emit-red") {
-#if defined(_WIN32)
+#if MAYAG_OS_WINDOWS
         const HANDLE hout = ::GetStdHandle(STD_OUTPUT_HANDLE);
         DWORD m = 0;
         ::GetConsoleMode(hout, &m);
@@ -56,7 +57,7 @@ std::optional<int> fixture(int argc, char** argv) {
     // not exist on Windows -- and even on Linux it made a UI test depend on
     // coreutils. hand is already on the pty, so it plays the part itself.
     if (argc >= 2 && std::string_view{argv[1]} == "--cat-v") {
-#if defined(_WIN32)
+#if MAYAG_OS_WINDOWS
         // Raw mode: no line buffering, no echo, and crucially no
         // ENABLE_PROCESSED_INPUT, so ctrl-C arrives as a byte, not a signal.
         const HANDLE hin = ::GetStdHandle(STD_INPUT_HANDLE);

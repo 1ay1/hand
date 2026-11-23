@@ -1,4 +1,5 @@
 #pragma once
+#include <mayag/core/target.hpp>
 // hand::plat — the thin OS seam.
 //
 // hand is a POSIX program at heart: a pty is an fd, you poll it, you read it.
@@ -23,7 +24,7 @@
 #include <string>
 #include <vector>
 
-#if defined(_WIN32)
+#if MAYAG_OS_WINDOWS
 // Keep the Win32 headers from redefining the language. <windows.h> brings in
 // `min`/`max` macros that break std::min, a legacy `near`/`far` memory-model
 // keyword pair that collides with ordinary variable names, and ~2 MB of
@@ -83,7 +84,7 @@ namespace hand::plat {
 /// connection with the options died with "getsockname failed: Not a socket".
 /// A capability, asked by the one place that decides (remote::control_dir).
 [[nodiscard]] constexpr bool ssh_can_share() noexcept {
-#if defined(_WIN32)
+#if MAYAG_OS_WINDOWS
     return false;
 #else
     return true;

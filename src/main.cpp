@@ -8,6 +8,7 @@
 // main only parses arguments, loads fonts and config, and picks a mode; each
 // scripted mode lives in src/cli/.
 
+#include <mayag/core/target.hpp>
 #include <hand/app.hpp>
 #include <hand/core/shell.hpp>
 #include <hand/core/pty.hpp>
@@ -35,7 +36,7 @@
 #include <hand/core/platform.hpp>
 #include <csignal>
 
-#if defined(_WIN32)
+#if MAYAG_OS_WINDOWS
 #  include <windows.h>   // --cat-v puts the console in raw mode
 #else
 #  include <termios.h>

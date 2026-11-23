@@ -17,9 +17,10 @@
 // profile; the alternative (a per-pty pump thread doing blocking ReadFile)
 // costs a thread and a copy per session.
 
+#include <mayag/core/target.hpp>
 #include <hand/core/platform.hpp>
 
-#if defined(_WIN32)
+#if MAYAG_OS_WINDOWS
 
 #include <windows.h>
 

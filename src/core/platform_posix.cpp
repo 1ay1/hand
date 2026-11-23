@@ -1,8 +1,9 @@
 // hand::plat — POSIX. Every entry point is the real primitive, unwrapped.
 
+#include <mayag/core/target.hpp>
 #include <hand/core/platform.hpp>
 
-#if !defined(_WIN32)
+#if !MAYAG_OS_WINDOWS
 
 #include <fcntl.h>
 #include <fnmatch.h>
@@ -17,7 +18,7 @@
 #include <filesystem>
 #include <system_error>
 
-#if defined(__APPLE__)
+#if MAYAG_OS_APPLE
 #  include <mach-o/dyld.h>   // _NSGetExecutablePath
 #endif
 
@@ -45,7 +46,7 @@ std::tm local_time(std::time_t t) {
 }
 
 std::string self_exe() {
-#if defined(__APPLE__)
+#if MAYAG_OS_APPLE
     std::uint32_t n = 0;
     _NSGetExecutablePath(nullptr, &n);
     std::string p(n, '\0');
@@ -63,7 +64,7 @@ std::uint64_t peak_rss() {
     rusage u{};
     if (::getrusage(RUSAGE_SELF, &u) != 0) return 0;
     // ru_maxrss is kilobytes on Linux, bytes on macOS.
-#if defined(__APPLE__)
+#if MAYAG_OS_APPLE
     return static_cast<std::uint64_t>(u.ru_maxrss);
 #else
     return static_cast<std::uint64_t>(u.ru_maxrss) * 1024u;

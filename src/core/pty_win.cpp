@@ -15,9 +15,10 @@
 // an index into it. That keeps hand/core/pty.hpp free of windows.h, which is
 // what lets the rest of the app stay POSIX-shaped.
 
+#include <mayag/core/target.hpp>
 #include <hand/core/pty.hpp>
 
-#if defined(_WIN32)
+#if MAYAG_OS_WINDOWS
 
 #include <hand/core/platform.hpp>
 

@@ -1,5 +1,6 @@
 // hand::cli::checks — a real child on a real pty, through toe.
 
+#include <mayag/core/target.hpp>
 #include "suites.hpp"
 
 #include <hand/core/platform.hpp>   // self_exe (the Windows branch)
@@ -26,7 +27,7 @@ using namespace mayag;
 void pty([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& ok) {
     // a real child on a real pty, through toe (bounded: ≤ 2 s)
     hand::Term t{40, 5, hand::palette_of(hand::Config{})};
-#if defined(_WIN32)
+#if MAYAG_OS_WINDOWS
     // Our own binary as the child: it writes the SGR from its
     // own stdout (the one path conhost passes through intact)
     // and exits 7, so this stays a test of the pty and toe
@@ -56,7 +57,7 @@ void pty([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& ok) {
         for (int i = 0; i < 40 && code < 0; ++i) { code = hand::pty_reap(pty.pid()); if (code < 0) std::this_thread::sleep_for(std::chrono::milliseconds(25)); }
         ok(code == 7, "the exit code comes back");
     }
-#if !defined(_WIN32)
+#if !MAYAG_OS_WINDOWS
     {   // hand started where SIGINT is ignored (`hand &` from a script): ignored
         // signals survive exec, so the child must be given defaults back
         struct sigaction ign{}, was{};
@@ -82,7 +83,7 @@ void pty([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& ok) {
         bool known = false;
         (void)hand::proc::tcp_listeners(&known);
         ok(known, "this OS can list listening TCP ports");
-#if !defined(_WIN32)
+#if !MAYAG_OS_WINDOWS
         const int port = 20000 + hand::self_pid() % 20000;
         const hand::Pty nc{{.cols = 40, .rows = 5, .shell = "nc", .args = {"-l", std::to_string(port)}}};
         bool seen = false;

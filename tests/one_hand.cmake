@@ -38,7 +38,7 @@ foreach(rel ${files})
     if(rel MATCHES "^src/core/" OR rel MATCHES "^include/hand/core/")
         continue()   # the OS seam
     endif()
-    file(STRINGS ${ROOT}/${rel} hits REGEX "^[ \t]*#[ \t]*(if|ifdef|ifndef|elif)[ \t].*(_WIN32|__APPLE__|__linux__|__unix__|TARGET_OS_)")
+    file(STRINGS ${ROOT}/${rel} hits REGEX "^[ \t]*#[ \t]*(if|ifdef|ifndef|elif)[ \t].*(_WIN32|__APPLE__|__linux__|__unix__|TARGET_OS_|MAYAG_OS_|JAAL_OS_)")
     list(LENGTH hits n)
     set(allowed 0)
     if(DEFINED grant_${rel})

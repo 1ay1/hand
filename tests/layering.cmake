@@ -17,6 +17,7 @@
 #                                  must not pull in the runtime that mayag.hpp brings
 #      <mayag/core/sync.hpp>       Cell / Frozen / Sendable / Sync, for core/ types
 #                                  that threads share (pty.hpp, credit.hpp)
+#      <mayag/core/target.hpp>     MAYAG_OS_*: the OS, read once for the whole stack
 #    Never mayag's internals (app/ host/ backend/ platform/ render/ scene/ ...),
 #    and never mayag::detail.
 #
@@ -36,7 +37,7 @@ set(allowed_config "core;config")
 set(allowed_ssh    "core;ssh")
 set(allowed_app    "core;config;ssh;app")
 # rule 2: the mayag headers hand may name, beyond <mayag/widget/...>
-set(mayag_public "mayag/mayag.hpp;mayag/core/event.hpp;mayag/core/sync.hpp")
+set(mayag_public "mayag/mayag.hpp;mayag/core/event.hpp;mayag/core/sync.hpp;mayag/core/target.hpp")
 
 function(layer_of file out)
     set(l app)

@@ -1,8 +1,9 @@
 // hand::Pty — forkpty + nonblocking I/O. (POSIX; see pty_win.cpp for ConPTY.)
 
+#include <mayag/core/target.hpp>
 #include <hand/core/pty.hpp>
 
-#if !defined(_WIN32)
+#if !MAYAG_OS_WINDOWS
 
 #include <cerrno>
 #include <csignal>
@@ -10,7 +11,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <poll.h>
-#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+#if MAYAG_OS_APPLE || MAYAG_OS_FREEBSD || MAYAG_OS_OPENBSD || MAYAG_OS_NETBSD
 #include <util.h>
 #else
 #include <pty.h>
@@ -19,7 +20,7 @@
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
-#if defined(__APPLE__)
+#if MAYAG_OS_APPLE
 #include <libproc.h>
 #include <sys/sysctl.h>
 #endif
@@ -163,7 +164,7 @@ pid_t pty_foreground(int fd) {
 
 std::string proc_name(pid_t pid) {
     if (pid <= 0) return {};
-#if defined(__APPLE__)
+#if MAYAG_OS_APPLE
     char name[2 * MAXCOMLEN + 1] = {};
     if (::proc_name(pid, name, sizeof name) > 0) return name;
     return {};
@@ -178,7 +179,7 @@ std::string proc_name(pid_t pid) {
 std::vector<std::string> proc_argv(pid_t pid) {
     std::vector<std::string> out;
     if (pid <= 0) return out;
-#if defined(__APPLE__)
+#if MAYAG_OS_APPLE
     // KERN_PROCARGS2: argc, the exec path, padding, then argv[0..argc)
     int mib[3] = {CTL_KERN, KERN_PROCARGS2, static_cast<int>(pid)};
     std::size_t size = 0;

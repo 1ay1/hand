@@ -1,9 +1,10 @@
 // hand::proc — POSIX (Linux, macOS).
 
+#include <mayag/core/target.hpp>
 #include <hand/core/proc.hpp>
 #include <hand/core/pty.hpp>
 
-#if !defined(_WIN32)
+#if !MAYAG_OS_WINDOWS
 
 #include <cerrno>
 #include <chrono>
@@ -19,7 +20,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#if defined(__APPLE__)
+#if MAYAG_OS_APPLE
 #  include <arpa/inet.h>   // ntohs
 #  include <libproc.h>     // proc_listpids, proc_pidinfo, proc_pidfdinfo, proc_name
 #  include <sys/proc_info.h>
@@ -87,7 +88,7 @@ std::vector<Listener> tcp_listeners(bool* ok) {
         for (const auto& l : out) if (l.port == port) return;
         out.push_back({port, pid, std::move(name)});
     };
-#if defined(__linux__)
+#if MAYAG_OS_LINUX
     if (ok) *ok = true;
     for (const char* f : {"/proc/net/tcp", "/proc/net/tcp6"}) {
         std::ifstream in{f};
@@ -103,7 +104,7 @@ std::vector<Listener> tcp_listeners(bool* ok) {
             add(static_cast<int>(std::strtol(local.c_str() + c + 1, nullptr, 16)), 0, "");
         }
     }
-#elif defined(__APPLE__)
+#elif MAYAG_OS_APPLE
     // No /proc: walk every process's sockets with libproc (what lsof does,
     // in-process). Only processes of this user answer, which is exactly the
     // set that matters -- the tunnels are this user's ssh.
@@ -170,7 +171,7 @@ std::vector<RawSession> putty_sessions(const std::string& root) {
 std::vector<std::string> pick_files(const std::string& title) {
     // The desktop's own picker: AppKit's open panel through osascript on
     // macOS, zenity / kdialog elsewhere. One path per line; cancel is none.
-#if defined(__APPLE__)
+#if MAYAG_OS_APPLE
     std::string quoted;   // an AppleScript string literal
     for (char ch : title) { if (ch == '"' || ch == '\\') quoted += '\\'; quoted += ch; }
     const std::vector<std::vector<std::string>> pickers{{
@@ -204,7 +205,7 @@ std::string downloads_dir() {
 }
 
 void reveal(const std::string& path) {
-#if defined(__APPLE__)
+#if MAYAG_OS_APPLE
     (void)run({"open", "-R", path}, {}, 5000);
 #else
     (void)run({"xdg-open", std::filesystem::path{path}.parent_path().string()}, {}, 5000);
@@ -212,7 +213,7 @@ void reveal(const std::string& path) {
 }
 
 void open_path(const std::string& path) {
-#if defined(__APPLE__)
+#if MAYAG_OS_APPLE
     (void)run({"open", path}, {}, 5000);
 #else
     (void)run({"xdg-open", path}, {}, 5000);
@@ -220,7 +221,7 @@ void open_path(const std::string& path) {
 }
 
 void open_url(const std::string& url) {
-#if defined(__APPLE__)
+#if MAYAG_OS_APPLE
     spawn_detached({"open", url});
 #else
     spawn_detached({"xdg-open", url});
@@ -231,12 +232,6 @@ std::string host_name() {
     char b[256] = {};
     if (::gethostname(b, sizeof b - 1) != 0) return {};
     return b;
-}
-
-std::string temp_path(std::string_view stem) {
-    static unsigned n = 0;
-    return (std::filesystem::temp_directory_path() /
-            (std::string{stem} + "-" + std::to_string(::getpid()) + "-" + std::to_string(++n) + ".txt")).string();
 }
 
 }  // namespace hand::proc
