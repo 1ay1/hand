@@ -80,6 +80,7 @@ struct Model {
     DialogModel             dialog;               ///< the one open question
     SshModel                ssh;                  ///< ctrl+shift+s picker, ctrl+shift+h manager
     PaneModel               pane;                 ///< ctrl+shift+e
+    QuickOpenModel          quick;                ///< ⌘P / ctrl+P: the project's files
 
     /// The tab in front: what the keyboard, the mouse and the view act on.
     [[nodiscard]] Session& tab() noexcept { return tabs.active(); }

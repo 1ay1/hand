@@ -74,6 +74,14 @@ App::Cmd App::update(Model& m, OpenFile o) {
 App::Cmd App::update(Model& m, FileLoaded l) {
     FileDoc* d = doc_of(m, l.sid);
     if (d == nullptr) return {};   // closed while it was read
+    if (l.reload) {   // the file changed on disk, or "reload from disk"
+        if (!l.error.empty()) return {};
+        d->disk_mtime = l.mtime;
+        text_editor_ops::disk_text(d->st, l.text);
+        m.toast.card = Toast{.title = "reloaded", .body = name_of(d->path) + " changed on disk", .kind = Toast::Kind::info};
+        m.toast.at = m.time;
+        return {};
+    }
     d->loading = false;
     if (l.binary) {
         // not text: its own app opens it (Preview, an image viewer), and the
@@ -89,6 +97,7 @@ App::Cmd App::update(Model& m, FileLoaded l) {
         return {};
     }
     d->st = text_editor_ops::open(l.text, l.path);
+    d->disk_mtime = l.mtime;
     return {};
 }
 
@@ -118,6 +127,9 @@ App::Cmd App::editor_actions(Model& m) {
                 cmds.push_back(ReadClipboard<Msg>{[sid](std::string s) -> Msg { return EditorPasted{sid, std::move(s)}; }});
                 break;
             }
+            case TextEditorAction::Kind::reload:
+                if (!m.cfg.demo) cmds.push_back(Cmd::task(fx::reread_file, se.sid, se.file->path));
+                break;
         }
     }
     return Cmd::batch(std::move(cmds));
@@ -148,6 +160,8 @@ App::Cmd App::update(Model& m, FileSaved s) {
         return {};
     }
     text_editor_ops::saved(d->st, s.point);
+    d->disk_mtime = s.mtime;   // our own write: not an outside change
+    d->st.disk_changed = false;
     if (d->close_after_save && !d->st.ed.dirty()) {
         d->close_after_save = false;
         if (const auto i = m.tabs.find(s.sid)) return update(m, CloseTab{TabIndex{*i}, Confirm::given});
@@ -161,5 +175,105 @@ App::Cmd App::update(Model& m, EditorPasted p) {
     text_editor_ops::paste(d->st, p.text);
     return {};
 }
+
+// ── the file on disk ───────────────────────────────────────────────────────
+
+App::Cmd App::update(Model& m, FileWatch) {
+    const Session& se = m.tab();
+    if (!se.file || se.file->loading || !se.file->error.empty() || se.file->saving || m.cfg.demo) return {};
+    return Cmd::task(fx::stat_file, se.sid, se.file->path);
+}
+
+App::Cmd App::update(Model& m, FileStat s) {
+    FileDoc* d = doc_of(m, s.sid);
+    if (d == nullptr || d->saving || s.mtime == 0 || s.mtime == d->disk_mtime) return {};
+    // changed by someone else. Unedited: just take it. Edited: say so and
+    // keep the edits until the user chooses (the banner's "reload").
+    if (!d->st.ed.dirty()) return Cmd::task(fx::reread_file, s.sid, d->path);
+    d->disk_mtime = s.mtime;   // asked once per change, not every poll
+    d->st.disk_changed = true;
+    return {};
+}
+
+// ── ⌘P: the project's files ────────────────────────────────────────────────
+
+namespace {
+/// The files, ranked against the query: (index into files, hits). An empty
+/// query keeps git's order.
+std::vector<std::pair<int, FuzzyMatch>> quick_ranked(const Model& m) {
+    std::vector<std::pair<int, FuzzyMatch>> out;
+    const auto& q = m.quick.q.text;
+    for (std::size_t i = 0; i < m.quick.files.size(); ++i) {
+        auto fm = fuzzy_match(q, m.quick.files[i]);
+        if (!fm.ok) continue;
+        // the file NAME matching counts more than its folders
+        const auto& f = m.quick.files[i];
+        const auto slash = f.find_last_of('/');
+        const std::size_t name_at = slash == std::string::npos ? 0 : slash + 1;
+        int bonus = 0;
+        for (auto p : fm.positions) bonus += p >= name_at ? 2 : 0;
+        fm.score += bonus - static_cast<int>(f.size() / 16);   // shorter paths win ties
+        out.emplace_back(static_cast<int>(i), std::move(fm));
+        if (out.size() > 4000) break;
+    }
+    if (!q.empty()) std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) { return a.second.score > b.second.score; });
+    if (out.size() > 200) out.resize(200);
+    return out;
+}
+/// Where ⌘P starts: the front tab's folder (list_project climbs to its repo's top).
+std::string quick_root(const Model& m) {
+    const Session& se = m.tab();
+    std::string dir = se.file ? se.file->path.substr(0, se.file->path.find_last_of('/')) : se.term ? se.term->cwd() : std::string{};
+    if (dir.empty()) dir = m.env.cwd;
+    return dir;
+}
+}  // namespace
+
+App::Cmd App::update(Model& m, QuickOpen) {
+    if (m.quick.open) { m.quick.open = false; return {}; }
+    m.quick.open = true;
+    m.quick.q.set({});
+    m.quick.sel = 0;
+    const std::string root = quick_root(m);
+    if (!m.quick.files.empty() && (root == m.quick.root || root.rfind(m.quick.root + "/", 0) == 0)) return {};   // still inside the listed project
+    m.quick.loading = true;
+    m.quick.files.clear();
+    if (m.cfg.demo) return {};
+    return Cmd::task(fx::list_project, root);
+}
+
+App::Cmd App::update(Model& m, QuickListed l) {
+    m.quick.loading = false;
+    m.quick.root = l.root;   // the repo's top when it is one: paths are relative to it
+    m.quick.files = std::move(l.files);
+    m.quick.truncated = l.truncated;
+    return {};
+}
+
+App::Cmd App::update(Model& m, QuickKey k) {
+    if (!m.quick.open) return {};
+    const int n = static_cast<int>(quick_ranked(m).size());
+    const auto in = picker_key(m.quick.q, k.key, k.mods, m.quick.sel, n);
+    if (in.act == PickerIntent::Act::close) { m.quick.open = false; return {}; }
+    if (in.act == PickerIntent::Act::choose) return update(m, QuickPick{in.index});
+    return {};
+}
+
+App::Cmd App::update(Model& m, QuickText t) {
+    if (!m.quick.open) return {};
+    m.quick.q.insert(t.text);
+    m.quick.sel = 0;
+    return {};
+}
+
+App::Cmd App::update(Model& m, QuickPick p) {
+    const auto r = quick_ranked(m);
+    m.quick.open = false;
+    if (p.index < 0 || p.index >= static_cast<int>(r.size())) return {};
+    const std::string& rel = m.quick.files[static_cast<std::size_t>(r[static_cast<std::size_t>(p.index)].first)];
+    return update(m, OpenFile{m.quick.root + "/" + rel});
+}
+
+std::vector<std::pair<int, FuzzyMatch>> quick_open_ranked(const Model& m) { return quick_ranked(m); }
 
 }  // namespace hand

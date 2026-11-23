@@ -68,6 +68,18 @@ struct FileDoc {
     std::string                    save_error;    ///< the last save failed: why (the text is still here)
     std::optional<std::uint64_t>   saving;        ///< a write of this save point is in flight
     bool                           close_after_save = false;   ///< "save" in the close dialog
+    std::int64_t                   disk_mtime = 0; ///< the file's mtime when last read or written (watching for outside edits)
+};
+
+/// ⌘P: every file of the project, fuzzy-found.
+struct QuickOpenModel {
+    bool                     open = false;
+    bool                     loading = false;
+    mayag::TextEditState     q;
+    int                      sel = 0;
+    std::string              root;              ///< absolute; files are relative to it
+    std::vector<std::string> files;
+    bool                     truncated = false; ///< the project has more than the list holds
 };
 
 /// One tab: a shell on a pty, the screen toe keeps for it, and everything

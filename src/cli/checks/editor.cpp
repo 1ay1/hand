@@ -11,6 +11,8 @@
 
 #include <hand/app.hpp>
 
+#include "../../app/detail.hpp"   // quick_open_ranked
+
 #include <string>
 
 namespace hand::cli::checks {
@@ -67,6 +69,21 @@ void editor(Runtime& rt, Vec2, Check& ok) {
     rt.press_key(Key::escape);
     ok(!d().st.find_open, "escape closes find");
 
+    // completion through the real input: a prefix of a word the file uses
+    rt.press_key(Key::end);
+    rt.press_key(Key::enter);
+    rt.window().type("ret");
+    rt.tick();
+    ok(d().st.comp_open && !d().st.comp.empty() && d().st.comp[0].word == "return", "typing offers the file's words, best first");
+    rt.press_key(Key::tab);
+    ok(!d().st.comp_open && d().st.ed.line(d().st.ed.cursor().line).find("return") != std::string::npos, "tab takes the completion");
+    rt.press_key(Key::z, primary());   // undo it, and the newline
+    rt.press_key(Key::z, primary());
+
+    // someone else changed the file: edited here, so the editor asks
+    rt.send(App::Msg{App::FileStat{sid, 777}});
+    ok(d().st.disk_changed, "an outside change to an edited file is announced, the edits kept");
+
     // the window keeps its chords: ctrl+tab goes back to the shell and returns
     rt.press_key(Key::tab, Mods{.shift = true, .ctrl = true});
     ok(!rt.model().tab().file, "ctrl+shift+tab still switches tabs from an editor");
@@ -100,6 +117,18 @@ void editor(Runtime& rt, Vec2, Check& ok) {
         for (int i = 0; i < 4; ++i) rt.tick();
         ok(rt.model().tab_count() == tabs0, "\"save\" in the dialog saves, then closes the tab");
     }
+
+    // ⌘P: the project's files, fuzzy-found, from any tab
+    rt.press_key(Key::p, primary());
+    ok(rt.model().quick.open, "the quick-open key opens the file finder");
+    rt.send(App::Msg{App::QuickListed{"/tmp/hand-selftest", {"src/app/editor.cpp", "src/app/pane.cpp", "README.md"}, false}});
+    rt.window().type("pane");
+    rt.tick();
+    ok(!quick_open_ranked(rt.model()).empty() &&
+           rt.model().quick.files[static_cast<std::size_t>(quick_open_ranked(rt.model())[0].first)] == "src/app/pane.cpp",
+       "...and finds the file by name");
+    rt.press_key(Key::escape);
+    ok(!rt.model().quick.open, "escape closes it");
 
     // a binary is not a tab: it goes to its app and the waiting tab closes
     rt.send(App::Msg{App::OpenFile{"/tmp/hand-selftest/logo.png"}});

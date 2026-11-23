@@ -74,6 +74,13 @@ void preview_local(Sink out, std::string path, int lines);
 // ── files in editor tabs (src/app/fx/files.cpp) ────────────────────────────
 /// Read a file for the editor (refuses binaries and anything over 32 MB).
 void read_file(Sink out, SessionId sid, std::string path);
+/// The same, for an open file that changed on disk (or "reload").
+void reread_file(Sink out, SessionId sid, std::string path);
+/// The file's mtime now (0: gone), as FileStat.
+void stat_file(Sink out, SessionId sid, std::string path);
+/// Every file under `root` worth opening (git's list when it is a repo:
+/// ignored files stay out; else a bounded walk skipping build trees).
+void list_project(Sink out, std::string root);
 /// Write `text` to `path` atomically (a sibling temp file, renamed over it,
 /// keeping the file's permissions), then FileSaved{sid, point}.
 void write_file(Sink out, SessionId sid, std::string path, std::string text, std::uint64_t point);

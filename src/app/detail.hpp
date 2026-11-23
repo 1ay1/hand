@@ -95,3 +95,8 @@ std::optional<App::Msg> send(std::string bytes);
 mayag::dsl::FilePaneProps pane_props(const Model& m);
 
 }  // namespace hand::detail
+
+namespace hand {
+/// ⌘P's list ranked against its query (src/app/editor.cpp): (file index, hits).
+std::vector<std::pair<int, mayag::dsl::FuzzyMatch>> quick_open_ranked(const Model& m);
+}  // namespace hand

@@ -31,6 +31,7 @@
 #include <string>
 #include <string_view>
 #include <hand/core/platform.hpp>
+#include <hand/core/proc.hpp>
 #include <csignal>
 
 #if defined(_WIN32)
@@ -378,7 +379,8 @@ if (shot.rfind("files", 0) == 0) {   // the file pane beside a shell in this rep
         }
     }
 }
-if (shot == "editor" || shot == "editor-find" || shot == "editor-deep") {   // a file from the pane, open in the editor
+if (shot == "editor" || shot == "editor-find" || shot == "editor-deep" || shot == "editor-complete" || shot == "editor-symbols" ||
+    shot == "editor-changed" || shot == "quick-open") {   // a file from the pane, open in the editor
     std::error_code ec;
     const std::string here = std::filesystem::current_path(ec).generic_string();
     const std::string path = here + (shot == "editor-deep" ? "/external/mayag/include/mayag/widget/text_editor.hpp" : "/src/app/editor.cpp");
@@ -400,6 +402,27 @@ if (shot == "editor" || shot == "editor-find" || shot == "editor-deep") {   // a
         rt.press_key(mayag::Key::f, mayag::Mods{.ctrl = true});
 #endif
         rt.type("Model");
+    }
+#if defined(__APPLE__)
+    const mayag::Mods prim{.super = true};
+#else
+    const mayag::Mods prim{.ctrl = true};
+#endif
+    if (shot == "editor-complete") {   // completion at the caret
+        rt.press_key(mayag::Key::enter, {});
+        rt.type("    up");
+    }
+    if (shot == "editor-symbols") rt.press_key(mayag::Key::o, mayag::Mods{.shift = true, .ctrl = prim.ctrl, .super = prim.super});
+    if (shot == "editor-changed") rt.send(hand::App::Msg{hand::App::FileStat{rt.model().tab().sid, 1}});
+    if (shot == "quick-open") {
+        rt.press_key(mayag::Key::p, prim);
+        { // the demo never lists (no task): list this repo the way fx::list_project does
+            const auto g = hand::proc::run({"git", "-C", here, "ls-files"}, {}, 4000);
+            std::vector<std::string> files; std::string l;
+            for (char ch : g.out) { if (ch == '\n') { if (!l.empty()) files.push_back(l); l.clear(); } else l += ch; }
+            rt.send(hand::App::Msg{hand::App::QuickListed{here, std::move(files), false}});
+        }
+        rt.type("edit");
     }
     for (int i = 0; i < 60; ++i) { rt.settle([](const auto&) { return false; }, std::chrono::milliseconds(10)); rt.tick(); }   // the tab switch settles
     rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) { m.strip.t = 1.0f; m.strip.switch_t = 1.0f; hand::App::fit(m); }}});

@@ -33,6 +33,9 @@ std::optional<App::Msg> App::on(const Model& m, const FocusEvent& f) {
 
 std::optional<App::Msg> App::on(const Model& m, const Left& l) {
     if (m.ssh.picker.open && l.node == part_id("hosts", part_menu)) return PickerClose{};
+    if (m.quick.open && l.node == part_id("quick", part_menu)) return QuickOpen{};   // a click outside: close
+    if (m.tab().file)
+        if (auto op = text_editor_clicked(m.tab().file->st, "doc", l.node)) return EditorOp{std::move(*op)};
     if (m.settings.open)
         if (auto op = settings_panel_left(m.settings.ui, "settings", l.node)) return Panel{std::move(*op)};
     return std::nullopt;
@@ -69,6 +72,13 @@ std::optional<App::Msg> App::on(const Model& m, const Clicked& c) {
             if (c.node == part_id("hosts", k)) return ConnectHost{m.ssh.book.hosts[static_cast<std::size_t>(ranked[k])]};
     }
     if (c.node == node_id("ssh.reconnect")) return Reconnect{};
+    if (m.quick.open) {   // ⌘P's rows (an overlay: outside every widget's handlers)
+        const std::size_t n = std::min<std::size_t>(quick_open_ranked(m).size(), 200);
+        for (std::size_t k = 0; k < n; ++k)
+            if (c.node == part_id("quick", k)) return QuickPick{static_cast<int>(k)};
+    }
+    if (m.tab().file)
+        if (auto op = text_editor_clicked(m.tab().file->st, "doc", c.node)) return EditorOp{std::move(*op)};
     if (c.node == node_id("ssh.close")) return CloseTab{TabIndex{m.active()}, Confirm::given};
     for (std::size_t i = 0; i < m.tab_count(); ++i) {
         if (c.node == part_id("tabs", tab_part_close + i)) return CloseTab{TabIndex{i}};

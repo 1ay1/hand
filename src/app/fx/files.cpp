@@ -42,6 +42,14 @@ std::int64_t unix_of(fs::file_time_type t) {
         std::chrono::time_point_cast<std::chrono::system_clock::duration>(sys)));
 }
 
+/// A file's modification time in the filesystem's own ticks (nanoseconds on
+/// APFS / ext4): two saves in the same second still differ. 0: no such file.
+std::int64_t mtime_ticks(const std::string& path) {
+    std::error_code ec;
+    const auto t = fs::last_write_time(path, ec);
+    return ec ? 0 : static_cast<std::int64_t>(t.time_since_epoch().count());
+}
+
 std::string when_of(std::int64_t epoch_s) {   // not `unix`: a predefined macro in GNU mode
     const std::time_t tt = static_cast<std::time_t>(epoch_s);
     std::tm tm{};
@@ -205,6 +213,7 @@ void preview_local(Sink out, std::string path, int lines) {
 void read_file(Sink out, SessionId sid, std::string path) {
     App::FileLoaded r{.sid = sid, .path = path};
     std::error_code ec;
+    r.mtime = mtime_ticks(path);
     const auto size = fs::file_size(path, ec);
     if (ec) { r.error = ec.message(); out.send(App::Msg{std::move(r)}); return; }
     if (size > 32u * 1024u * 1024u) {   // the editor holds the whole file: past this it is a log, not a source
@@ -242,6 +251,60 @@ void write_file(Sink out, SessionId sid, std::string path, std::string text, std
     if (existed) fs::permissions(tmp, perms, ec);   // an executable script stays executable
     fs::rename(tmp, target, ec);
     if (ec) { r.error = ec.message(); fs::remove(tmp, ec); }
+    r.mtime = mtime_ticks(path);   // what "unchanged since we wrote it" looks like
+    out.send(App::Msg{std::move(r)});
+}
+
+void reread_file(Sink out, SessionId sid, std::string path) {
+    // the same read, marked as a reload
+    std::error_code ec;
+    App::FileLoaded r{.sid = sid, .path = path, .reload = true};
+    r.mtime = mtime_ticks(path);
+    const auto size = fs::file_size(path, ec);
+    if (ec || size > 32u * 1024u * 1024u) { r.error = ec ? ec.message() : "too large"; out.send(App::Msg{std::move(r)}); return; }
+    std::ifstream f(path, std::ios::binary);
+    r.text.resize(static_cast<std::size_t>(size));
+    f.read(r.text.data(), static_cast<std::streamsize>(size));
+    r.text.resize(static_cast<std::size_t>(f.gcount()));
+    out.send(App::Msg{std::move(r)});
+}
+
+void stat_file(Sink out, SessionId sid, std::string path) {
+    out.send(App::Msg{App::FileStat{sid, mtime_ticks(path)}});
+}
+
+void list_project(Sink out, std::string root) {
+    App::QuickListed r{.root = root};
+    constexpr std::size_t kMax = 50000;
+    // a git repo: list from its top (⌘P in src/app still finds README.md),
+    // and git knows exactly which files are the project's
+    const auto top = proc::run({"git", "-C", root, "rev-parse", "--show-toplevel"}, {}, 1500);
+    if (top.started && top.code == 0) {
+        std::string t = top.out;
+        while (!t.empty() && (t.back() == '\n' || t.back() == '\r')) t.pop_back();
+        if (!t.empty()) { root = t; r.root = t; }
+    }
+    const auto g = proc::run({"git", "-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard"}, {}, 4000);
+    if (g.started && g.code == 0) {
+        std::size_t a = 0;
+        for (std::size_t i = 0; i < g.out.size(); ++i)
+            if (g.out[i] == '\0') { if (i > a) r.files.emplace_back(g.out.substr(a, i - a)); a = i + 1; if (r.files.size() >= kMax) break; }
+    } else {   // not a repo: walk, skipping what is never source
+        std::error_code ec;
+        fs::recursive_directory_iterator it{root, fs::directory_options::skip_permission_denied, ec}, end;
+        for (; !ec && it != end && r.files.size() < kMax; it.increment(ec)) {
+            const std::string name = it->path().filename().string();
+            std::error_code e2;
+            if (it->is_directory(e2)) {
+                if (name.empty() || name[0] == '.' || name == "node_modules" || name == "build" || name == "target" ||
+                    name == "dist" || name == "__pycache__" || name.rfind("build-", 0) == 0)
+                    it.disable_recursion_pending();
+                continue;
+            }
+            if (it->is_regular_file(e2)) r.files.push_back(fs::relative(it->path(), root, e2).generic_string());
+        }
+    }
+    r.truncated = r.files.size() >= kMax;
     out.send(App::Msg{std::move(r)});
 }
 

@@ -35,6 +35,9 @@ App::Sub App::subscribe(const Model& m) {
     if (m.ssh.manager.open) s.push_back(Sub::every(std::chrono::milliseconds(900), Msg{TunnelProbe{}}));
     // the file pane: re-read its folder (new and changed files glow), and follow `ssh` started in a tab
     if (m.pane.open && m.cfg.files_watch) s.push_back(Sub::every(std::chrono::milliseconds(m.pane.where.empty() ? 1500 : 5000), Msg{PaneWatch{}}));
+    // the file in front: did someone else change it? (a formatter, git checkout, another editor)
+    if (m.tab().file && !m.tab().file->loading && m.tab().file->error.empty())
+        s.push_back(Sub::every(std::chrono::milliseconds(1500), Msg{FileWatch{}}));
     if (m.pane.open && m.tab_count() < 2) s.push_back(Sub::every(std::chrono::milliseconds(1000), Msg{Second{}}));
     if (m.focused && m.cfg.cursor_blink)
         s.push_back(Sub::every(std::chrono::milliseconds(static_cast<int>(m.cfg.blink_ms)), Msg{Blink{}}));

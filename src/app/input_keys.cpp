@@ -87,6 +87,22 @@ static std::optional<KeyEvent> mac_chord(const KeyEvent& k) {
 
 std::optional<App::Msg> App::on(const Model& m, const KeyEvent& k_in) {
     const Session& se = m.tab();
+    // ⌘P (ctrl+P off the Mac): quick open, from any tab. While it is open it
+    // has the keyboard -- arrows move, enter opens, esc closes, keys edit.
+    if (!m.settings.open && !m.ssh.picker.open && !m.ssh.manager.open && !m.dialog.ask) {
+        const Mods q = k_in.mods;
+        const bool quick_chord = k_in.key == Key::p && !q.alt && !q.shift &&
+#if defined(__APPLE__)
+                                 q.super && !q.ctrl;
+#else
+                                 q.ctrl && !q.super && se.file.has_value();   // in a shell, ctrl+P is the shell's (history)
+#endif
+        if (quick_chord) return QuickOpen{};
+        if (m.quick.open) {
+            if (k_in.key == Key::ctrl || k_in.key == Key::shift || k_in.key == Key::alt || k_in.key == Key::super) return std::nullopt;
+            return QuickKey{k_in.key, k_in.mods};
+        }
+    }
     if (se.file && !m.settings.open && !m.ssh.picker.open && !m.ssh.manager.open && !m.dialog.ask &&
         !(m.pane.open && m.pane.ui.focused))
         if (auto msg = editor_key(m, k_in)) return msg;
@@ -226,6 +242,7 @@ std::optional<App::Msg> App::on(const Model& m, const TextEvent& t) {
     if (m.ssh.picker.open)
         return PickerText{t.text};
     if (m.dialog.ask.has_value()) return Swallow{};
+    if (m.quick.open) return QuickText{t.text};
     if (m.pane.open && m.pane.ui.focused) {   // the pane reads keys; text only while filtering
         if (auto op = file_pane_text(m.pane.ui, t.text)) return PaneOp{std::move(*op)};
         return Swallow{};
