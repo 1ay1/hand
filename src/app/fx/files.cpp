@@ -164,6 +164,7 @@ std::optional<FilePreview> read_preview(const std::string& path, int max_lines) 
             pv.lines.push_back(dir ? name + "/" : name);
         }
         pv.note = n == 1 ? "1 item" : std::to_string(n) + " items";
+        pv.listing = true;
         return pv;
     }
     std::ifstream f(fp, std::ios::binary);

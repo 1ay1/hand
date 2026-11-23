@@ -72,7 +72,8 @@ TermTabInfo tab_info(const Model& m, std::size_t i) {
     ti.process = proc;
     if (const auto& r = remote_of(se)) {   // a remote tab: named for the machine, its second line the address
         if (se.name.empty() && m.cfg.tab_title != TabTitle::shell) ti.title = r->alias;
-        ti.host = se.link.dropped ? "disconnected" : (r->user.empty() ? "" : r->user + "@") + r->hostname;
+        const bool retrying = se.link.dropped && se.link.retry_at >= 0.0;
+        ti.host = retrying ? "reconnecting" : se.link.dropped ? "disconnected" : (r->user.empty() ? "" : r->user + "@") + r->hostname;
         ti.host_danger = se.link.dropped || (m.cfg.ssh_prod_guard && remote_env(m, *r) == HostEnv::prod);
         if (se.link.launched) ti.process = "ssh";
     }
@@ -88,6 +89,7 @@ TermTabInfo tab_info(const Model& m, std::size_t i) {
             ti.elapsed = static_cast<double>(m.wall_ms - last->start_ms) / 1000.0;
         }
     }
+    if (const auto& r = remote_of(se); r && se.link.dropped && se.link.retry_at >= 0.0) ti.running = true;   // reconnecting: the ring turns
     return ti;
 }
 
