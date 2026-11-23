@@ -465,6 +465,7 @@ App::Cmd App::update(Model& m, Tick t) {
     Session& se = m.tab();
     m.time += t.dt;
     const float mdt = static_cast<float>(t.dt) * m.cfg.motion_speed;   // the motion clock
+    if (se.file && !se.file->loading) (void)text_editor_ops::step(se.file->st, mdt, m.cfg.motion);
     if (se.selecting && se.sel_edge != 0.0f) {   // drag-select past an edge: history scrolls under the pointer
         scroll_by(m, se.sel_edge * static_cast<float>(t.dt));
         const int col = cell_of(se.sel_pos.x + m.metrics.cell_w * 0.5f, m.metrics.origin_x, m.metrics.cell_w, se.term->cols() + 1);

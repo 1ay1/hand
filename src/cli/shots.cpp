@@ -378,10 +378,10 @@ if (shot.rfind("files", 0) == 0) {   // the file pane beside a shell in this rep
         }
     }
 }
-if (shot == "editor" || shot == "editor-find") {   // a file from the pane, open in the editor
+if (shot == "editor" || shot == "editor-find" || shot == "editor-deep") {   // a file from the pane, open in the editor
     std::error_code ec;
     const std::string here = std::filesystem::current_path(ec).generic_string();
-    const std::string path = here + "/src/app/editor.cpp";
+    const std::string path = here + (shot == "editor-deep" ? "/external/mayag/include/mayag/widget/text_editor.hpp" : "/src/app/editor.cpp");
     std::ifstream f(path, std::ios::binary);
     std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     rt.send(hand::App::Msg{hand::App::Output{"\x1b]7;file://localhost" + here + "/src/app\a"}});
@@ -390,6 +390,7 @@ if (shot == "editor" || shot == "editor-find") {   // a file from the pane, open
     rt.send(hand::App::Msg{hand::App::OpenFile{path}});
     rt.send(hand::App::Msg{hand::App::FileLoaded{rt.model().tab().sid, path, std::move(text), "", false}});
     for (int i = 0; i < 30; ++i) rt.press_key(mayag::Key::down, {});   // into the code, the caret in an update()
+    if (shot == "editor-deep") for (int i = 0; i < 230; ++i) rt.press_key(mayag::Key::down, {});   // deep inside text_editor_ops::key
     rt.press_key(mayag::Key::end, {});
     rt.type("  // edited");
     if (shot == "editor-find") {

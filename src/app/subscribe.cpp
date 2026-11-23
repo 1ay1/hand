@@ -47,7 +47,8 @@ App::Sub App::subscribe(const Model& m) {
                          !motion::tail_settled(m.tab().fx, m.cfg.cursor_anim == CursorAnim::smear ? static_cast<float>(cur.col) : m.tab().cur_x,
                                                m.cfg.cursor_anim == CursorAnim::smear ? static_cast<float>(cur.row) : m.tab().cur_y);
     const bool strip_goal = m.cfg.strip_always() || m.tab_count() > 1;
-    const bool animating = (m.pane.open && pane_glowing(m)) || gliding || breathing || tailing || m.tab().fx.busy() || m.dialog.ask.has_value() || m.dialog.t > 0.0f || m.time - m.tab().copy_flash_at < 0.5 || m.strip.motion.animating() ||
+    const bool editing = m.tab().file && !m.tab().file->loading && text_editor_ops::animating(m.tab().file->st);   // the caret glides, a jump slides
+    const bool animating = editing || (m.pane.open && pane_glowing(m)) || gliding || breathing || tailing || m.tab().fx.busy() || m.dialog.ask.has_value() || m.dialog.t > 0.0f || m.time - m.tab().copy_flash_at < 0.5 || m.strip.motion.animating() ||
                            m.strip.t != (strip_goal ? 1.0f : 0.0f) || m.strip.switch_t < 1.0f || m.strip.drag_tab >= 0 || m.strip.show_numbers || m.tab().scroll_d != m.tab().scroll_goal || m.tab().out_shift != 0.0f ||
                            (m.tab().bell_at >= 0.0 && m.time - m.tab().bell_at < 0.45) ||
                            (m.cfg.blink_style == BlinkStyle::fade && m.tab().cur_a != (m.cursor_on || !m.focused || !m.cfg.cursor_blink ? 1.0f : 0.0f)) ||

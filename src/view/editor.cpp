@@ -41,6 +41,7 @@ Node editor(const Ctx& c, const Model& m) {
     props.theme = th;
     props.focused = m.focused && !(m.pane.open && m.pane.ui.focused) && !m.settings.open && !m.dialog.ask;
     props.cursor_on = m.cursor_on;
+    props.motion = m.cfg.motion;
     props.saving = d.saving.has_value();
     props.error = d.save_error;
     return (node(text_editor(c, "doc", d.st, props, [](TextEditorOp op) -> App::Msg { return App::EditorOp{std::move(op)}; }))

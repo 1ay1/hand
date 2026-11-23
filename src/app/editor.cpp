@@ -96,6 +96,7 @@ App::Cmd App::update(Model& m, EditorOp e) {
     Session& se = m.tab();
     if (!se.file || se.file->loading || !se.file->error.empty()) return {};
     e.op(se.file->st);
+    if (!m.cfg.motion) (void)text_editor_ops::step(se.file->st, 0.0, false);   // no motion: everything snaps
     m.cursor_on = true;   // a keystroke shows the caret, as in the terminal
     return editor_actions(m);
 }
