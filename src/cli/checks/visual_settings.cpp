@@ -49,6 +49,34 @@ void visual_settings([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, C
     const auto quiet = px_at(bx, by);
     ok(quiet == lit, "and stays dark with it off");
     rt.send(hand::App::Msg{E{[](hand::App::Model& m) { m.cfg.visual_bell = true; }}});
+
+    {   // colors.min_contrast: a pale yellow on white is lifted to readable,
+        // keeping its hue; off, the pixels are the program's own
+        const auto darkest = [&]() {   // the darkest pixel in the window's top half (the one text row)
+            rt.tick();
+            const auto px = rt.window().read_pixels();
+            const int W = static_cast<int>(rt.window().size().x * rt.window().dpi_scale());
+            const int H = static_cast<int>(rt.window().size().y * rt.window().dpi_scale());
+            int best = 255 * 3;
+            for (int y = 0; y < H / 2; ++y)
+                for (int x = 8; x < W / 2; ++x) {
+                    const auto i = (static_cast<std::size_t>(y) * static_cast<std::size_t>(W) + static_cast<std::size_t>(x)) * 4;
+                    best = std::min(best, px[i] + px[i + 1] + px[i + 2]);
+                }
+            return best;
+        };
+        rt.send(hand::App::Msg{E{[](hand::App::Model& m) {
+            m.palette.bg = 0xFAFAFA; m.palette.fg = 0x383A42; m.cursor_on = false; m.tab().cur_a = 0.0f; }}});
+        rt.send(hand::App::Msg{hand::App::Output{std::string{"\x1b[2J\x1b[H\x1b[38;2;240;220;130mMMMMMMMMMMMMMMMMMMMM\x1b[0m"}}});
+        const int off = darkest();
+        rt.send(hand::App::Msg{E{[](hand::App::Model& m) { m.cfg.min_contrast = 4.5f; }}});
+        const int on = darkest();
+        std::printf("    min_contrast: darkest text pixel off=%d  4.5:1=%d (of 765)\n", off, on);
+        ok(on < off - 150, "colors.min_contrast darkens pale text on a light background");
+        rt.send(hand::App::Msg{E{[](hand::App::Model& m) { m.cfg.min_contrast = 1.0f; }}});
+        ok(darkest() == off, "...and off, the program's colour is drawn exactly");
+        rt.send(hand::App::Msg{E{[](hand::App::Model& m) { m.palette = hand::palette_of(m.cfg); }}});
+    }
 }
 
 }  // namespace hand::cli::checks

@@ -57,7 +57,7 @@ const TermGrid& snapshot(const Model& m, bool above) {
 TermTheme term_theme(const Model& m) {
     const Palette& p = m.palette;
     TermTheme th{.fg = p.fg, .bg = p.bg, .cursor = p.cursor, .cursor_text = p.bg, .selection_bg = p.selection,
-                 .bold_brighten = m.cfg.bold_is_bright ? 0.22f : 0.0f};
+                 .bold_brighten = m.cfg.bold_is_bright ? 0.22f : 0.0f, .min_contrast = m.cfg.min_contrast};
     th.mark_prompt = p.ansi[8]; th.mark_ok = p.ansi[2]; th.mark_error = p.ansi[1]; th.mark_running = p.ansi[4];
     th.match_bg = p.selection; th.hint_bg = p.ansi[3]; th.hint_fg = p.bg; th.link = p.ansi[6];
     return th;

@@ -67,6 +67,7 @@ struct Config {
     // colors
     int   scheme = -1;              ///< index into the catalogue; -1 = default (One Dark)
     bool  bold_is_bright = true;
+    float min_contrast = 1.0f;      ///< every glyph at least this contrast on its background (1 = the scheme as is)
     float dim_unfocused = 0.0f;
     // cursor
     CursorShape cursor = CursorShape::block;

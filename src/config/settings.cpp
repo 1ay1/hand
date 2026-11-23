@@ -81,6 +81,9 @@ const std::vector<Row>& rows() {
          GET(scheme_index(c)), SET(c.scheme = static_cast<std::size_t>(v) == default_scheme() ? -1 : static_cast<int>(v))},
         {"colors", "bold_is_bright", "bold text in brighter colours", Kind::toggle, 0, 1, 1, 0, "", 1, none,
          GET(c.bold_is_bright), SET(c.bold_is_bright = v > 0.5f)},
+        {"colors", "min_contrast", "lift text to at least this contrast on its background, keeping its hue (1 = off, 4.5 = WCAG body text)",
+         Kind::number, 1, 7, 0.1f, 1, ":1", 1, none,
+         GET(c.min_contrast), SET(c.min_contrast = v)},
         {"colors", "dim_unfocused", "darken the terminal when the window loses focus", Kind::number, 0, 0.6f, 0.05f, 0, "%", 100, none,
          GET(c.dim_unfocused), SET(c.dim_unfocused = v)},
 

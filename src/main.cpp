@@ -164,6 +164,7 @@ int main(int argc, char** argv) {
     if (const char* sch = std::getenv("HAND_SCHEME"); sch && *sch && mode != Mode::window)
         for (std::size_t k = 0; k < hand::presets::all.size(); ++k)
             if (hand::presets::all[k].name == sch) { cfg.scheme = static_cast<int>(k); break; }
+    if (const char* mc = std::getenv("HAND_MIN_CONTRAST"); mc && *mc && mode != Mode::window) cfg.min_contrast = std::strtof(mc, nullptr);
 
     AppConfig ac{.title = "hand", .size = size, .decorated = cfg.decorations, .transparent = true, .option_as_alt = cfg.option_as_alt, .theme_morph = false, .fonts = scripted_fonts, .log_renderer = false};
     switch (mode) {
