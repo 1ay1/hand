@@ -11,6 +11,7 @@
 #include <hand/app.hpp>
 #include <hand/core/proc.hpp>
 #include <hand/ssh/remote.hpp>
+#include <hand/ssh/sftp.hpp>
 
 #include "../../app/fx/fx.hpp"
 
@@ -50,6 +51,15 @@ void remote_files(Runtime&, mayag::Vec2, Check& ok) {
     const auto t0 = std::chrono::steady_clock::now();
     ok(remote::warm(h, book).empty(), "the host's shared connection comes up (key login)");
     std::printf("       connect: %.0f ms\n", ms_since(t0));
+    {   // what hand pays to start any child at all (every remote action is one)
+        double best = 1e9;
+        for (int i = 0; i < 5; ++i) {
+            const auto s = std::chrono::steady_clock::now();
+            (void)proc::run({"true"}, {}, 5000);
+            best = std::min(best, ms_since(s));
+        }
+        std::printf("       spawn a child: %.1f ms\n", best);
+    }
 
     namespace ro = fx::remote_ops;
     auto t = std::chrono::steady_clock::now();
@@ -97,6 +107,16 @@ void remote_files(Runtime&, mayag::Vec2, Check& ok) {
     ok(found->token == 3 && found->hits.size() == 1 && found->hits[0].line == 1 && found->hits[0].col == 5,
        "\u2318\u21e7F finds text on the remote host, case-folded, at its column");
     std::printf("       search: %.0f ms\n", search_ms);
+
+    {   // the file pane lists a folder over sftp, through the same connection
+        t = std::chrono::steady_clock::now();
+        const auto pl = sftp::list(h, book, dir);
+        const double pane_ms = ms_since(t);
+        bool has = false;
+        for (const auto& e : pl.entries) has = has || e.name == "notes.sh";
+        ok(pl.error.empty() && has, "the file pane lists a remote folder");
+        std::printf("       pane folder: %.0f ms\n", pane_ms);
+    }
 
     // a name the remote shell must not interpret
     const std::string odd = dir + "/it's $HOME; rm -rf x.txt";
