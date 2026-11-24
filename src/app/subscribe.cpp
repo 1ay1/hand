@@ -41,6 +41,10 @@ App::Sub App::subscribe(const Model& m) {
     // the file in front: did someone else change it? (a formatter, git checkout, another editor)
     if (m.tab().file && !m.tab().file->loading && m.tab().file->error.empty())
         s.push_back(Sub::every(std::chrono::milliseconds(1500), Msg{FileWatch{}}));
+    // ...and its syntax lexed ahead in slices, only while it is not all lexed:
+    // the subscription ends by itself once the cache covers the file
+    if (m.tab().file && !m.tab().file->loading && !m.tab().file->st.ed.syntax_warm())
+        s.push_back(Sub::every(std::chrono::milliseconds(10), Msg{WarmSyntax{}}));
     if (m.pane.open && m.tab_count() < 2) s.push_back(Sub::every(std::chrono::milliseconds(1000), Msg{Second{}}));
     // the blink, until it rests (then keys, output and focus wake it: an idle
     // window has no timer left and draws nothing)

@@ -224,6 +224,15 @@ App::Cmd App::update(Model& m, EditorPasted p) {
 
 // ── the file on disk ───────────────────────────────────────────────────────
 
+App::Cmd App::update(Model& m, WarmSyntax) {
+    // One background slice: ~2k lines, ~1 ms -- small enough that a key landing
+    // on one waits no longer than a frame stage. A cold 100k-line file is warm
+    // ~0.5 s after it opens, so a jump to its end draws in a frame instead of
+    // lexing the whole file in that frame (a 50 ms freeze).
+    if (const Session& se = m.tab(); se.file && !se.file->loading) (void)se.file->st.ed.warm_syntax(2000);
+    return {};
+}
+
 App::Cmd App::update(Model& m, FileWatch) {
     const Session& se = m.tab();
     if (!se.file || se.file->loading || !se.file->error.empty() || se.file->saving || m.cfg.demo) return {};

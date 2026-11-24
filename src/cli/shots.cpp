@@ -64,6 +64,19 @@ if (shot == "bench") {
     const auto run = [&](const char* what, auto&& poke) {
         if (const char* only = std::getenv("HAND_BENCH_ONLY"); only && !std::string_view{what}.starts_with(only)) return;
         static const int N = std::getenv("HAND_BENCH_LOOP") ? std::atoi(std::getenv("HAND_BENCH_LOOP")) : 120;
+        // The steady state, not the catch-up: the first frames after a jump
+        // pay once for whole-file work (syntax state lexed to the caret,
+        // bracket depth, glyphs never drawn before) and were averaged in, so
+        // typing at the end of a 100k-line file read 3.2 ms against 2.7 at the
+        // top -- over 1500 keys both are 2.4. Those frames are not hidden:
+        // `worst` is the slowest frame of warm-up and run together.
+        double worst = 0;
+        for (int i = 0; i < 10; ++i) {
+            poke(N + i);
+            const auto a = clk::now();
+            rt.tick();
+            worst = std::max(worst, std::chrono::duration<double, std::milli>(clk::now() - a).count());
+        }
         double view = 0, cascade = 0, layout = 0, paint = 0, render = 0, fold = 0;
         const auto reused0 = rt.window().tiles_reused(), total0 = rt.window().tiles_total();
         const auto t0 = clk::now();
@@ -71,15 +84,17 @@ if (shot == "bench") {
             poke(i);   // the input (posted: one input, one frame)
             const auto a = clk::now();
             rt.tick();
-            fold += std::chrono::duration<double, std::milli>(clk::now() - a).count();
+            const double ms = std::chrono::duration<double, std::milli>(clk::now() - a).count();
+            fold += ms;
+            worst = std::max(worst, ms);
             const auto& f = rt.host().latency().last();
             view += f.view_ms; cascade += f.cascade_ms; layout += f.layout_ms; paint += f.paint_ms; render += f.render_ms;
         }
         const double total = std::chrono::duration<double, std::milli>(clk::now() - t0).count() / N;
         const auto tiles = rt.window().tiles_total() - total0;
         const double reuse = tiles ? 100.0 * static_cast<double>(rt.window().tiles_reused() - reused0) / static_cast<double>(tiles) : 0.0;
-        std::printf("  %-26s %6.3f ms/frame   frame %.3f  view %.3f  cascade %.3f  layout %.3f  paint %.3f  raster %.3f  reuse %4.1f%%\n",
-                    what, total, fold / N, view / N, cascade / N, layout / N, paint / N, render / N, reuse);
+        std::printf("  %-26s %6.3f ms/frame   frame %.3f  view %.3f  cascade %.3f  layout %.3f  paint %.3f  raster %.3f  reuse %4.1f%%  worst %.2f\n",
+                    what, total, fold / N, view / N, cascade / N, layout / N, paint / N, render / N, reuse, worst);
     };
     std::printf("hand frame pipeline (%dx%d, %d cols x %d rows)\n", static_cast<int>(size.x), static_cast<int>(size.y),
                 rt.model().tab().term->cols(), rt.model().tab().term->rows());
@@ -171,6 +186,13 @@ if (shot == "bench") {
         run("editor: scrolling", [&](int i) { rt.window().scroll(Vec2{900.0f, 300.0f}, Vec2{0.0f, (i / 30) % 2 ? -60.0f : 60.0f}); });
         run("editor: page down", [&](int) { rt.window().press_key(mayag::Key::page_down, {}); });
         {
+            // what a person does between opening and jumping: nothing, for a
+            // moment -- in which the editor lexes ahead (WarmSyntax slices)
+            const auto w = clk::now();
+            rt.settle([](const hand::App::Model& m) { return !m.tab().file || m.tab().file->st.ed.syntax_warm(); },
+                      std::chrono::milliseconds(1000));
+            std::printf("  %-26s %6.1f ms   (lexed ahead in the background)\n", "editor: warm the whole file",
+                        std::chrono::duration<double, std::milli>(clk::now() - w).count());
             const auto b = clk::now();
             rt.press_key(mayag::Key::end, mayag::Mods{.super = true});
             rt.press_key(mayag::Key::down, mayag::Mods{.ctrl = true});
@@ -212,6 +234,30 @@ if (shot == "flood") {   // a real shell running a firehose: frames keep coming,
     std::printf("flood: %d frames in %.1fs (%.0f fps), worst frame %.1f ms, %.0f MB/s through toe, peak rss %.0f MB, ctrl-C quiet after %.0f ms\n",
                 frames, secs, frames / secs, worst, mbps, rss_mb(), stop_ms);
     return (worst < 100.0 && rss_mb() < 400.0 && stop_ms < 1000.0) ? 0 : 1;
+}
+if (shot == "panelag") {   // the file pane open on a real folder: what every pane message costs
+    using clk = std::chrono::steady_clock;
+    rt.send(hand::App::Msg{hand::App::TogglePane{}});
+    // the pane follows the shell: run with `-e "sh -c 'cd DIR; exec cat'"` for a big folder
+    const auto t0 = clk::now();
+    while (clk::now() - t0 < std::chrono::seconds(2)) {
+        rt.settle([](const auto&) { return false; }, std::chrono::milliseconds(16));
+        rt.tick();
+    }
+    // scroll the list like a trackpad: 120 wheel steps, one a frame
+    double worst = 0, sum = 0;
+    const float x = rt.model().cfg.files_left ? 60.0f : rt.model().win.x - 60.0f;
+    const int steps = std::getenv("HAND_PANE_STEPS") ? std::atoi(std::getenv("HAND_PANE_STEPS")) : 120;
+    for (int i = 0; i < steps; ++i) {
+        const auto a = clk::now();
+        rt.window().scroll(Vec2{x, 300.0f}, Vec2{0.0f, (i / 40) % 2 ? 30.0f : -30.0f});
+        rt.tick();
+        const double ms = std::chrono::duration<double, std::milli>(clk::now() - a).count();
+        worst = std::max(worst, ms); sum += ms;
+    }
+    std::printf("panelag: %zu entries, path %s, slow folds %llu, scroll %.2f ms/frame worst %.2f\n", rt.model().pane.entries.size(),
+                rt.model().pane.path.c_str(), static_cast<unsigned long long>(rt.slow_folds()), sum / steps, worst);
+    return 0;
 }
 if (shot == "echo") {   // keystroke -> pty -> echo -> parsed -> frame drawn: hand's whole share of input-to-photon
     using clk = std::chrono::steady_clock;

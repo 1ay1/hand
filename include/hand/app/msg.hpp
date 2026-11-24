@@ -235,6 +235,8 @@ struct FileSaved { SessionId sid; std::uint64_t point = 0; std::string error; st
 struct EditorPasted { SessionId sid; std::string text; };
 /// Look whether the front file changed on disk (1.5 s while one is in front).
 struct FileWatch {};
+/// Lex the front file's syntax ahead, one slice (only while it is cold).
+struct WarmSyntax {};
 /// What the disk says about a file now (mtime 0: it is gone).
 struct FileStat { SessionId sid; std::int64_t mtime = 0; };
 /// ⌘P: open (or close) the quick-open list of the project's files.
@@ -254,7 +256,7 @@ using hand::SearchHit;
 struct SearchAllDone { std::uint64_t token = 0; std::string root; std::vector<SearchHit> hits; bool truncated = false; std::string error; };
 struct SearchAllPick { int index = 0; };
 using EditorMsg = std::variant<OpenFile, FileLoaded, EditorOp, FileSaved, EditorPasted, FileWatch, FileStat,
-                               QuickOpen, QuickListed, QuickKey, QuickText, QuickPick,
+                               QuickOpen, QuickListed, WarmSyntax, QuickKey, QuickText, QuickPick,
                                SearchAll, SearchAllKey, SearchAllText, SearchAllDone, SearchAllPick>;
 
 // ── the root ───────────────────────────────────────────────────────────────

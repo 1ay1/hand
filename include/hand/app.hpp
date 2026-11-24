@@ -75,6 +75,7 @@ struct App {
     using OpenFile = msg::OpenFile;     using FileLoaded = msg::FileLoaded; using EditorOp = msg::EditorOp;
     using FileSaved = msg::FileSaved;   using EditorPasted = msg::EditorPasted;
     using FileWatch = msg::FileWatch;   using FileStat = msg::FileStat;     using QuickOpen = msg::QuickOpen;
+    using WarmSyntax = msg::WarmSyntax;
     using QuickListed = msg::QuickListed; using QuickKey = msg::QuickKey;   using QuickText = msg::QuickText;
     using QuickPick = msg::QuickPick;
     using SearchAll = msg::SearchAll;   using SearchAllKey = msg::SearchAllKey; using SearchAllText = msg::SearchAllText;
@@ -210,6 +211,7 @@ struct App {
     static Cmd update(Model& m, FileSaved);
     static Cmd update(Model& m, EditorPasted);
     static Cmd update(Model& m, FileWatch);
+    static Cmd update(Model& m, WarmSyntax);
     static Cmd update(Model& m, FileStat);
     static Cmd update(Model& m, QuickOpen);
     static Cmd update(Model& m, QuickListed);
