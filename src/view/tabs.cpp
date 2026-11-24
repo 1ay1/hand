@@ -100,12 +100,12 @@ Node tabs(const Ctx& c, const Model& m, float height) {
     infos.reserve(m.tab_count());
     for (std::size_t i = 0; i < m.tab_count(); ++i) infos.push_back(tab_info(m, i));
     const Config& cfg = m.cfg;
-    // c.time, not m.time: the spinner and the busy ring are pure functions of
-    // the frame clock and schedule their own next frame (mayag stepper /
-    // request_animation_frame). m.time only moves while hand's own motion
-    // subscription runs, so a spinner read from it froze whenever nothing
-    // else was animating -- the "lags and stops" bug.
-    return tab_strip(c, "tabs", infos, static_cast<int>(m.active()), &m.strip.motion, c.time,
+    // No clock passed: the strip reads the frame's own (frame_time) and its
+    // spinner and ring book their own next frames. It used to take a time
+    // argument, and hand once passed m.time -- a model clock that moves only
+    // while a frame subscription runs, so the spinner froze whenever nothing
+    // else animated. The parameter is gone, so that cannot happen again.
+    return tab_strip(c, "tabs", infos, static_cast<int>(m.active()), &m.strip.motion,
                      {.show_numbers = m.strip.show_numbers,
                       .max_tab = cfg.tab_width, .min_tab = std::min(96.0f, cfg.tab_width),
                       .height = height,

@@ -26,6 +26,7 @@
 
 #include <algorithm>
 #include <array>
+#include <map>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -334,6 +335,36 @@ if (shot == "motion") {   // every animation on its own: how long it moves, what
     std::printf("%s\n", bad ? "FAIL: an animation never came to rest, or drew frames that changed nothing"
                              : "PASS: every animation comes to rest, and its frames change pixels");
     return bad ? 1 : 0;
+}
+if (shot == "idle") {   // a REAL shell, at rest and running a command: how many frames, and who asks
+    using clk = std::chrono::steady_clock;
+    rt.settle([](const auto& m) { return static_cast<bool>(m.tab().pty); }, std::chrono::seconds(3));
+    rt.window().drive_frames(true);   // the frame clock runs, as a display link would
+    const auto measure = [&](const char* what, double secs) -> void {
+        std::map<std::string, int> why;
+        const auto t0 = clk::now();
+        while (clk::now() - t0 < std::chrono::duration<double>(secs)) {
+            rt.settle([](const auto&) { return false; }, std::chrono::milliseconds(16));
+            const bool wanted = rt.host().wants_frames();   // asked BEFORE the tick: only frames something wanted count
+            std::string r = rt.host().frame_reason();
+            if (r == "on_frame") r = hand::frames_wanted_by(rt.model());
+            if (wanted) { rt.tick(); ++why[r]; }
+            else rt.tick();
+        }
+        const double fps = static_cast<double>(why.empty() ? 0 : [&] { int n = 0; for (const auto& [k, v] : why) n += v; return n; }()) / secs;
+        std::printf("  %-28s %5.1f frames/s", what, fps);
+        for (const auto& [k, n] : why) std::printf("  [%s x%d]", k.c_str(), n);
+        std::printf("\n");
+    };
+    std::printf("idle: a real shell (%s)\n", rt.model().cfg.shell_cli.c_str());
+    measure("prompt, just started", 1.0);
+    measure("prompt, idle", 2.0);
+    rt.send(hand::App::Msg{hand::App::Typed{"sleep 3\r"}});
+    measure("running `sleep 3`", 2.0);
+    // (the spinner alone, with nothing else drawing, is mayag's own check:
+    // test_embedded "a spinner alone keeps its own time", on the Cocoa loop logic)
+    std::printf("(frames counted are the ones the model or a widget ASKED for; a fade blink asks ~18/s while it fades)\n");
+    return 0;
 }
 if (shot == "panelag") {   // the file pane open on a real folder: what every pane message costs
     using clk = std::chrono::steady_clock;

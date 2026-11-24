@@ -197,7 +197,7 @@ float history(std::vector<Node>& layers, const Ctx& c, const Model& m, const Ter
                                                   {.line = se.term->command_text(*cmd), .cwd = short_path(m, cmd->cwd), .state = state_of(*cmd),
                                                    .exit_code = cmd->exit_code, .time = time,
                                                    .at = std::clamp<std::int64_t>(info.first - out0 + 1, 1, span), .span = span,
-                                                   .now = m.time, .ease = se.sticky_t, .marks = cfg.shell_marks}))
+                                                   .ease = se.sticky_t, .marks = cfg.shell_marks}))
                               | on_click([prompt = cmd->prompt_row] {
                                     return App::Msg{App::ScrollToPrompt{prompt}};   // fly to its prompt
                                 })).build());

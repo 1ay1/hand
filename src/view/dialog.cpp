@@ -92,7 +92,6 @@ void dialog(const Ctx& c, const Model& m) {
     TermDialogSpec d = a.kind == Ask::Kind::paste ? paste_dialog(c, m, a) : close_dialog(c, m, a);
     d.focused = static_cast<int>(a.focus);
     d.remember_on = a.remember;
-    d.time = m.time;
     d.width = std::min(600.0f, m.size.x - 40.0f);
     d.appear = m.dialog.t;
     c.overlay(Overlay{.content = term_dialog(c, "ask", d), .id = part_id("ask", part_menu),

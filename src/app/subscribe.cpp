@@ -77,7 +77,7 @@ std::string frames_wanted_by(const Model& m) {
         // effect (and records where it is). Without this an effect fired only
         // if something ELSE was animating -- a toast's frames had masked it.
         {"cursor moved", m.cfg.cursor_fx != CursorFx::none && (cur.col != m.tab().fx.last_col || cur.row != m.tab().fx.last_row)},
-        {"dialog", m.dialog.ask.has_value() || m.dialog.t > 0.0f},
+        {"dialog", m.dialog.t != (m.dialog.ask.has_value() ? 1.0f : 0.0f)},   // its entrance/exit; the pulse schedules itself
         {"copy flash", m.cfg.sel_flash && m.time - m.tab().copy_flash_at < 0.45},
         // (the tab pill is a Tracked: the host steps it and asks for its frames
         //  while the strip is drawn -- no reason of ours)

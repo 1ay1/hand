@@ -145,6 +145,7 @@ int main(int argc, char** argv) {
         else if (a == "--bench") { mode = Mode::png; shot = "bench"; }
         else if (a == "--panelag") { mode = Mode::png; shot = "panelag"; }
         else if (a == "--motion") { mode = Mode::png; shot = "motion"; }
+        else if (a == "--idle") { mode = Mode::png; shot = "idle"; if (i + 1 < argc && argv[i + 1][0] != '-') cfg.shell_cli = argv[++i]; }
         else if (a == "--echo") { mode = Mode::png; shot = "echo"; cfg.shell_cli = (i + 1 < argc && argv[i + 1][0] != '-') ? argv[++i] : "cat"; }
         else if (a == "--flood") { mode = Mode::png; shot = "flood"; cfg.shell_cli = (i + 1 < argc && argv[i + 1][0] != '-') ? argv[++i] : "yes"; }
     }
@@ -162,7 +163,7 @@ int main(int argc, char** argv) {
         if (!problems.empty()) std::fprintf(stderr, "hand: %s:\n%s", hand::config_path().c_str(), problems.c_str());
     }
     startup::mark("hand: config loaded");
-    cfg.demo = mode != Mode::window && shot != "flood" && shot != "echo";
+    cfg.demo = mode != Mode::window && shot != "flood" && shot != "echo" && shot != "idle";
     // Scripted shots in any colour scheme: HAND_SCHEME="Clu" (by name).
     if (const char* sch = std::getenv("HAND_SCHEME"); sch && *sch && mode != Mode::window)
         for (std::size_t k = 0; k < hand::presets::all.size(); ++k)
