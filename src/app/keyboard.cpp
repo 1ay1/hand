@@ -85,7 +85,11 @@ App::Cmd App::update(Model& m, Resized r) {
     const int c0 = se.term ? se.term->cols() : 0, r0 = se.term ? se.term->rows() : 0;
     m.win = r.size;
     fit(m);
-    if (m.sized_once && se.term && (se.term->cols() != c0 || se.term->rows() != r0)) m.resized_at = m.time;
+    if (m.sized_once && se.term && (se.term->cols() != c0 || se.term->rows() != r0)) {
+        m.sized_once = true;
+        m.hud_up = true;
+        return Cmd::after(std::chrono::milliseconds(800), Msg{HudExpired{++m.hud_serial}});
+    }
     m.sized_once = true;
     return {};
 }

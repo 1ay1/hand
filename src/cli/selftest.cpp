@@ -49,7 +49,15 @@ int selftest(Runtime& rt, Vec2 size) {
         checks::ssh,
         checks::config_roundtrip,
     };
-    for (const auto suite : suites) suite(rt, size, ok);
+    for (const auto suite : suites) {
+        suite(rt, size, ok);
+        // A toast or the size HUD leaves on a REAL-time timer (no frames while
+        // it is up); a suite runs faster than that, so the next one would start
+        // under whatever the last left on screen. Retire them as their timers
+        // would.
+        rt.send(hand::App::Msg{hand::App::ToastExpired{rt.model().toast.serial}});
+        rt.send(hand::App::Msg{hand::App::HudExpired{rt.model().hud_serial}});
+    }
     // jaal times every update (options::fold_budget_time, 8 ms) and names a
     // slow one on stderr. The self-test drives every feature once: none of
     // them may hold the loop -- the UI -- longer than a frame. Wall-clock, so

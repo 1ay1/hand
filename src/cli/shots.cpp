@@ -269,6 +269,72 @@ if (shot == "flood") {   // a real shell running a firehose: frames keep coming,
                 frames, secs, frames / secs, worst, mbps, rss_mb(), stop_ms);
     return (worst < 100.0 && rss_mb() < 400.0 && stop_ms < 1000.0) ? 0 : 1;
 }
+if (shot == "motion") {   // every animation on its own: how long it moves, what a frame of it costs, what it repaints
+    std::string s;
+    for (int i = 0; i < 300; ++i) s += "\x1b[3" + std::to_string(1 + i % 6) + "mline " + std::to_string(i) + "\x1b[0m " + std::string(20 + i % 50, 'x') + "\r\n";
+    rt.send(hand::App::Msg{hand::App::Output{s}});
+    rt.window().drive_frames(true);
+    using Msg = hand::App::Msg;
+    const auto quiet = [&] { for (int i = 0; i < 600 && rt.host().wants_frames(); ++i) rt.tick(); };
+    int bad = 0;
+    const auto run = [&](const char* what, auto&& start) {
+        if (const char* only = std::getenv("HAND_MOTION_ONLY"); only && !std::string_view{what}.starts_with(only)) return;
+        quiet();
+        rt.tick(); rt.tick();   // two idle frames: nothing owed
+        const auto t0 = rt.window().tiles_total(), r0 = rt.window().tiles_reused();
+        start();
+        int frames = 0, still = 0;
+        std::string why;   // who asked for the frames that changed nothing
+        double cpu = 0, worst = 0;
+        for (; frames < 600 && rt.host().wants_frames(); ++frames) {
+            const auto d0 = rt.window().tiles_total() - rt.window().tiles_reused();
+            std::string reason = rt.host().frame_reason();
+            if (reason == "on_frame") reason = hand::frames_wanted_by(rt.model());
+            rt.tick();
+            if (rt.window().tiles_total() - rt.window().tiles_reused() == d0) {   // drew, but no pixel changed
+                ++still;
+                if (!reason.empty() && why.find(reason) == std::string::npos) why += (why.empty() ? "" : ",") + reason;
+            }
+            const auto& f = rt.host().latency().last();
+            cpu += f.widget_cpu_ms;
+            worst = std::max(worst, f.widget_cpu_ms);
+        }
+        const double tiles = static_cast<double>(rt.window().tiles_total() - t0);
+        const double drawn = tiles - static_cast<double>(rt.window().tiles_reused() - r0);
+        const bool settles = frames < 600;
+        // a frame that changed no pixel is a frame the display did not need:
+        // a fade past visible, a timer counted in frames. A few round off; more
+        // is a bug of the kind this shot found (a toast held 193 such frames).
+        const bool lean = still <= std::max(1, std::min(2, frames / 10));
+        bad += settles && lean ? 0 : 1;
+        std::printf("  %-28s %4d frames (%4.0f ms) %3d still  cpu %.3f ms/frame worst %.3f   repaints %5.1f%% a frame%s%s%s\n", what, frames,
+                    frames * 1000.0 / 60.0, still, cpu / std::max(frames, 1), worst, 100.0 * drawn / std::max(tiles, 1.0),
+                    why.empty() ? "" : "   still from: ", why.c_str(), !settles ? "   NEVER SETTLES" : !lean ? "   WASTES FRAMES" : "");
+    };
+    std::printf("motion: each animation alone, from rest to rest (headless, 60 Hz steps)\n");
+    run("new output line glides in", [&] { rt.send(Msg{hand::App::Output{"one more line\r\n"}}); });
+    run("scroll a notch", [&] { rt.window().scroll(Vec2{400.0f, 300.0f}, Vec2{0.0f, 48.0f}); rt.tick(); });
+    run("scroll back to live", [&] { rt.window().scroll(Vec2{400.0f, 300.0f}, Vec2{0.0f, -480.0f}); rt.tick(); });
+    run("cursor glides", [&] { rt.send(Msg{hand::App::Output{"\x1b[12;40H"}}); });
+    run("bell", [&] { rt.send(Msg{hand::App::Output{"\a"}}); });
+    run("new tab (strip appears)", [&] { rt.send(Msg{hand::App::NewTab{}}); });
+    run("switch tab", [&] { rt.send(Msg{hand::App::StepTab{hand::Step::backward}}); });
+    run("settings open", [&] { rt.send(Msg{hand::App::ToggleSettings{}}); });
+    run("settings close", [&] { rt.send(Msg{hand::App::ToggleSettings{}}); });
+    run("host manager open", [&] { rt.send(Msg{hand::App::ToggleManager{}}); });
+    run("host manager close", [&] { rt.send(Msg{hand::App::ToggleManager{}}); });
+    run("file pane open", [&] { rt.send(Msg{hand::App::TogglePane{}}); });
+    run("file pane close", [&] { rt.send(Msg{hand::App::TogglePane{}}); });
+    run("toast (copy output)", [&] { rt.send(Msg{hand::App::CopyOutput{}}); });
+    run("window resize (size HUD)", [&] { rt.window().resize(Vec2{size.x - 40.0f, size.y}, 2.0f); rt.tick(); });
+    run("close-tab dialog", [&] { rt.send(Msg{hand::App::CloseTab{hand::TabIndex{rt.model().active()}}}); });
+    run("dialog dismissed", [&] { rt.press_key(mayag::Key::escape); });
+    run("pointer over the tab strip", [&] { rt.window().move_to(Vec2{120.0f, 14.0f}); rt.tick(); });
+    run("pointer leaves it", [&] { rt.window().move_to(Vec2{600.0f, 400.0f}); rt.tick(); });
+    std::printf("%s\n", bad ? "FAIL: an animation never came to rest, or drew frames that changed nothing"
+                             : "PASS: every animation comes to rest, and its frames change pixels");
+    return bad ? 1 : 0;
+}
 if (shot == "panelag") {   // the file pane open on a real folder: what every pane message costs
     using clk = std::chrono::steady_clock;
     rt.send(hand::App::Msg{hand::App::TogglePane{}});
@@ -448,7 +514,7 @@ if (shot == "find") {
     rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) {
         m.toast.card = mayag::dsl::Toast{.title = "\u2713 done in 41.2s", .body = "cargo build --release",
                                     .kind = mayag::dsl::Toast::Kind::success};
-        m.toast.at = m.time; }}});
+        ++m.toast.serial; }}});
 }
 if (shot == "minimap-short")
     rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) { m.minimap.open = true; m.minimap.width = 96.0f; }}});
@@ -775,7 +841,7 @@ if (shot == "select" || shot == "copymode" || shot == "paste" || shot == "quit")
     rt.tick();
 }
 if (shot == "resize")
-    rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) { m.resized_at = m.time; }}});
+    rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) { m.hud_up = true; }}});
 if (shot == "settings") {
     rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) {
         m.settings.open = true; m.settings.t = 1.0f; m.settings.ui.selected = 1;

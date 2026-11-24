@@ -285,7 +285,7 @@ App::Cmd App::update(Model& m, PaneOp p) {
     std::vector<Cmd> cmds;
     const auto toast = [&](std::string title, std::string body, Toast::Kind k) {
         m.toast.card = Toast{.title = std::move(title), .body = std::move(body), .kind = k};
-        m.toast.at = m.time;
+        ++m.toast.serial;
     };
     // typing into the shell is only safe at its prompt
     const auto at_prompt = [&] {

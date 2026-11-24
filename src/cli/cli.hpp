@@ -41,6 +41,6 @@ struct Shot { std::string name; std::string out; };
 [[nodiscard]] int run_scripted(mayag::AppConfig ac, App::Flags flags, mayag::Vec2 size, std::optional<Shot> shot);
 
 /// Has the cursor's motion (and its particles) come to rest?
-[[nodiscard]] inline bool motion_settled(const App::Model& m) { return motion::tail_settled(m.tab().fx, m.tab().cur_x, m.tab().cur_y); }
+[[nodiscard]] inline bool motion_settled(const App::Model& m) { return motion::tail_settled(m.tab().fx, m.tab().cur_x, m.tab().cur_y, m.metrics.cell_w, m.metrics.cell_h); }
 
 }  // namespace hand::cli

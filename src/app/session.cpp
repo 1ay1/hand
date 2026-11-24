@@ -175,7 +175,7 @@ App::Cmd App::init(Model& m, const Flags& f) {
     found(m.cfg.ui_fonts, kUiRoles, ui_role);
     if (std::string p = resolve_font_family(m.cfg); !p.empty()) {   // hand.vibe named a face this machine lacks
         m.toast.card = Toast{.title = "hand.vibe", .body = std::move(p), .kind = Toast::Kind::error};
-        m.toast.at = m.time;
+        ++m.toast.serial;
     }
     m.palette = palette_of(m.cfg);
     m.font_size = m.cfg.font_size;
@@ -235,7 +235,7 @@ void feed_background(Model& m, std::size_t i, const std::string& bytes) {
                                  (c.exit_code == 0 ? "done" : "failed (" + std::to_string(c.exit_code) + ")"),
                         .body = se.term->command_text(c),
                         .kind = c.exit_code == 0 ? Toast::Kind::success : Toast::Kind::error};
-        m.toast.at = m.time;
+        ++m.toast.serial;
     }
 }
 }  // namespace
@@ -314,7 +314,7 @@ App::Cmd App::update(Model& m, Output o) {
                                                                                c.exit_code == 0 ? "normal" : "critical", title,
                                                                                cmd.empty() ? "command finished" : cmd}));
         m.toast.card = Toast{.title = title, .body = cmd, .kind = c.exit_code == 0 ? Toast::Kind::success : Toast::Kind::error};
-        m.toast.at = m.time;
+        ++m.toast.serial;
     }
     if (m.pane.open) cmds.push_back(pane_sync(m));   // a cd lands in the output (OSC 7)
     cmds.push_back(probe_soon(m));                   // what runs there may have changed
@@ -344,7 +344,7 @@ App::Cmd App::update(Model& m, Exited e) {
                 se.unread = true;
                 m.toast.card = Toast{.title = "\u21C4 " + se.remote->alias + " disconnected", .body = "tab " + std::to_string(i + 1) + " \u00B7 reconnecting by itself",
                                 .kind = Toast::Kind::warning};
-                m.toast.at = m.time;
+                ++m.toast.serial;
             }
             return {};
         }
@@ -361,8 +361,13 @@ App::Cmd App::update(Model& m, Msg msg, Time now) {
     m.now = now;
     m.wall_ms = m.env.wall_epoch_ms + std::chrono::duration_cast<std::chrono::milliseconds>(now - m.began).count();
     const auto front = m.tab().sid;
+    const auto toast_before = m.toast.serial;
     auto cmd = step(m, std::move(msg));
     if (m.tab().sid != front) m.blinks_idle = 0;   // another tab in front: its cursor blinks again
+    // A new toast (any handler bumped the serial) leaves on a timer of its own:
+    // one message in 3 s, instead of a frame subscription running until then.
+    if (m.toast.serial != toast_before && m.toast.card)
+        cmd = Cmd::batch(std::move(cmd), Cmd::after(std::chrono::milliseconds(ToastModel::kShowMs), Msg{ToastExpired{m.toast.serial}}));
     return cmd;
 }
 
@@ -465,6 +470,11 @@ App::Cmd App::update(Model& m, Second) {
 }
 
 bool detail::blink_resting(const Model& m) {
+    // A modal over the terminal has the keys (settings, the host manager, a
+    // question, ⌘P, ⌘⇧F): the cursor under its scrim is not where you type, so
+    // it holds solid. Its blink was 14 frames a cycle drawing a cursor the
+    // scrim hid -- every second the manager stayed open.
+    if (modal_open(m)) return true;
     const int after = std::max(4, static_cast<int>(10000.0f / std::max(m.cfg.blink_ms, 50.0f)));   // ~10 s of blinks
     return m.cfg.cursor_blink && m.blinks_idle >= after;
 }
@@ -487,6 +497,16 @@ App::Cmd App::update(Model& m, Blink) {
     }
     m.cursor_on = !m.cursor_on || !m.cfg.cursor_blink;
     if (m.cfg.blink_style == BlinkStyle::hard) m.tab().cur_a = m.cursor_on ? 1.0f : 0.0f;
+    return {};
+}
+
+App::Cmd App::update(Model& m, ToastExpired e) {
+    if (e.serial == m.toast.serial) m.toast.card.reset();   // a newer toast keeps its own time
+    return {};
+}
+
+App::Cmd App::update(Model& m, HudExpired e) {
+    if (e.serial == m.hud_serial) m.hud_up = false;   // a later resize keeps it up
     return {};
 }
 
@@ -515,8 +535,8 @@ App::Cmd App::update(Model& m, Tick t) {
             v += (goal - v) * (1.0f - std::exp(-static_cast<float>(t.dt) * rate));
             if (std::fabs(v - goal) < 0.01f) v = goal;
         };
-        if (m.cfg.blink_style == BlinkStyle::fade)
-            toward(se.cur_a, m.cursor_on || !m.focused || !m.cfg.cursor_blink ? 1.0f : 0.0f, 16.0f * m.cfg.motion_speed);
+        if (m.cfg.blink_style == BlinkStyle::fade)   // under a modal's scrim nothing shows the fade: it lands at once
+            toward(se.cur_a, cursor_lit(m) ? 1.0f : 0.0f, modal_open(m) ? 1000.0f : 16.0f * m.cfg.motion_speed);
         toward(m.settings.t, m.settings.open ? 1.0f : 0.0f, m.cfg.motion ? 22.0f : 1000.0f);
         toward(m.ssh.manager.t, m.ssh.manager.open ? 1.0f : 0.0f, m.cfg.motion ? 22.0f : 1000.0f);
         toward(se.out_shift, 0.0f, 22.0f);
@@ -541,7 +561,10 @@ App::Cmd App::update(Model& m, Tick t) {
     if (se.scroll_d != se.scroll_goal) {   // critically damped glide, ~120 ms, frame-rate independent
         const float k = 1.0f - std::exp(-static_cast<float>(t.dt) * 18.0f);
         se.scroll_d += (se.scroll_goal - se.scroll_d) * k;
-        if (std::fabs(se.scroll_goal - se.scroll_d) < 0.004f) se.scroll_d = se.scroll_goal;
+        // done once what is left is under a quarter of a logical pixel (half a
+        // device pixel at 2x): 0.004 rows was 0.08 px, and the glide spent its
+        // last five frames moving nothing on screen
+        if (std::fabs(se.scroll_goal - se.scroll_d) < 0.25f / std::max(m.metrics.cell_h, 1.0f)) se.scroll_d = se.scroll_goal;
         const int whole = std::clamp(static_cast<int>(std::floor(se.scroll_d)), 0, se.term->history());
         if (whole != se.scroll_applied) { se.term->set_scroll_offset(whole); se.scroll_applied = whole; }
         if (se.scroll_d == 0.0f) se.new_below = 0;
@@ -568,7 +591,7 @@ App::Cmd App::update(Model& m, Tick t) {
     motion::move_cursor(se.fx, m.cfg.cursor_anim, se.cur_x, se.cur_y, tx, ty, mdt);
     {   // the tail follows the head (smear: the head IS the cell)
         const bool smear = m.cfg.cursor_anim == CursorAnim::smear;
-        motion::move_tail(se.fx, smear ? tx : se.cur_x, smear ? ty : se.cur_y, m.cfg.cursor_trail, mdt);
+        motion::move_tail(se.fx, smear ? tx : se.cur_x, smear ? ty : se.cur_y, m.cfg.cursor_trail, mdt, cw, chh);
     }
     if (!motion::cursor_settled(se.fx, m.cfg.cursor_anim, se.cur_x, se.cur_y, tx, ty) && se.term->scroll_offset() == 0)
         motion::travel(se.fx, m.cfg.cursor_fx, m.metrics.origin_x + (se.cur_x + 0.5f) * cw, m.metrics.origin_y + (se.cur_y + 0.5f) * chh,

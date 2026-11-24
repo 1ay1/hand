@@ -40,6 +40,7 @@ struct App {
     using NewTab = msg::NewTab;         using CloseTab = msg::CloseTab;     using SelectTab = msg::SelectTab;
     using StepTab = msg::StepTab;       using MoveTab = msg::MoveTab;
     using Blink = msg::Blink;           using Tick = msg::Tick;             using Second = msg::Clock;
+    using ToastExpired = msg::ToastExpired; using HudExpired = msg::HudExpired;
     using Copy = msg::Copy;             using PasteReq = msg::PasteReq;     using Pasted = msg::Pasted;
     using CopyOutput = msg::CopyOutput; using CopyKey = msg::CopyKey;       using OpenUrl = msg::OpenUrl;
     using HintPick = msg::HintPick;     using HintUse = msg::HintUse;
@@ -114,6 +115,8 @@ struct App {
     static Cmd update(Model& m, Blink);
     static Cmd update(Model& m, Tick t);
     static Cmd update(Model& m, Second);
+    static Cmd update(Model& m, ToastExpired e);
+    static Cmd update(Model& m, HudExpired e);
     // DialogMsg (src/app/dialog.cpp)
     static Cmd update(Model& m, Answer a);
     static Cmd update(Model& m, RememberToggle);
@@ -250,6 +253,8 @@ struct App {
     static std::optional<Msg> on(const Model& m, const mayag::Dragged& d);
     static std::optional<Msg> on(const Model& m, const mayag::Released& r);
     static Sub subscribe(const Model& m);
+    /// subscribe()'s timers and streams: everything but the frame clock.
+    static void subscribe_rest(const Model& m, std::vector<Sub>& s);
 
     // src/view/*.cpp: the widget tree
     static mayag::Theme theme(const Model& m);

@@ -3,7 +3,7 @@
 //
 //   Msg ─┬─ ShellMsg     Output Exited Spawned Probe Probed    a pty spoke
 //        ├─ TabMsg       NewTab CloseTab SelectTab StepTab MoveTab
-//        ├─ ClockMsg     Blink Tick Clock                       time passed
+//        ├─ ClockMsg     Blink Tick Clock ToastExpired HudExpired   time passed
 //        ├─ TextMsg      Copy PasteReq Pasted CopyOutput CopyKey OpenUrl HintPick
 //        ├─ SearchMsg    SearchToggle SearchStep SearchKey SearchText
 //        ├─ ScrollMsg    ScrollBy ScrollLive ScrollTop ScrollToPrompt ScrollToLine JumpPrompt ClearScrollback
@@ -73,7 +73,11 @@ using TabMsg = std::variant<NewTab, CloseTab, SelectTab, StepTab, MoveTab, TabPr
 struct Blink {};
 struct Tick { double dt = 0.0; };                                  ///< a frame: seconds since the last
 struct Clock {};                                                   ///< 1 Hz: live timers, activity
-using ClockMsg = std::variant<Blink, Tick, Clock>;
+/// The toast numbered `serial` has been up its time (a newer one outlives it).
+struct ToastExpired { std::uint64_t serial = 0; };
+/// The size HUD numbered `serial` has been up its time.
+struct HudExpired { std::uint64_t serial = 0; };
+using ClockMsg = std::variant<Blink, Tick, Clock, ToastExpired, HudExpired>;
 
 // ── text in and out ────────────────────────────────────────────────────────
 /// How a hint is used: copied / opened, or typed at the prompt.

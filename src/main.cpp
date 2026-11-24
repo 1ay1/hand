@@ -144,6 +144,7 @@ int main(int argc, char** argv) {
         else if (a == "--shot" && i + 1 < argc) shot = argv[++i];
         else if (a == "--bench") { mode = Mode::png; shot = "bench"; }
         else if (a == "--panelag") { mode = Mode::png; shot = "panelag"; }
+        else if (a == "--motion") { mode = Mode::png; shot = "motion"; }
         else if (a == "--echo") { mode = Mode::png; shot = "echo"; cfg.shell_cli = (i + 1 < argc && argv[i + 1][0] != '-') ? argv[++i] : "cat"; }
         else if (a == "--flood") { mode = Mode::png; shot = "flood"; cfg.shell_cli = (i + 1 < argc && argv[i + 1][0] != '-') ? argv[++i] : "yes"; }
     }

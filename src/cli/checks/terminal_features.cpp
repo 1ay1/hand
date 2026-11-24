@@ -1,6 +1,7 @@
 // hand::cli::checks — shell marks, links, search, hints, the minimap, cursor motion.
 
 #include "suites.hpp"
+#include "../../app/detail.hpp"   // frames_wanted_by
 
 #include <algorithm>
 #include <array>
@@ -37,6 +38,20 @@ void terminal_features([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size,
     const auto sg = rt.model().tab().term->snapshot();
     ok(sg.lines[0].mark == dsl::TermMark::error && sg.lines[3].mark == dsl::TermMark::ok,
        "failed and succeeded prompts get their marks");
+    {   // a toast is still: it costs no frames, and its own timer takes it down
+        const bool driving = rt.window().driving_frames();
+        rt.window().drive_frames(true);
+        for (int i = 0; i < 600 && rt.host().wants_frames(); ++i) rt.tick();   // everything else at rest
+        rt.window().drive_frames(driving);
+        rt.send(hand::App::Msg{hand::App::CopyOutput{}});
+        ok(rt.model().toast.card.has_value(), "a toast appears");
+        ok(hand::frames_wanted_by(rt.model()).empty() && !rt.host().wants_frames(), "...and asks for no frames while it is up");
+        const auto first = rt.model().toast.serial;
+        rt.send(hand::App::Msg{hand::App::ToastExpired{first - 1}});
+        ok(rt.model().toast.card.has_value(), "an older toast's timer does not take a newer one down");
+        rt.send(hand::App::Msg{hand::App::ToastExpired{first}});
+        ok(!rt.model().toast.card.has_value(), "its own timer does");
+    }
     rt.press_key(K::g, Mods{.shift = true, .ctrl = true});
     ok(rt.window().get_clipboard().find("commit 3f9a2c1d") != std::string::npos, "ctrl+shift+g copies the last output");
     // hints
@@ -163,6 +178,9 @@ void terminal_features([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size,
     rt.send(hand::App::Msg{hand::App::Output{std::string{"\r\nnew 1\r\nnew 2\r\nnew 3"}}});
     rt.tick();
     ok(rt.model().tab().new_below >= 3, "output arriving while you read is counted, not shoved at you");
+    // the copy toast above sits over the pill's corner; its timer (3 s of real
+    // time, longer than this suite's ticks) is what takes it down
+    rt.send(hand::App::Msg{hand::App::ToastExpired{rt.model().toast.serial}});
     rt.click(dsl::node_id("tolive"));
     settle();
     ok(rt.model().tab().term->scroll_offset() == 0 && rt.model().tab().new_below == 0, "the pill glides you back to live");

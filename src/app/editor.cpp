@@ -123,7 +123,7 @@ App::Cmd App::update(Model& m, FileLoaded l) {
         d->disk_mtime = l.mtime;
         text_editor_ops::disk_text(d->st, l.text);
         m.toast.card = Toast{.title = "reloaded", .body = name_of(d->path) + " changed on disk", .kind = Toast::Kind::info};
-        m.toast.at = m.time;
+        ++m.toast.serial;
         return {};
     }
     d->loading = false;
@@ -202,7 +202,7 @@ App::Cmd App::update(Model& m, FileSaved s) {
         d->save_error = s.error;   // the text is still here: a toast and the status line, never a dead tab
         d->close_after_save = false;
         m.toast.card = Toast{.title = "not saved", .body = name_of(d->path) + ": " + s.error, .kind = Toast::Kind::error};
-        m.toast.at = m.time;
+        ++m.toast.serial;
         return {};
     }
     text_editor_ops::saved(d->st, s.point);

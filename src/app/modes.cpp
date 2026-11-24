@@ -37,7 +37,7 @@ App::Cmd App::update(Model& m, OpenHints) {
         se.hint = std::move(h);
     } else {
         m.toast.card = Toast{.title = "nothing to pick", .body = "no links, paths, hashes or IPs on screen"};
-        m.toast.at = m.time;
+        ++m.toast.serial;
     }
     return {};
 }

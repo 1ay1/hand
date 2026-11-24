@@ -84,7 +84,11 @@ struct Model {
     bool                    ctrl_held = false;    ///< ctrl is down: links are armed
     MinimapModel            minimap;
     std::uint64_t           clock = 0;            ///< 1 Hz: live timers, activity samples
-    double                  resized_at = -10.0;
+    /// The size HUD, up after a resize changed the grid. It is still, so it
+    /// takes no frames: HudExpired{hud_serial} takes it down 0.8 s later (a
+    /// newer resize bumps the serial and keeps it up).
+    bool                    hud_up = false;
+    std::uint64_t           hud_serial = 0;
     bool                    sized_once = false;
     ToastModel              toast;
     // what floats over the terminal, and what sits beside it

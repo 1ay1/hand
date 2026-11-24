@@ -59,10 +59,13 @@ struct DialogModel {
     Ask                                was;    ///< the last question asked (drawn while it fades out)
 };
 
-/// One notice at a time, in the corner.
+/// One notice at a time, in the corner. It leaves on a timer (ToastExpired,
+/// scheduled by the update seam when `serial` moves), not by frames watching
+/// a clock: a toast is still, so showing it costs one frame, not 3 s of them.
 struct ToastModel {
     std::optional<mayag::dsl::Toast> card;
-    double                           at = -10.0;   ///< when it appeared
+    std::uint64_t                    serial = 0;   ///< bumped by every new toast (++m.toast.serial)
+    static constexpr int             kShowMs = 3000;
 };
 
 }  // namespace hand

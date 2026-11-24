@@ -54,6 +54,13 @@ endif()
 add_test(NAME fold_budget COMMAND hand --headless --last-resort)
 set_tests_properties(fold_budget PROPERTIES RUN_SERIAL TRUE TIMEOUT 120 LABELS "perf"
                      ENVIRONMENT "HAND_FOLD_BUDGET=strict")
+# every animation alone, from rest to rest: each one stops, and its frames
+# change pixels (a toast held 193 frames that changed nothing; a bell ran
+# past its flash). Machine-independent: frames and tiles, not milliseconds.
+if(NOT MAYAG_SYSTEM STREQUAL "windows")
+    add_test(NAME motion_economy COMMAND hand --motion --last-resort -e cat)
+    set_tests_properties(motion_economy PROPERTIES TIMEOUT 60 LABELS "perf")
+endif()
 add_test(NAME layering COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/layering.cmake)
 add_test(NAME purity COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/purity.cmake)
 

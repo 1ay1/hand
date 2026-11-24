@@ -73,7 +73,7 @@ App::Cmd App::update(Model& m, HostsKey k) {
         if (const Host* h = chosen()) {
             const std::string cmd = ssh_command(*h);
             m.toast.card = Toast{.title = "copied", .body = cmd, .kind = Toast::Kind::info};
-            m.toast.at = m.time;
+            ++m.toast.serial;
             return WriteClipboard{cmd};
         }
         return {};
@@ -212,7 +212,7 @@ App::Cmd App::update(Model& m, Manager p) {
                 if (!known) break;
                 const std::string cmd = ssh_command(m.ssh.book.hosts[static_cast<std::size_t>(a.host)]);
                 m.toast.card = Toast{.title = "copied", .body = cmd, .kind = Toast::Kind::info};
-                m.toast.at = m.time;
+                ++m.toast.serial;
                 cmds.push_back(WriteClipboard{cmd});
                 break;
             }
@@ -238,7 +238,7 @@ App::Cmd App::update(Model& m, Manager p) {
                 for (std::size_t i = 0; i < m.ssh.book.hosts.size(); ++i)
                     if (m.ssh.book.hosts[i].alias == h.alias) m.ssh.manager.ui.sel = static_cast<int>(i);
                 m.toast.card = Toast{.title = known ? "saved" : "host added", .body = h.alias, .kind = Toast::Kind::success};
-                m.toast.at = m.time;
+                ++m.toast.serial;
                 break;
             }
             case A::Kind::remove: {
@@ -255,7 +255,7 @@ App::Cmd App::update(Model& m, Manager p) {
                     x.env_set = false; x.env = guess_env(x.alias, x.hostname);
                 }
                 m.toast.card = Toast{.title = h.editable() ? "host deleted" : "notes forgotten", .body = h.alias, .kind = Toast::Kind::info};
-                m.toast.at = m.time;
+                ++m.toast.serial;
                 break;
             }
             case A::Kind::save_folder: {
@@ -269,14 +269,14 @@ App::Cmd App::update(Model& m, Manager p) {
                         else if (h.folder.rfind(a.old_alias + "/", 0) == 0) h.folder = f.name + h.folder.substr(a.old_alias.size());
                     }
                 m.toast.card = Toast{.title = "folder saved", .body = f.name, .kind = Toast::Kind::success};
-                m.toast.at = m.time;
+                ++m.toast.serial;
                 break;
             }
             case A::Kind::remove_folder:
                 if (!m.cfg.demo) cmds.push_back(Cmd::run(fx::remove_folder, m.ssh.sources, a.old_alias));
                 std::erase_if(m.ssh.book.folders, [&](const Folder& x) { return x.name == a.old_alias; });
                 m.toast.card = Toast{.title = "folder settings removed", .body = a.old_alias + ": its hosts keep their own", .kind = Toast::Kind::info};
-                m.toast.at = m.time;
+                ++m.toast.serial;
                 break;
             case A::Kind::import_source: {
                 if (a.host < 0 || a.host >= static_cast<int>(m.ssh.manager.imports.size())) break;
@@ -293,7 +293,7 @@ App::Cmd App::update(Model& m, Manager p) {
                                 .body = added ? std::to_string(added) + (added == 1 ? " host" : " hosts") + " from " + src.name + ", in folder " + src.name
                                               : "every " + src.name + " session is here already",
                                 .kind = added ? Toast::Kind::success : Toast::Kind::info};
-                m.toast.at = m.time;
+                ++m.toast.serial;
                 break;
             }
             case A::Kind::open_url:
@@ -304,7 +304,7 @@ App::Cmd App::update(Model& m, Manager p) {
                 break;
             case A::Kind::files_copy_path:
                 m.toast.card = Toast{.title = "copied", .body = a.path, .kind = Toast::Kind::info};
-                m.toast.at = m.time;
+                ++m.toast.serial;
                 cmds.push_back(WriteClipboard{a.path});
                 break;
             case A::Kind::files_terminal: {
@@ -352,7 +352,7 @@ App::Cmd App::update(Model& m, FilesDone d) {
     if (m.pane.where == d.alias) m.pane.busy.clear();
     m.toast.card = d.error.empty() ? Toast{.title = d.title, .body = d.reveal.empty() ? d.alias : d.reveal, .kind = Toast::Kind::success}
                               : Toast{.title = "transfer failed", .body = d.error, .kind = Toast::Kind::error};
-    m.toast.at = m.time;
+    ++m.toast.serial;
     std::vector<Cmd> cmds;
     if (d.error.empty() && !d.refresh_path.empty() && m.pane.open && m.pane.where == d.alias && m.pane.path == d.refresh_path)
         cmds.push_back(update(m, PaneOp{FilePaneOp{[p = d.refresh_path](FilePaneState& s) { s.out.push_back({FilePaneAction::Kind::list, p}); }}}));

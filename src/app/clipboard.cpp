@@ -52,7 +52,7 @@ App::Cmd App::update(Model& m, HintPick h) {
     }
     if (hint.kind == Term::Hint::Kind::url) return update(m, OpenUrl{hint.text});
     m.toast.card = Toast{.title = "copied", .body = hint.text, .kind = Toast::Kind::info};
-    m.toast.at = m.time;
+    ++m.toast.serial;
     return WriteClipboard{hint.text};
 }
 
@@ -105,11 +105,11 @@ App::Cmd App::update(Model& m, CopyOutput) {
         if (!it->ran || !it->finished) continue;
         const std::string out = se.term->output_text(*it);
         m.toast.card = Toast{.title = "copied the output of", .body = se.term->command_text(*it), .kind = Toast::Kind::info};
-        m.toast.at = m.time;
+        ++m.toast.serial;
         return WriteClipboard{out};
     }
     m.toast.card = Toast{.title = "no command output yet", .body = "needs shell integration (settings \u203A shell)", .kind = Toast::Kind::warning};
-    m.toast.at = m.time;
+    ++m.toast.serial;
     return {};
 }
 
@@ -123,7 +123,7 @@ App::Cmd App::update(Model& m, Copy) {
     m.toast.card = Toast{.title = "copied", .body = std::to_string(si.lines) + (si.lines == 1 ? " line, " : " lines, ") +
                                              std::to_string(si.chars) + " chars" + (si.block ? " (block)" : ""),
                     .kind = Toast::Kind::info};
-    m.toast.at = m.time;
+    ++m.toast.serial;
     return WriteClipboard{se.term->selection_text()};
 }
 

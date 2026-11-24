@@ -34,8 +34,18 @@ float term_left(const Model& m);
 bool in_pane(const Model& m, float x);
 /// Something in the file pane is still glowing (it changed a moment ago).
 bool pane_glowing(const Model& m);
+/// A modal over the terminal has the keys: settings, the host manager, a
+/// question, ⌘P, ⌘⇧F.
+inline bool modal_open(const Model& m) {
+    return m.settings.open || m.ssh.manager.open || m.dialog.ask.has_value() || m.quick.open || m.search_all.open;
+}
 /// The cursor has stopped blinking: nothing typed or printed for ~10 s.
 bool blink_resting(const Model& m);
+/// The blink's phase as drawn: lit unless it is blinking AND in its off half
+/// (a resting blink is lit, whatever phase it stopped in).
+inline bool cursor_lit(const Model& m) {
+    return m.cursor_on || !m.focused || !m.cfg.cursor_blink || blink_resting(m);
+}
 bool in_strip(const Model& m, float y);
 /// The foreground process of a session's shell, as the last probe found it.
 const std::string& fg_process(const Session& se);
@@ -102,4 +112,8 @@ namespace hand {
 /// ⌘P's list ranked against its query (src/app/editor.cpp): (file index, hits).
 /// Memoised on the model: valid until the next update.
 const std::vector<std::pair<int, mayag::dsl::FuzzyMatch>>& quick_open_ranked(const Model& m);
+/// Why the model wants frames now, the reasons joined by commas; empty: it
+/// does not (src/app/subscribe.cpp, the one place the frame subscription is
+/// decided).
+std::string frames_wanted_by(const Model& m);
 }  // namespace hand

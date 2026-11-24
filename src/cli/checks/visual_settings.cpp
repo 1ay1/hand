@@ -65,9 +65,9 @@ void visual_settings([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, C
                 }
             return best;
         };
-        rt.send(hand::App::Msg{E{[](hand::App::Model& m) {
-            m.palette.bg = 0xFAFAFA; m.palette.fg = 0x383A42; m.cursor_on = false; m.tab().cur_a = 0.0f; }}});
-        rt.send(hand::App::Msg{hand::App::Output{std::string{"\x1b[2J\x1b[H\x1b[38;2;240;220;130mMMMMMMMMMMMMMMMMMMMM\x1b[0m"}}});
+        rt.send(hand::App::Msg{E{[](hand::App::Model& m) { m.palette.bg = 0xFAFAFA; m.palette.fg = 0x383A42; }}});
+        // the cursor hidden as a program hides it (DECTCEM), so only text is measured
+        rt.send(hand::App::Msg{hand::App::Output{std::string{"\x1b[?25l\x1b[2J\x1b[H\x1b[38;2;240;220;130mMMMMMMMMMMMMMMMMMMMM\x1b[0m"}}});
         const int off = darkest();
         rt.send(hand::App::Msg{E{[](hand::App::Model& m) { m.cfg.min_contrast = 4.5f; }}});
         const int on = darkest();
@@ -76,6 +76,7 @@ void visual_settings([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, C
         rt.send(hand::App::Msg{E{[](hand::App::Model& m) { m.cfg.min_contrast = 1.0f; }}});
         ok(darkest() == off, "...and off, the program's colour is drawn exactly");
         rt.send(hand::App::Msg{E{[](hand::App::Model& m) { m.palette = hand::palette_of(m.cfg); }}});
+        rt.send(hand::App::Msg{hand::App::Output{std::string{"\x1b[?25h"}}});
     }
 }
 
