@@ -446,14 +446,20 @@ App::Cmd App::update(Model& m, Probe) {
 }
 
 App::Cmd App::update(Model& m, Probed p) {
+    std::vector<Cmd> cmds;
     for (auto& t : p.tabs) {
         const auto i = m.tabs.find(t.sid);
         if (!i) continue;
         Session& se = m.at(*i);
         se.proc = std::move(t.proc);
-        if (!se.link.launched) se.remote = std::move(t.remote);   // a launched tab knows its host
+        if (se.link.launched) continue;   // a launched tab knows its host
+        // `ssh host` typed in a tab: its files are about to be asked for (the
+        // pane follows, ⌘P lists) -- bring up the channel now, not on that click
+        const bool reached = t.remote && (!se.remote || se.remote->alias != t.remote->alias);
+        se.remote = std::move(t.remote);
+        if (reached && !m.cfg.demo) cmds.push_back(Cmd::task(fx::warm_remote, *se.remote, m.ssh.book));
     }
-    return {};
+    return Cmd::batch(std::move(cmds));
 }
 
 App::Cmd App::update(Model& m, Second) {

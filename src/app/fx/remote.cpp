@@ -4,6 +4,7 @@
 #include "fx.hpp"
 
 #include <hand/core/proc.hpp>
+#include <hand/ssh/remote.hpp>
 #include <hand/ssh/sftp.hpp>
 
 #include <mayag/widget/file_pane.hpp>
@@ -37,6 +38,13 @@ void download(Sink out, Host h, HostBook book, std::string remote, std::string n
 void upload(Sink out, Host h, HostBook book, std::string dir, std::vector<std::string> files) {
     const std::string err = sftp::put(h, book, files, dir);
     out.send(App::Msg{App::FilesDone{h.alias, dir, "Uploaded " + std::to_string(files.size()) + (files.size() == 1 ? " file" : " files"), err, ""}});
+}
+
+void warm_remote(Sink, Host h, HostBook book) {
+    // ahead of need: the shared connection, then one kept-open channel, so the
+    // first listing or file read after a tab reaches a host costs a round
+    // trip, not a login. Silent: a failure here is reported by the action itself.
+    if (remote::warm(h, book).empty()) (void)remote::warm_channel(h, book);
 }
 
 }  // namespace hand::fx

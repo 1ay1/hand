@@ -260,6 +260,16 @@ std::string host_name() {
     return c ? c : "";
 }
 
+// No kept-open channels on Windows (its OpenSSH has no ControlMaster, so a
+// channel would buy little); open() says so and remote::exec runs one-off.
+std::unique_ptr<Channel> Channel::open(const std::vector<std::string>&) { return nullptr; }
+Channel::~Channel() = default;
+bool Channel::write(std::string_view, Deadline) { return false; }
+bool Channel::read_line(std::string&, Deadline) { return false; }
+bool Channel::read_exact(std::size_t, std::string&, Deadline) { return false; }
+bool Channel::read_until(std::string_view, std::string&, Deadline) { return false; }
+bool Channel::fill(Deadline) { return false; }
+
 }  // namespace hand::proc
 
 #endif  // _WIN32

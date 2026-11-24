@@ -21,6 +21,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace hand::cli::checks {
@@ -59,6 +60,50 @@ void remote_files(Runtime&, mayag::Vec2, Check& ok) {
             best = std::min(best, ms_since(s));
         }
         std::printf("       spawn a child: %.1f ms\n", best);
+    }
+    {   // the kept-open channel: what every remote action rides
+        const auto lat = [&](const char* what, auto&& f) {
+            std::vector<double> xs;
+            for (int i = 0; i < 15; ++i) { const auto s = std::chrono::steady_clock::now(); f(); xs.push_back(ms_since(s)); }
+            std::sort(xs.begin(), xs.end());
+            std::printf("       %s: p50 %.1f ms  max %.1f ms\n", what, xs[xs.size() / 2], xs.back());
+            return xs[xs.size() / 2];
+        };
+        (void)remote::exec(h, book, "true");
+        const double chan = lat("exec over the channel", [&] { (void)remote::exec(h, book, "true"); });
+        const double fresh = lat("exec, a new ssh each time", [&] { auto a = remote::ssh_args(h, book); a.push_back("true"); (void)proc::run(a, {}, 10000); });
+        const bool channels_on = std::getenv("HAND_SSH_CHANNEL") == nullptr || std::getenv("HAND_SSH_CHANNEL")[0] != '0';
+        if (channels_on) ok(chan * 3.0 < fresh, "a request over the kept-open channel costs a fraction of a new ssh");
+        // framing: whatever a command prints, the answer is exactly its bytes
+        const auto x = remote::exec(h, book, "printf '\\nhand-err-fixed\\nno newline'; printf 'warn' >&2; exit 3");
+        ok(x.code == 3 && x.out == "\nhand-err-fixed\nno newline" && x.err == "warn",
+           "output that looks like the frame, no final newline, stderr and the exit code all come back exact");
+        std::string bin;
+        for (int i = 0; i < 300000; ++i) bin += static_cast<char>((i * 7919) & 0xFF);
+        const auto echo = remote::exec(h, book, "cat", bin, 20000);
+        ok(echo.code == 0 && echo.out == bin, "binary input (300 KB, every byte value) goes through and back untouched");
+        const auto before = remote::exec(h, book, "echo ${X-unset}; pwd");
+        (void)remote::exec(h, book, "X=leaked; cd /");
+        ok(remote::exec(h, book, "echo ${X-unset}; pwd").out == before.out, "one request's variables and cwd never leak into the next");
+        // a channel whose far end died (the laptop slept): the next request reconnects
+        (void)remote::exec(h, book, "kill -9 $$");
+        const auto after = remote::exec(h, book, "echo alive");
+        ok(after.code == 0 && after.out == "alive\n", "a dead channel is replaced, and the request still lands");
+        {   // the pane, the editor's watcher and a ⌘P list ask at once: each gets its own answer
+            std::vector<std::string> got(8);
+            {
+                std::vector<std::jthread> ts;
+                for (int i = 0; i < 8; ++i)
+                    ts.emplace_back([&, i] { for (int k = 0; k < 10; ++k) got[static_cast<std::size_t>(i)] += remote::exec(h, book, "echo " + std::to_string(i)).out; });
+            }
+            bool right = true;
+            for (int i = 0; i < 8; ++i) {
+                std::string want;
+                for (int k = 0; k < 10; ++k) want += std::to_string(i) + "\n";
+                right = right && got[static_cast<std::size_t>(i)] == want;
+            }
+            ok(right, "eight threads asking at once each get only their own answers");
+        }
     }
 
     namespace ro = fx::remote_ops;

@@ -50,8 +50,20 @@ namespace hand::remote {
 void drop(const Host& h, const HostBook& book);
 
 /// Run `command` (a /bin/sh line) on the host; `in` goes to its stdin.
+/// Over a pooled channel (a remote `sh -s` kept open: ~3 ms a request on a
+/// warm link instead of a new ssh and login shell, 40-65 ms); the one-off
+/// ssh where channels can't be kept (Windows) or for very large input.
 [[nodiscard]] proc::Result exec(const Host& h, const HostBook& book, const std::string& command,
                                 std::string_view in = {}, int timeout_ms = 20000);
+/// Open a channel to `h` ahead of need ("" when one is ready).
+[[nodiscard]] std::string warm_channel(const Host& h, const HostBook& book);
+/// A POSIX sh `script` with `args` as $1.., on the host. Over a channel it
+/// runs in the request's own subshell (no `sh -c`: one fork fewer per
+/// request); over the one-off ssh it is wrapped as `sh -c SCRIPT sh ARGS` so
+/// the login shell (bash, zsh, fish) only ever sees quoted words. File names
+/// travel as arguments, never spliced into the script.
+[[nodiscard]] proc::Result exec_sh(const Host& h, const HostBook& book, const std::string& script,
+                                   const std::vector<std::string>& args, std::string_view in = {}, int timeout_ms = 20000);
 
 /// `s` as one word for a POSIX shell: 'it'\''s'.
 [[nodiscard]] std::string sh_quote(std::string_view s);

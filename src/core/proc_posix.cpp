@@ -17,6 +17,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
+#include <sys/socket.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -232,6 +233,156 @@ std::string host_name() {
     char b[256] = {};
     if (::gethostname(b, sizeof b - 1) != 0) return {};
     return b;
+}
+
+// ── Channel ──────────────────────────────────────────────────────────────
+
+std::unique_ptr<Channel> Channel::open(const std::vector<std::string>& argv) {
+    if (argv.empty()) return nullptr;
+    // stdin is a socketpair, so a write after the child died fails with EPIPE
+    // instead of raising SIGPIPE (MSG_NOSIGNAL / SO_NOSIGPIPE): a dropped
+    // connection must never take hand down with it.
+    int sin[2], pout[2], perr[2];
+    if (::socketpair(AF_UNIX, SOCK_STREAM, 0, sin) != 0) return nullptr;
+    if (::pipe(pout) != 0) { ::close(sin[0]); ::close(sin[1]); return nullptr; }
+    if (::pipe(perr) != 0) { ::close(sin[0]); ::close(sin[1]); ::close(pout[0]); ::close(pout[1]); return nullptr; }
+#ifdef SO_NOSIGPIPE
+    const int one = 1;
+    (void)::setsockopt(sin[0], SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one);
+#endif
+    for (int fd : {sin[0], pout[0], perr[0]}) ::fcntl(fd, F_SETFD, FD_CLOEXEC);
+    const pid_t pid = ::fork();
+    if (pid < 0) {
+        for (int fd : {sin[0], sin[1], pout[0], pout[1], perr[0], perr[1]}) ::close(fd);
+        return nullptr;
+    }
+    if (pid == 0) {
+        reset_signals();
+        ::dup2(sin[1], 0); ::dup2(pout[1], 1); ::dup2(perr[1], 2);
+        for (int fd : {sin[0], sin[1], pout[0], pout[1], perr[0], perr[1]}) ::close(fd);
+        std::vector<char*> a;
+        for (const auto& s : argv) a.push_back(const_cast<char*>(s.c_str()));
+        a.push_back(nullptr);
+        ::execvp(a[0], a.data());
+        ::_exit(127);
+    }
+    ::close(sin[1]); ::close(pout[1]); ::close(perr[1]);
+    for (int fd : {sin[0], pout[0], perr[0]}) ::fcntl(fd, F_SETFL, ::fcntl(fd, F_GETFL) | O_NONBLOCK);
+    std::unique_ptr<Channel> c{new Channel};
+    c->in_ = sin[0]; c->out_ = pout[0]; c->errfd_ = perr[0]; c->pid_ = pid;
+    c->used = std::chrono::steady_clock::now();
+    return c;
+}
+
+Channel::~Channel() {
+    for (int fd : {in_, out_, errfd_}) if (fd >= 0) ::close(fd);
+    if (pid_ > 0) {
+        // stdin closed: a remote `sh -s` exits and ssh with it. Give it a
+        // moment (a clean exit leaves the shared master tidy), then insist.
+        int st = 0;
+        for (int i = 0; i < 20; ++i) {
+            if (::waitpid(pid_, &st, WNOHANG) == pid_) return;
+            ::usleep(1000);
+        }
+        ::kill(pid_, SIGKILL);
+        while (::waitpid(pid_, &st, 0) < 0 && errno == EINTR) {}
+    }
+}
+
+namespace {
+int ms_until(Deadline by) {
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(by - std::chrono::steady_clock::now()).count();
+    return ms <= 0 ? 0 : static_cast<int>(std::min<long long>(ms, 1 << 30));
+}
+}  // namespace
+
+bool Channel::write(std::string_view s, Deadline by) {
+    if (broken_) return false;
+    std::size_t put = 0;
+    while (put < s.size()) {
+#ifdef MSG_NOSIGNAL
+        const ssize_t n = ::send(in_, s.data() + put, s.size() - put, MSG_NOSIGNAL);
+#else
+        const ssize_t n = ::send(in_, s.data() + put, s.size() - put, 0);
+#endif
+        if (n > 0) { put += static_cast<std::size_t>(n); continue; }
+        if (n < 0 && errno == EINTR) continue;
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            // the child is slow to read (a big save): wait for room, and
+            // keep stderr drained so it can't block on a full pipe meanwhile
+            pollfd p[2] = {{in_, POLLOUT, 0}, {errfd_, POLLIN, 0}};
+            const int left = ms_until(by);
+            if (left == 0 || ::poll(p, 2, left) <= 0) { broken_ = true; return false; }
+            if (p[1].revents & (POLLIN | POLLHUP)) {
+                char b[4096];
+                const ssize_t e = ::read(errfd_, b, sizeof b);
+                if (e > 0 && err_.size() < 65536) err_.append(b, static_cast<std::size_t>(e));
+            }
+            continue;
+        }
+        broken_ = true;   // EPIPE: the child is gone
+        return false;
+    }
+    return true;
+}
+
+bool Channel::fill(Deadline by) {
+    for (;;) {
+        pollfd p[2] = {{out_, POLLIN, 0}, {errfd_, POLLIN, 0}};
+        const int left = ms_until(by);
+        const int r = ::poll(p, errfd_ >= 0 ? 2 : 1, left);
+        if (r < 0 && errno == EINTR) continue;
+        if (r <= 0) { broken_ = true; return false; }   // timed out: out of step from here on
+        char b[65536];
+        if (errfd_ >= 0 && (p[1].revents & (POLLIN | POLLHUP))) {
+            const ssize_t e = ::read(errfd_, b, sizeof b);
+            if (e > 0) { if (err_.size() < 65536) err_.append(b, static_cast<std::size_t>(e)); }
+            else if (e == 0) { ::close(errfd_); errfd_ = -1; }
+        }
+        if (p[0].revents & (POLLIN | POLLHUP | POLLERR)) {
+            const ssize_t n = ::read(out_, b, sizeof b);
+            if (n > 0) { buf_.append(b, static_cast<std::size_t>(n)); return true; }
+            if (n < 0 && (errno == EAGAIN || errno == EINTR)) continue;
+            broken_ = true;   // EOF: the child exited
+            return false;
+        }
+    }
+}
+
+bool Channel::read_line(std::string& line, Deadline by) {
+    if (broken_) return false;
+    for (std::size_t from = 0;;) {
+        if (const auto nl = buf_.find('\n', from); nl != std::string::npos) {
+            line.assign(buf_, 0, nl);
+            buf_.erase(0, nl + 1);
+            return true;
+        }
+        from = buf_.size();
+        if (!fill(by)) return false;
+    }
+}
+
+bool Channel::read_exact(std::size_t n, std::string& out, Deadline by) {
+    if (broken_) return false;
+    while (buf_.size() < n)
+        if (!fill(by)) return false;
+    out.append(buf_, 0, n);
+    buf_.erase(0, n);
+    return true;
+}
+
+bool Channel::read_until(std::string_view marker, std::string& out, Deadline by) {
+    if (broken_ || marker.empty()) return false;
+    for (std::size_t from = 0;;) {
+        if (const auto at = buf_.find(marker, from); at != std::string::npos) {
+            out.append(buf_, 0, at);
+            buf_.erase(0, at + marker.size());
+            return true;
+        }
+        // only the tail that could still start the marker is searched again
+        from = buf_.size() >= marker.size() ? buf_.size() - marker.size() + 1 : 0;
+        if (!fill(by)) return false;
+    }
 }
 
 }  // namespace hand::proc

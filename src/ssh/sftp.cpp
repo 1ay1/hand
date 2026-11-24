@@ -115,6 +115,19 @@ std::string explain(std::string_view err, int code) {
 }
 
 Listing list(const Host& h, const HostBook& book, const std::string& path) {
+    // Over the host's kept-open channel first: `ls -la` prints the longname
+    // form parse_listing reads (sftp's own ls copies it), in ~2 ms where a
+    // check plus an sftp process was ~80 ms. LC_ALL=C: English month names and
+    // byte sizes whatever the host's locale. sftp stays the fallback (a host
+    // whose shell can't be used, Windows).
+    {
+        const std::string cmd = "cd " + remote::sh_quote(path.empty() ? std::string{"."} : path) +
+                                " 2>/dev/null || { echo 'No such file or directory' >&2; exit 2; }; "
+                                "printf 'Remote working directory: %s\\n' \"$(pwd)\"; LC_ALL=C exec ls -la";
+        const proc::Result r = remote::exec(h, book, cmd, {}, 20000);
+        if (r.started && !r.timed_out && r.code == 0) return parse_listing(r.out);
+        if (r.started && r.code == 2) return Listing{path, {}, explain(r.err, 1)};
+    }
     std::string batch;
     if (!path.empty()) batch += "cd " + quote(path) + "\n";
     batch += "pwd\nls -la\n";

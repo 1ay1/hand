@@ -23,3 +23,13 @@ core/proc_win.cpp: thread
 core/pty.cpp: const_cast
 core/proc_posix.cpp: const_cast
 
+# proc::ChannelPool: idle remote channels shared by every task thread. A leaf
+# lock held only to move a unique_ptr in or out of a map -- never across I/O,
+# never with another lock taken inside; channels are closed after it is let go.
+core/proc_common.cpp: mutex
+
+# The opt-in real-ssh check (HAND_TEST_SSH): eight jthreads asking the
+# channel pool at once, as the pane, the watcher and ⌘P's tasks do -- joined
+# at the end of their block; a test of the pool, not app code.
+cli/checks/remote_files.cpp: thread
+

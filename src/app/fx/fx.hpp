@@ -110,5 +110,8 @@ void list_remote_pane(Sink out, std::uint64_t token, Host h, HostBook book, std:
 void list_remote_files(Sink out, Host h, HostBook book, std::string dir);
 void download(Sink out, Host h, HostBook book, std::string remote, std::string name);
 void upload(Sink out, Host h, HostBook book, std::string dir, std::vector<std::string> files);
+/// The host's shared connection and one kept-open channel, ahead of need
+/// (Cmd::task: it blocks on ssh; answers nothing).
+void warm_remote(Sink out, Host h, HostBook book);
 
 }  // namespace hand::fx
