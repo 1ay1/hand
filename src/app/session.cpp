@@ -38,9 +38,20 @@ void App::fit(Model& m) {
     const float gutter = m.cfg.shell_marks ? 10.0f : 0.0f;   // terminal_view's mark margin
     m.metrics.cell_w = cw;
     m.metrics.cell_h = ch;
-    m.metrics.origin_x = pad + gutter;
+    // The grid sits CENTRED in its space, the same gap on both sides. Left
+    // had padding + the mark gutter, right had padding alone, the minimap
+    // drawn over it, plus whatever part of a cell did not fit -- so a TUI's
+    // background ran almost into the right edge while the left kept ~18 px.
+    // Now both sides reserve padding + gutter, the minimap's resting strip is
+    // its own (the configured minimap, not whether it shows: entering a
+    // full-screen program must not resize it), and the leftover fraction of a
+    // cell is split evenly.
+    const float strip = m.cfg.minimap ? detail::kMinimapRest : 0.0f;
+    const float side_gap = pad + gutter;
+    const float avail = std::max(m.size.x - strip - 2.0f * side_gap, cw);
+    const int cols = std::max(2, static_cast<int>(avail / cw));
+    m.metrics.origin_x = side_gap + std::round((avail - static_cast<float>(cols) * cw) * 0.5f);
     m.metrics.origin_y = pad;
-    const int cols = std::max(2, static_cast<int>((m.size.x - 2.0f * pad - gutter) / cw));
     const int rows = std::max(1, static_cast<int>((m.size.y - 2.0f * pad) / ch));
     m.metrics.fit_cols = cols;
     m.metrics.fit_rows = rows;

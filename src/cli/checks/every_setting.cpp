@@ -1,8 +1,10 @@
 // hand::cli::checks — every setting, stepped through the panel, takes effect.
 
 #include "suites.hpp"
+#include "../../app/detail.hpp"   // kMinimapRest
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 
 namespace hand::cli::checks {
@@ -47,7 +49,16 @@ void every_setting([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Che
     const hand::Config d{};
     ok(mm.font_size == mm.cfg.font_size && mm.font_size != d.font_size, "font.size reaches the grid");
     ok(mm.metrics.cell_h == std::round(mm.font_size * mm.cfg.line_height), "font.line_height sets the row height");
-    ok(mm.metrics.origin_x == mm.cfg.padding + (mm.cfg.shell_marks ? 10.0f : 0.0f) && mm.cfg.padding != d.padding, "window.padding moves the grid");
+    {   // window.padding moves the grid, and the grid sits centred: the gap left
+        // of column 0 equals the gap right of the last column (to the minimap
+        // strip), within the one pixel a centred half-cell rounds by
+        const float gutter = mm.cfg.shell_marks ? 10.0f : 0.0f;
+        const float strip = mm.cfg.minimap ? hand::detail::kMinimapRest : 0.0f;
+        const float left = mm.metrics.origin_x - gutter;
+        const float right = mm.size.x - strip - (mm.metrics.origin_x + static_cast<float>(mm.metrics.fit_cols) * mm.metrics.cell_w) - gutter;
+        ok(left >= mm.cfg.padding && mm.cfg.padding != d.padding, "window.padding moves the grid");
+        ok(std::fabs(left - right) <= 1.0f, "the grid sits centred: the same space left and right");
+    }
     ok(mm.palette.bg != hand::palette_of(d).bg, "colors.scheme recolours the terminal");
     ok(mm.tab().grid && mm.tab().grid->cursor_shape != dsl::TermCursorShape::block, "cursor.style reaches the cursor");
     ok(!mm.cfg.cursor_blink && !mm.cfg.visual_bell && mm.cfg.copy_on_select && !mm.cfg.links_need_ctrl,

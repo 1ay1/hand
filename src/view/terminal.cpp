@@ -80,6 +80,7 @@ TermViewOptions term_options(const Model& m, float frac, bool above) {
     const Config& cfg = m.cfg;
     const float bell = se.bell_at >= 0.0 && cfg.visual_bell ? static_cast<float>(std::max(0.0, 1.0 - (m.time - se.bell_at) / 0.2)) : 0.0f;
     TermViewOptions o{.font_size = m.font_size, .line_height = cfg.line_height, .padding = cfg.padding,
+                      .origin_x = m.metrics.origin_x,   // centred by fit(): equal gaps both sides
                       .focused = m.focused,
                       .cursor_on = cfg.blink_style != BlinkStyle::hard ? true : cursor_lit(m),
                       .dim_unfocused = m.focused ? 0.0f : cfg.dim_unfocused, .bell = bell, .marks = cfg.shell_marks,
