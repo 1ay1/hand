@@ -113,5 +113,10 @@ void upload(Sink out, Host h, HostBook book, std::string dir, std::vector<std::s
 /// The host's shared connection and one kept-open channel, ahead of need
 /// (Cmd::task: it blocks on ssh; answers nothing).
 void warm_remote(Sink out, Host h, HostBook book);
+/// The host's link: its shared connection up, then one timed round trip
+/// (LinkProbed: up + rtt, or down + why).
+void probe_link(Sink out, Host h, HostBook book);
+/// ...the same, returned (the real-ssh check calls it directly).
+App::LinkProbed probe_link_now(const Host& h, const HostBook& book);
 
 }  // namespace hand::fx

@@ -14,7 +14,7 @@
 //        ├─ DialogMsg    Answer RememberToggle DialogFocus      the question
 //        ├─ WindowMsg    RequestQuit WindowAct Panel ToggleSettings
 //        ├─ SshMsg       OpenHosts HostsKey ConnectHost ConnectTyped Reconnect HostsLoaded
-//        ├─ ManagerMsg   ToggleManager Manager FilesListed FilesDone UploadPicked TunnelProbe TunnelScan
+//        ├─ ManagerMsg   ToggleManager Manager FilesListed FilesDone UploadPicked TunnelProbe TunnelScan LinkProbed
 //        ├─ PaneMsg      TogglePane PaneOp PaneListed PaneResize PaneWatch PanePreview
 //        ├─ EditorMsg    OpenFile FileLoaded EditorOp FileSaved EditorPasted FileWatch FileStat
 //        │               QuickOpen QuickListed QuickKey QuickText QuickPick     files in tabs, ⌘P
@@ -207,7 +207,9 @@ struct FilesDone { std::string alias; std::string refresh_path; std::string titl
 struct UploadPicked { std::string alias; std::string dir; std::vector<std::string> files; };
 struct TunnelProbe {};                                             ///< 1 Hz while the manager is open
 struct TunnelScan { std::vector<int> ports; std::vector<std::string> owners; bool known = true; };
-using ManagerMsg = std::variant<ToggleManager, Manager, FilesListed, FilesDone, UploadPicked, TunnelProbe, TunnelScan>;
+/// A host's link, probed (up: its round trip; down: why).
+struct LinkProbed { std::string alias; bool up = false; int rtt_ms = -1; std::string error; };
+using ManagerMsg = std::variant<ToggleManager, Manager, FilesListed, FilesDone, UploadPicked, TunnelProbe, TunnelScan, LinkProbed>;
 
 // ── the file pane ──────────────────────────────────────────────────────────
 /// Whether a listing should announce itself (a watch re-read is quiet).

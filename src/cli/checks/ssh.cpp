@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <functional>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -158,6 +159,27 @@ void ssh([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& ok) {
         rt.tick();
         ok(rt.model().ssh.manager.open && rt.node_rect(dsl::node_id("mgr.connect")).has_value(),
            "ctrl+shift+h opens the host manager on a host, ready to connect");
+        {   // the link: what a probe found shows on the row and in the detail
+            const auto& sel = rt.model().ssh.book.hosts[static_cast<std::size_t>(rt.model().ssh.manager.ui.sel)];
+            rt.send(hand::App::Msg{hand::App::LinkProbed{sel.alias, true, 23, ""}});
+            rt.tick();
+            const auto hs = hand::detail::picker_hosts(rt.model());
+            const auto& sh = hs[static_cast<std::size_t>(rt.model().ssh.manager.ui.sel)];
+            ok(sh.link == dsl::SshHost::Link::up && sh.rtt_ms == 23, "a probed host is reachable, with its round trip");
+            const auto has_text = [&](std::string_view s) {
+                const std::function<bool(const Node&)> walk = [&](const Node& n) {
+                    if (n.kind() == NodeKind::text && n.text().find(s) != std::string_view::npos) return true;
+                    for (const auto& k : n.children()) if (walk(k)) return true;
+                    return false;
+                };
+                for (const auto& o : rt.host().overlays().items()) if (walk(o.content)) return true;
+                return walk(rt.tree());
+            };
+            ok(has_text("23 ms round trip"), "...and the detail says so");
+            rt.send(hand::App::Msg{hand::App::LinkProbed{sel.alias, false, -1, "key login refused"}});
+            rt.tick();
+            ok(has_text("unreachable \u00B7 key login refused"), "a refusing host says why");
+        }
         const std::size_t n0 = rt.model().ssh.book.hosts.size();
         // a new host: n, fields by typing and tab, a bad tunnel refused
         rt.press_key(K::n);

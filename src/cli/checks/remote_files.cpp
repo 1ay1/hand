@@ -106,6 +106,15 @@ void remote_files(Runtime&, mayag::Vec2, Check& ok) {
         }
     }
 
+    {   // the manager's link probe: a real host up, with its round trip; a bad one down, with why
+        const auto up = fx::probe_link_now(h, book);
+        ok(up.up && up.rtt_ms >= 0 && up.rtt_ms < 1000, std::string("the link probe finds the host up, with its round trip (" + std::to_string(up.rtt_ms) + " ms)").c_str());
+        Host nowhere = h;
+        nowhere.alias = nowhere.hostname = "no-such-host.invalid";
+        const auto down = fx::probe_link_now(nowhere, book);
+        ok(!down.up && !down.error.empty(), std::string("...and an unknown host down, saying why (" + down.error + ")").c_str());
+    }
+
     namespace ro = fx::remote_ops;
     auto t = std::chrono::steady_clock::now();
     const auto ld = ro::read_file(SessionId{1}, h, book, file, false);

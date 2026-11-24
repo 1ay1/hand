@@ -25,6 +25,10 @@ using namespace mayag;
 using namespace mayag::dsl;
 using namespace hand::detail;
 
+namespace {
+App::Cmd probe_selected(Model& m);   // below: the selected host's link
+}  // namespace
+
 App::Cmd App::update(Model& m, OpenHosts) {
     if (m.ssh.picker.open) { m.ssh.picker.open = false; return {}; }
     if (m.dialog.ask.has_value() || m.settings.open) return {};
@@ -160,7 +164,8 @@ App::Cmd App::update(Model& m, ToggleManager) {
         m.ssh.manager.ui.sel = r.empty() ? 0 : r.front();
     }
     Cmd load = m.cfg.demo ? Cmd{} : Cmd::run(fx::load_hosts, m.ssh.sources, true);
-    return Cmd::batch(std::move(load), update(m, TunnelProbe{}));   // tunnel status from the first frame
+    m.ssh.manager.probed.clear();   // each opening asks afresh
+    return Cmd::batch(std::move(load), update(m, TunnelProbe{}), probe_selected(m));   // tunnel status and the host's link from the first frame
 }
 
 namespace {
@@ -184,6 +189,22 @@ std::string base_name(const std::string& p) {
     while (s.size() > 1 && s.back() == '/') s.pop_back();
     return s.substr(s.rfind('/') == std::string::npos ? 0 : s.rfind('/') + 1);
 }
+
+/// The selected host's link, probed once per selection: picking a host (the
+/// keyboard, a click, opening the manager on it) shows whether it answers and
+/// in how many ms -- and brings its shared connection up, so Connect after
+/// that is instant. Only the host you look at, never the whole book: a
+/// manager must not ssh to forty machines because you opened it.
+App::Cmd probe_selected(Model& m) {
+    auto& mg = m.ssh.manager;
+    if (!mg.open || m.cfg.demo || mg.ui.sel < 0 || mg.ui.sel >= static_cast<int>(m.ssh.book.hosts.size())) return {};
+    const Host& h = m.ssh.book.hosts[static_cast<std::size_t>(mg.ui.sel)];
+    if (h.alias == mg.probed) return {};
+    mg.probed = h.alias;
+    auto& l = mg.links[h.alias];
+    if (l.state != SshHost::Link::up) l.state = SshHost::Link::probing;   // a known-up host keeps its number while re-asked
+    return App::Cmd::task(TaskKey{"ssh.probe"}, fx::probe_link, h, m.ssh.book);
+}
 }  // namespace
 
 App::Cmd App::update(Model& m, Manager p) {
@@ -192,6 +213,7 @@ App::Cmd App::update(Model& m, Manager p) {
     p.op(m.ssh.manager.ui);
     if (m.ssh.manager.ui.show_hidden != hidden_before) refilter(m);
     std::vector<Cmd> cmds;
+    cmds.push_back(probe_selected(m));
     for (auto& a : std::exchange(m.ssh.manager.ui.out, {})) {
         const bool known = a.host >= 0 && a.host < static_cast<int>(m.ssh.book.hosts.size());
         switch (a.kind) {
@@ -380,6 +402,14 @@ App::Cmd App::update(Model& m, TunnelScan s) {
     m.ssh.manager.ports = std::move(s.ports);
     m.ssh.manager.port_owners = std::move(s.owners);
     m.ssh.manager.ports_known = s.known;
+    return {};
+}
+
+App::Cmd App::update(Model& m, LinkProbed p) {
+    auto& l = m.ssh.manager.links[p.alias];
+    l.state = p.up ? SshHost::Link::up : SshHost::Link::down;
+    l.rtt_ms = p.up ? p.rtt_ms : -1;
+    l.error = std::move(p.error);
     return {};
 }
 

@@ -70,7 +70,7 @@ struct App {
     using ConnectTyped = msg::ConnectTyped; using Reconnect = msg::Reconnect; using RetryTick = msg::RetryTick; using Where = msg::Where;
     using ToggleManager = msg::ToggleManager; using Manager = msg::Manager;
     using FilesListed = msg::FilesListed; using FilesDone = msg::FilesDone; using UploadPicked = msg::UploadPicked;
-    using TunnelProbe = msg::TunnelProbe; using TunnelScan = msg::TunnelScan;
+    using TunnelProbe = msg::TunnelProbe; using TunnelScan = msg::TunnelScan; using LinkProbed = msg::LinkProbed;
     using TogglePane = msg::TogglePane; using PaneOp = msg::PaneOp;         using PaneListed = msg::PaneListed;
     using PaneResize = msg::PaneResize; using PaneWatch = msg::PaneWatch;   using PanePreview = msg::PanePreview;
     using OpenFile = msg::OpenFile;     using FileLoaded = msg::FileLoaded; using EditorOp = msg::EditorOp;
@@ -200,6 +200,7 @@ struct App {
     static Cmd update(Model& m, UploadPicked);
     static Cmd update(Model& m, TunnelProbe);
     static Cmd update(Model& m, TunnelScan);
+    static Cmd update(Model& m, LinkProbed p);
     // PaneMsg (src/app/pane.cpp)
     static Cmd update(Model& m, TogglePane);
     static Cmd update(Model& m, PaneOp);

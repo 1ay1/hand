@@ -7,6 +7,8 @@
 #include <hand/ssh/remote.hpp>
 #include <hand/ssh/sftp.hpp>
 
+#include <chrono>
+
 #include <mayag/widget/file_pane.hpp>
 
 namespace hand::fx {
@@ -46,5 +48,28 @@ void warm_remote(Sink, Host h, HostBook book) {
     // trip, not a login. Silent: a failure here is reported by the action itself.
     if (remote::warm(h, book).empty()) (void)remote::warm_channel(h, book);
 }
+
+App::LinkProbed probe_link_now(const Host& h, const HostBook& book) {
+    // Bring the shared connection up (a no-op when it is), then time one
+    // request over the kept-open channel: the round trip every file action
+    // will cost. A host that refuses says why, in ssh's own terms.
+    App::LinkProbed r{.alias = h.alias};
+    if (const std::string why = remote::warm(h, book); !why.empty()) {
+        r.error = why;
+        return r;
+    }
+    (void)remote::exec(h, book, "true", {}, 10000);   // the channel itself, outside the timing
+    const auto t0 = proc::Clock::now();
+    const auto x = remote::exec(h, book, "true", {}, 10000);
+    if (x.started && x.code == 0) {
+        r.up = true;
+        r.rtt_ms = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(proc::Clock::now() - t0).count());
+    } else {
+        r.error = x.timed_out ? "timed out" : remote::explain(x.err, x.code);
+    }
+    return r;
+}
+
+void probe_link(Sink out, Host h, HostBook book) { out.send(App::Msg{probe_link_now(h, book)}); }
 
 }  // namespace hand::fx

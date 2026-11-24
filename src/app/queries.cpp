@@ -82,6 +82,11 @@ std::vector<SshHost> picker_hosts(const Model& m) {
                 ++s.sessions;
         }
         s.connected = s.sessions > 0;
+        if (const auto it = m.ssh.manager.links.find(h.alias); it != m.ssh.manager.links.end()) {
+            s.link = it->second.state;
+            s.rtt_ms = it->second.rtt_ms;
+            s.link_error = it->second.error;
+        }
         // each tunnel, live: who listens on its local port right now
         for (const auto& fw : h.forwards) {
             const auto f = mayag::dsl::ssh_forward_parse(fw);

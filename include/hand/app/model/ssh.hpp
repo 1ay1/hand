@@ -7,6 +7,7 @@
 #include <mayag/mayag.hpp>
 #include <mayag/widget/ssh_manager.hpp>
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -30,6 +31,12 @@ struct ManagerModel {
     std::vector<std::string>                port_owners;
     bool                                    ports_known = true;
     std::vector<ImportSource>               imports;     ///< other clients' sessions, read on open
+    /// The link to each host as last probed (by alias): the selected host is
+    /// probed when it is picked -- which also brings its shared connection up,
+    /// so Connect is instant -- never the whole book behind your back.
+    struct Link { mayag::dsl::SshHost::Link state = mayag::dsl::SshHost::Link::unknown; int rtt_ms = -1; std::string error; };
+    std::map<std::string, Link>             links;
+    std::string                             probed;      ///< the alias the last probe was asked for (one in flight per selection)
 };
 
 struct SshModel {
