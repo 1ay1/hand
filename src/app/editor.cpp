@@ -111,6 +111,19 @@ App::Cmd App::update(Model& m, OpenFile o) {
     if (first_split && !m.cfg.motion) m.strip.t = 1.0f;
     m.pane.ui.focused = false;   // the editor has the keyboard
     fit(m);
+    if (o.host) {   // read before on this host: show it now, and let one stat say if it still is
+        const auto key = RemoteFileCache::key(*o.host, o.path);
+        if (const auto* e = m.remote_files.find(key)) {
+            FileDoc& d = *m.tab().file;
+            d.loading = false;
+            d.st = text_editor_ops::open(*e->text, o.path);
+            d.disk_mtime = e->mtime;
+            if (d.jump) text_editor_ops::jump_to(d.st, *std::exchange(d.jump, std::nullopt));
+            m.remote_files.put(key, e->mtime, e->text);   // most recently used
+            if (m.cfg.demo) return SetTitle{name_of(o.path)};
+            return Cmd::batch(Cmd::task(fx::stat_remote_file, sid, *o.host, m.ssh.book, o.path), Cmd{SetTitle{shown_name(o.path, o.host)}});
+        }
+    }
     if (m.cfg.demo) return SetTitle{name_of(o.path)};
     return Cmd::batch(read_doc(m, sid, *m.tab().file, false), Cmd{SetTitle{shown_name(o.path, o.host)}});
 }
@@ -118,6 +131,8 @@ App::Cmd App::update(Model& m, OpenFile o) {
 App::Cmd App::update(Model& m, FileLoaded l) {
     FileDoc* d = doc_of(m, l.sid);
     if (d == nullptr) return {};   // closed while it was read
+    if (d->host && l.error.empty() && !l.binary)   // what reopening it shows at once
+        m.remote_files.put(RemoteFileCache::key(*d->host, d->path), l.mtime, std::make_shared<const std::string>(l.text));
     if (l.reload) {   // the file changed on disk, or "reload from disk"
         if (!l.error.empty()) return {};
         d->disk_mtime = l.mtime;

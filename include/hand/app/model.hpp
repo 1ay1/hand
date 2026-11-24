@@ -97,6 +97,8 @@ struct Model {
     SshModel                ssh;                  ///< ctrl+shift+s picker, ctrl+shift+h manager
     PaneModel               pane;                 ///< ctrl+shift+e
     QuickOpenModel          quick;                ///< ⌘P / ctrl+P: the project's files
+    RemoteFileCache         remote_files;         ///< remote files read this run: reopened at once
+    RemoteListCache         remote_dirs;          ///< remote folders listed this run: shown at once on return
     SearchAllModel          search_all;           ///< ⌘⇧F: text across the project
 
     /// The tab in front: what the keyboard, the mouse and the view act on.

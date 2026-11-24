@@ -9,12 +9,14 @@
 #include <hand/ssh/hosts.hpp>
 
 #include <mayag/mayag.hpp>
+#include <mayag/widget/file_pane.hpp>
 #include <mayag/widget/fuzzy.hpp>
 #include <mayag/widget/text_editor.hpp>
 #include <mayag/widget/terminal_view.hpp>
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -72,6 +74,81 @@ struct FileDoc {
     bool                           close_after_save = false;   ///< "save" in the close dialog
     std::int64_t                   disk_mtime = 0; ///< the file's mtime when last read or written (watching for outside edits)
     std::optional<mayag::editor::Range> jump;     ///< where to land once the text arrives (a search hit)
+};
+
+/// Remote files read this run, by host and path. Reopening one shows it AT
+/// ONCE (the text it had and its change token), and one stat -- a round trip
+/// -- says whether the host still has that; a different token reloads it, as
+/// an outside edit would. Copy-on-write (the model is copied every update):
+/// a put copies a map of at most kMaxFiles shared pointers, never the texts.
+struct RemoteFileCache {
+    struct Entry {
+        std::int64_t                       mtime = 0;   ///< the change token the text was read or saved at
+        std::shared_ptr<const std::string> text;
+        std::uint64_t                      used = 0;    ///< for evicting the least recently used
+    };
+    using Map = std::map<std::string, Entry>;
+    std::shared_ptr<const Map> files = std::make_shared<const Map>();
+    std::uint64_t              clock = 0;
+    static constexpr std::size_t kMaxFiles = 64;
+    static constexpr std::size_t kMaxBytes = 64u << 20;
+    static constexpr std::size_t kMaxFile = 8u << 20;   ///< bigger files are read afresh each time
+
+    [[nodiscard]] static std::string key(const Host& h, const std::string& path) { return h.alias + '\x1f' + path; }
+    [[nodiscard]] const Entry* find(const std::string& k) const {
+        const auto it = files->find(k);
+        return it == files->end() ? nullptr : &it->second;
+    }
+    /// Remember `text` at token `mtime` for `k`, evicting the oldest past the bounds.
+    void put(const std::string& k, std::int64_t mtime, std::shared_ptr<const std::string> text) {
+        if (!text || text->size() > kMaxFile || mtime == 0) return;
+        auto next = std::make_shared<Map>(*files);
+        (*next)[k] = Entry{mtime, std::move(text), ++clock};
+        std::size_t bytes = 0;
+        for (const auto& [_, e] : *next) bytes += e.text->size();
+        while (next->size() > kMaxFiles || bytes > kMaxBytes) {
+            auto old = next->begin();
+            for (auto it = next->begin(); it != next->end(); ++it) if (it->second.used < old->second.used) old = it;
+            bytes -= old->second.text->size();
+            next->erase(old);
+        }
+        files = std::move(next);
+    }
+    void forget(const std::string& k) {
+        if (!files->contains(k)) return;
+        auto next = std::make_shared<Map>(*files);
+        next->erase(k);
+        files = std::move(next);
+    }
+};
+
+/// Remote folders listed this run, by host and path: going back into one
+/// shows it at once, and a quiet re-list (what changed glows) catches up a
+/// round trip later. Copy-on-write like RemoteFileCache.
+struct RemoteListCache {
+    struct Entry {
+        std::shared_ptr<const std::vector<mayag::dsl::FileEntry>> entries;
+        std::uint64_t used = 0;
+    };
+    using Map = std::map<std::string, Entry>;
+    std::shared_ptr<const Map> dirs = std::make_shared<const Map>();
+    std::uint64_t              clock = 0;
+    static constexpr std::size_t kMaxDirs = 256;
+
+    [[nodiscard]] const Entry* find(const std::string& k) const {
+        const auto it = dirs->find(k);
+        return it == dirs->end() ? nullptr : &it->second;
+    }
+    void put(const std::string& k, std::vector<mayag::dsl::FileEntry> entries) {
+        auto next = std::make_shared<Map>(*dirs);
+        (*next)[k] = Entry{std::make_shared<const std::vector<mayag::dsl::FileEntry>>(std::move(entries)), ++clock};
+        while (next->size() > kMaxDirs) {
+            auto old = next->begin();
+            for (auto it = next->begin(); it != next->end(); ++it) if (it->second.used < old->second.used) old = it;
+            next->erase(old);
+        }
+        dirs = std::move(next);
+    }
 };
 
 /// ⌘P's files ranked against one query: (index into files, hits), best first.

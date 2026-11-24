@@ -61,6 +61,15 @@ App::Cmd App::update(Model& m, CloseTab c) {
         m.strip.switch_t = m.cfg.motion ? 0.0f : 1.0f;
     }
     // the closing session's pty dies with its Session (SIGHUP to the shell)
+    // A remote file closed clean: its text as last saved is what reopening
+    // it shows (one stat then confirms it). Edited and discarded: forgotten,
+    // so a reopen never shows a version the host does not have.
+    if (const FileDoc* d = m.at(i).file ? &*m.at(i).file : nullptr; d && d->host && !d->loading && d->error.empty()) {
+        const auto key = RemoteFileCache::key(*d->host, d->path);
+        if (!d->st.ed.dirty() && !d->saving)
+            m.remote_files.put(key, d->disk_mtime, std::make_shared<const std::string>(text_editor_ops::file_text(d->st)));
+        else m.remote_files.forget(key);
+    }
     m.tabs.erase(i);   // the active tab stays in front
     if (m.tab_count() == 1 && !m.cfg.strip_always() && !m.cfg.motion) m.strip.t = 0.0f;
     fit(m);

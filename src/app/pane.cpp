@@ -145,6 +145,18 @@ bool pane_glowing(const Model& m) {
 /// List `dir` where the pane looks (a task), and show it. `quiet`: a watch
 /// re-read of the same folder (no spinner; what changed glows).
 static App::Cmd pane_list(Model& m, std::string dir, bool quiet = false) {
+    // A remote folder seen this run: show it now and re-list quietly -- what
+    // changed since glows a round trip later, instead of a spinner for one.
+    if (!quiet && !m.pane.where.empty() && m.pane.host && !dir.empty())
+        if (const auto* c = m.remote_dirs.find(m.pane.host->alias + '\x1f' + dir)) {
+            if (dir != m.pane.path) { m.pane.fresh_at.clear(); m.pane.ui.filter.clear(); m.pane.ui.filtering = false; }
+            m.pane.path = dir;
+            m.pane.entries = *c->entries;
+            m.pane.loading = false;
+            m.pane.error.clear();
+            m.pane.preview_path.clear();
+            quiet = true;
+        }
     if (!quiet) {
         if (dir != m.pane.path) { m.pane.fresh_at.clear(); m.pane.ui.filter.clear(); m.pane.ui.filtering = false; }
         m.pane.path = dir;
@@ -242,6 +254,8 @@ App::Cmd App::update(Model& m, PaneResize r) {
 
 App::Cmd App::update(Model& m, PaneListed r) {
     if (r.token != m.pane.token) return {};   // an older request
+    if (!m.pane.where.empty() && m.pane.host && r.error.empty() && !r.path.empty())
+        m.remote_dirs.put(m.pane.host->alias + '\x1f' + r.path, r.entries);   // what returning here shows at once
     if (r.notice == Notice::quiet) {   // a watch re-read: same folder, glow what changed
         if (!r.error.empty() || r.path != m.pane.path) return {};
         std::map<std::string, const FileEntry*> before;

@@ -131,6 +131,66 @@ void editor_in(Runtime& rt, Check& ok) {
         ok(rt.model().tab_count() == tabs0, "\"save\" in the dialog saves, then closes the tab");
     }
 
+    {   // a remote file read once reopens AT ONCE (its text as it was), and one
+        // stat confirms it -- a round trip, not a whole read before you see it
+        Host box;
+        box.alias = "box";
+        box.hostname = "box.example";
+        const std::string rp = "/srv/app/main.py";
+        const auto close_front = [&] {
+            rt.send(App::Msg{App::CloseTab{TabIndex{rt.model().active()}, Confirm::given}});
+            for (int i = 0; i < 3; ++i) rt.tick();
+        };
+        rt.send(App::Msg{App::OpenFile{.path = rp, .host = box}});
+        ok(rt.model().tab().file && rt.model().tab().file->loading, "a remote file opens loading (nothing read yet)");
+        rt.send(App::Msg{App::FileLoaded{.sid = rt.model().tab().sid, .path = rp, .text = "print('hi')\n", .mtime = 42}});
+        close_front();
+        rt.send(App::Msg{App::OpenFile{.path = rp, .host = box}});
+        const FileDoc* d = rt.model().tab().file ? &*rt.model().tab().file : nullptr;
+        ok(d && !d->loading && d->st.ed.text() == "print('hi')\n" && d->disk_mtime == 42,
+           "reopened, it shows at once with its change token (no read to wait for)");
+        rt.window().type("x");
+        rt.tick();
+        close_front();
+        rt.send(App::Msg{App::OpenFile{.path = rp, .host = box}});
+        ok(rt.model().tab().file && rt.model().tab().file->loading, "edited and discarded: forgotten, read afresh (never a version the host lacks)");
+        close_front();
+    }
+    {   // the file pane on a remote host: a folder visited before shows at once on return
+        using A = FilePaneAction;
+        const bool was_open = rt.model().pane.open;
+        rt.send(App::Msg{mayag::Edit<App::Model>{[](App::Model& mm) {
+            Host box;
+            box.alias = "box";
+            box.hostname = "box.example";
+            mm.pane.open = true;
+            mm.pane.where = "box";
+            mm.pane.host = box;
+            mm.pane.follow = false;
+        }}});
+        const auto go = [&](const std::string& p) {
+            rt.send(App::Msg{App::PaneOp{FilePaneOp{[p](FilePaneState& s) { s.out.push_back({A::Kind::list, p}); }}}});
+        };
+        const auto listed = [&](const std::string& p, std::vector<FileEntry> es, App::Notice n = App::Notice::loud) {
+            rt.send(App::Msg{App::PaneListed{rt.model().pane.token, p, std::move(es), "", n}});
+        };
+        const std::string top = "/srv/" + std::to_string(rt.model().pane.token);   // fresh per run of this suite
+        go(top);
+        ok(rt.model().pane.loading, "a remote folder never seen: listed (loading)");
+        listed(top, {{.name = "app", .dir = true}, {.name = "notes.txt"}});
+        go(top + "/app");
+        listed(top + "/app", {{.name = "main.py"}});
+        go(top);
+        ok(!rt.model().pane.loading && rt.model().pane.entries.size() == 2 && rt.model().pane.path == top,
+           "...seen before: shown at once, the re-list quiet behind it");
+        listed(top, {{.name = "app", .dir = true}, {.name = "notes.txt"}, {.name = "new.log"}}, App::Notice::quiet);
+        ok(rt.model().pane.entries.size() == 3 && rt.model().pane.fresh_at.count("new.log") == 1,
+           "...and what changed since arrives a round trip later, glowing");
+        rt.send(App::Msg{mayag::Edit<App::Model>{[was_open](App::Model& mm) {
+            mm.pane.where.clear(); mm.pane.host.reset(); mm.pane.open = was_open; mm.pane.entries.clear(); mm.pane.path.clear();
+        }}});
+    }
+
     // ⌘P: the project's files, fuzzy-found. On the Mac from any tab; on the
     // PC ctrl+P in a shell is the shell's (history), so from an editor tab.
     const bool mac = g_km == Keymap::mac;
