@@ -1,0 +1,74 @@
+# hand CI: the app built and its suites run on every OS it ships on.
+#
+# hand had no CI: its Windows code fell a whole Pty interface behind POSIX and
+# nobody saw. Each job builds hand (mayag, toe and jaal come in as submodules)
+# and runs its ctest suite -- the headless self-test, the lints, the perf gates
+# that judge CPU time, motion_economy.
+#
+# TOOLCHAIN FLOOR, as mayag's CI: jaal needs C++26 structured binding packs
+# (P1061), first in GCC 16 and clang 22 -- neither in the runner images, so
+# they come from the same install script mayag's CI uses. Windows builds with
+# MSVC on jaal's shallow rules.
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-clang
+            os: ubuntu-24.04
+            cxx: clang++-22
+            cc: clang-22
+            install: sh external/mayag/.github/ci/install-linux.sh clang
+            # the perf gates time this runner, not hand: a shared VM's CPU
+            # is not ours (they still run, they just do not gate)
+            test: ctest --test-dir build --output-on-failure -LE "perf"
+
+          - name: macos-gcc
+            os: macos-15
+            # the runner's Apple clang predates P1061; Homebrew's GCC 16 has it
+            cxx: g++-16
+            cc: gcc-16
+            install: brew install gcc@16 ninja
+            test: ctest --test-dir build --output-on-failure -LE "perf"
+
+          - name: windows-msvc
+            os: windows-2022
+            cxx: cl
+            cc: cl
+            install: choco install ninja -y
+            test: ctest --test-dir build --output-on-failure -LE "perf"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install toolchain
+        run: ${{ matrix.install }}
+        shell: bash
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: matrix.name == 'windows-msvc'
+
+      - name: Configure
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} -DCMAKE_C_COMPILER=${{ matrix.cc }}
+        shell: bash
+
+      - name: Build
+        run: cmake --build build -j
+        shell: bash
+
+      - name: Test
+        run: ${{ matrix.test }}
+        shell: bash
