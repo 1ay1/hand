@@ -217,6 +217,18 @@ if (shot == "echo") {   // keystroke -> pty -> echo -> parsed -> frame drawn: ha
     using clk = std::chrono::steady_clock;
     // wait for the program to come up and go quiet
     rt.settle([](const auto& m) { return static_cast<bool>(m.tab().pty); }, std::chrono::seconds(3));
+    // HAND_ECHO_LOAD=cmd: the same measurement with a firehose running in a
+    // SECOND tab ("yes", "cat /dev/urandom | base64"): a key must still echo
+    // in a frame or two while another shell floods the loop.
+    if (const char* load = std::getenv("HAND_ECHO_LOAD"); load && *load) {
+        const std::string echo_cli = rt.model().cfg.shell_cli;
+        rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[l = std::string{load}](hand::App::Model& m) { m.cfg.shell_cli = l; }}});
+        rt.send(hand::App::Msg{hand::App::NewTab{}});
+        rt.settle([](const auto& m) { return static_cast<bool>(m.tab().pty); }, std::chrono::seconds(3));
+        rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[echo_cli](hand::App::Model& m) { m.cfg.shell_cli = echo_cli; }}});
+        rt.send(hand::App::Msg{hand::App::SelectTab{hand::TabIndex{0}}});   // back to the echo tab; the flood runs behind it
+        for (int i = 0; i < 30; ++i) { rt.settle([](const auto&) { return false; }, std::chrono::milliseconds(5)); rt.tick(); }
+    }
     for (int i = 0; i < 20; ++i) { rt.settle([](const auto&) { return false; }, std::chrono::milliseconds(5)); rt.tick(); }
     const int n = std::getenv("HAND_ECHO_N") ? std::atoi(std::getenv("HAND_ECHO_N")) : 200;
     std::vector<double> lat;

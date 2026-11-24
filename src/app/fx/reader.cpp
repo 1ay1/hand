@@ -3,6 +3,7 @@
 #include "fx.hpp"
 
 #include <hand/core/credit.hpp>
+#include <hand/core/output_slice.hpp>
 #include <hand/core/platform.hpp>
 
 #include <algorithm>
@@ -21,21 +22,19 @@ void read_pty(Sink out, std::stop_token st, mayag::CoOwned<Pty> pty, SessionId s
     // macOS) pty buffer; only when that next chunk is full (kCap) does it
     // stop reading -- and then the producer blocks, which is the throttle.
     constexpr std::size_t kCap = 4u << 20;
-    // Each Output is at most a frame's worth of parsing (~6 ms at toe's
-    // ~80 MB/s): a bigger one would starve the frame it lands in, and while
-    // that frame is late the reader piles up an even bigger next one -- a
-    // feedback loop that ran a `yes` flood down to 8 fps.
-    constexpr std::size_t kSlice = 512u << 10;
+    // Each Output costs at most ~4 ms of parsing (core/output_slice.hpp): a
+    // bigger one holds the frame and the next key behind it, and while that
+    // frame is late the reader piles up an even bigger next one -- a
+    // feedback loop that once ran a `yes` flood down to 8 fps.
     auto credit = mayag::CoOwned<OutputCredit>::make();   // this reader's, shared with the UI through each Output
     std::string buf;
     bool alive = true;
     const auto ship = [&] {
+        // a slice is bounded by its parse cost, not its size (output_slice.hpp)
         std::string chunk;
-        if (buf.size() <= kSlice) chunk = std::exchange(buf, std::string{});
+        const std::size_t n = output_slice(buf);
+        if (n >= buf.size()) chunk = std::exchange(buf, std::string{});
         else {
-            // cut on a UTF-8 boundary, so no slice ends mid-character
-            std::size_t n = kSlice;
-            while (n > kSlice - 4 && (static_cast<unsigned char>(buf[n]) & 0xC0) == 0x80) --n;
             chunk.assign(buf, 0, n);
             buf.erase(0, n);
         }

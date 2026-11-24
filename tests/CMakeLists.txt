@@ -19,7 +19,8 @@
 #   one_os_cmake                 no CMakeLists branches on WIN32 / APPLE / UNIX / CMAKE_SYSTEM_NAME: the build asks
 #                                the C++ headers (jaal_target_is) or reads MAYAG_SYSTEM
 #   mayag_no_byte_hash           cache keys are values, never an object's padded bytes
-#   echo_latency                 keystroke -> pty -> echo -> frame, through the real loop (hand --echo):
+#   echo_latency[_under_flood]   keystroke -> pty -> echo -> frame, through the real loop (hand --echo),
+#                                alone and with `yes` flooding a second tab:
 #                                fails if the median passes 8 ms (baseline ~1 ms release, ~2.3 ms dev)
 #   hint_scan                    hint mode's hand-written URL / path / hash / IP scanners agree with the
 #                                std::regex each one replaced, on 40k random strings
@@ -42,6 +43,11 @@ set_tests_properties(hint_scan PROPERTIES FIXTURES_REQUIRED hint_scan_bin)
 if(NOT MAYAG_SYSTEM STREQUAL "windows")   # `cat` is the echo program
     add_test(NAME echo_latency COMMAND hand --echo --last-resort)
     set_tests_properties(echo_latency PROPERTIES RUN_SERIAL TRUE TIMEOUT 60 LABELS "perf")
+    # ...and with `yes` flooding a second tab: a key still echoes within a
+    # frame (measured p50 ~0.3 ms, max ~5 ms; the gate is the same 8 ms p50)
+    add_test(NAME echo_latency_under_flood COMMAND hand --echo --last-resort)
+    set_tests_properties(echo_latency_under_flood PROPERTIES RUN_SERIAL TRUE TIMEOUT 60 LABELS "perf"
+                         ENVIRONMENT "HAND_ECHO_LOAD=yes")
 endif()
 # the self-test again, alone on the machine, failing on any update over
 # jaal's 8 ms fold budget (it names the message: "slow update: hand::msg::X")
