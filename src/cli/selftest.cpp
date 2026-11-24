@@ -61,6 +61,18 @@ int selftest(Runtime& rt, Vec2 size) {
     else if (rt.slow_folds() > 0)
         std::printf("  note  %llu update(s) over jaal's fold budget (see stderr; HAND_FOLD_BUDGET=strict fails on it)\n",
                     static_cast<unsigned long long>(rt.slow_folds()));
+    {   // ...and every widget the suites drove drew within one 120 Hz refresh
+        // (8.3 ms): view + cascade + layout + paint, the part every backend pays
+        // (the headless raster is the software path a GPU window does not run).
+        // Measured: ~4.3 ms, a zoom frame rasterising every glyph at a new size
+        // for the first time; ordinary frames are well under 1 ms.
+        const auto& w = rt.host().latency().slowest();
+        const double ms = mayag::LatencyStats::widget_ms(w);
+        std::printf("  slowest widget frame %.2f ms  (view %.2f cascade %.2f layout %.2f paint %.2f, %u instances)\n", ms,
+                    w.view_ms, w.cascade_ms, w.layout_ms, w.paint_ms, static_cast<unsigned>(w.instances));
+        if (const char* s = std::getenv("HAND_FOLD_BUDGET"); s && std::string_view{s} == "strict")
+            ok(ms < 8.0, "no widget frame misses a 120 Hz refresh (8 ms)");
+    }
     std::printf(ok.failures() ? "FAIL\n" : "PASS\n");
     return ok.failures();
 }
