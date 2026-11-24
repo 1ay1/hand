@@ -146,7 +146,7 @@ void editor_in(Runtime& rt, Check& ok) {
     rt.window().type("pane");
     rt.tick();
     ok(!quick_open_ranked(rt.model()).empty() &&
-           rt.model().quick.files[static_cast<std::size_t>(quick_open_ranked(rt.model())[0].first)] == "src/app/pane.cpp",
+           (*rt.model().quick.files)[static_cast<std::size_t>(quick_open_ranked(rt.model())[0].first)] == "src/app/pane.cpp",
        "...and finds the file by name");
     rt.press_key(Key::escape);
     ok(!rt.model().quick.open, "escape closes it");

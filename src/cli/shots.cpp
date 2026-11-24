@@ -200,6 +200,40 @@ if (shot == "bench") {
         }
         run("editor: typing at the end", [&](int i) { rt.window().type(std::string(1, static_cast<char>('a' + i % 26))); });
     }
+    {   // ⌘P over a 50k-file project (the list's cap): every key re-ranks, every frame draws the list
+        rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) {
+            m.quick = {};
+            m.quick.open = true;
+            m.quick.root = "/tmp/big";
+            auto files = std::make_shared<std::vector<std::string>>();
+            for (int i = 0; i < 50000; ++i)
+                files->push_back("src/module" + std::to_string(i % 97) + "/sub" + std::to_string(i % 13) + "/file_" + std::to_string(i) + ".cpp");
+            m.quick.files = std::move(files);
+        }}});
+        rt.tick();
+        run("quick open: typing, 50k", [&](int i) {
+            if (i % 8 < 4) rt.post(hand::App::Msg{hand::App::QuickText{std::string(1, "mfsx"[i % 8])}});
+            else rt.post(hand::App::Msg{hand::App::QuickKey{mayag::Key::backspace, {}}});
+        });
+        run("quick open: pointer moving", [&](int i) { rt.window().move_to(Vec2{500.0f + static_cast<float>(i % 60) * 3.0f, 200.0f}); });
+        rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) { m.quick = {}; }}});
+        rt.tick();
+    }
+    {   // ⌘⇧F with its 2000 hits (the cap)
+        rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) {
+            m.search_all = {};
+            m.search_all.open = true;
+            m.search_all.q.set("needle");
+            for (int i = 0; i < 2000; ++i)
+                m.search_all.hits.push_back({.file = "src/f" + std::to_string(i / 7) + ".cpp", .line = i, .col = 12, .len = 6,
+                                             .text = "    auto x = needle(" + std::to_string(i) + ", v.size(), k * 3);   // what it is for"});
+            m.search_all.truncated = true;
+        }}});
+        rt.tick();
+        run("search all: moving, 2000", [&](int i) { rt.post(hand::App::Msg{hand::App::SearchAllKey{(i / 30) % 2 ? mayag::Key::up : mayag::Key::down, {}}}); });
+        rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[](hand::App::Model& m) { m.search_all = {}; }}});
+        rt.tick();
+    }
     return 0;
 }
 if (shot == "flood") {   // a real shell running a firehose: frames keep coming, memory stays flat, ctrl-C lands
@@ -290,7 +324,12 @@ if (shot == "echo") {   // keystroke -> pty -> echo -> parsed -> frame drawn: ha
         const bool back = rt.settle([before](const auto& m) { return m.tab().bytes > before; }, std::chrono::milliseconds(500));
         const auto b = clk::now();
         rt.tick();                                                   // the frame that shows it
-        if (!back) { ++lost; continue; }
+        if (!back) {
+            ++lost;
+            std::printf("  key %d ('%c') got no echo in 500 ms (bytes %llu -> %llu)\n", i, static_cast<char>('a' + i % 26),
+                        static_cast<unsigned long long>(before), static_cast<unsigned long long>(rt.model().tab().bytes));
+            continue;
+        }
         trip += std::chrono::duration<double, std::milli>(b - a).count();
         frame += std::chrono::duration<double, std::milli>(clk::now() - b).count();
         lat.push_back(std::chrono::duration<double, std::milli>(clk::now() - a).count());

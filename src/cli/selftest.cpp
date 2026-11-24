@@ -66,12 +66,18 @@ int selftest(Runtime& rt, Vec2 size) {
         // (the headless raster is the software path a GPU window does not run).
         // Measured: ~4.3 ms, a zoom frame rasterising every glyph at a new size
         // for the first time; ordinary frames are well under 1 ms.
+        // The gate is on the frame's CPU time: on wall time it failed on a
+        // loaded machine for frames whose paint "took" 11.8 ms on 122
+        // instances -- the thread descheduled, not the code slow.
         const auto& w = rt.host().latency().slowest();
+        const auto& cw = rt.host().latency().slowest_cpu();
         const double ms = mayag::LatencyStats::widget_ms(w);
         std::printf("  slowest widget frame %.2f ms  (view %.2f cascade %.2f layout %.2f paint %.2f, %u instances)\n", ms,
                     w.view_ms, w.cascade_ms, w.layout_ms, w.paint_ms, static_cast<unsigned>(w.instances));
+        std::printf("  most widget work in a frame %.2f ms cpu  (wall: view %.2f cascade %.2f layout %.2f paint %.2f, %u instances)\n",
+                    cw.widget_cpu_ms, cw.view_ms, cw.cascade_ms, cw.layout_ms, cw.paint_ms, static_cast<unsigned>(cw.instances));
         if (const char* s = std::getenv("HAND_FOLD_BUDGET"); s && std::string_view{s} == "strict")
-            ok(ms < 8.0, "no widget frame misses a 120 Hz refresh (8 ms)");
+            ok(cw.widget_cpu_ms < 8.0, "no widget frame's work misses a 120 Hz refresh (8 ms)");
     }
     std::printf(ok.failures() ? "FAIL\n" : "PASS\n");
     return ok.failures();

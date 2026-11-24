@@ -457,9 +457,9 @@ App::Cmd App::update(Model& m, Second) {
     // one activity sample a second per tab: bytes in, as a 0..1 rate
     for (std::size_t i = 0; i < m.tab_count(); ++i) {
         Session& se = m.at(i);
-        se.activity.push_back(std::clamp(std::log1p(static_cast<float>(se.bytes)) / 9.0f, 0.0f, 1.0f));
+        se.activity.push_back(std::clamp(std::log1p(static_cast<float>(se.bytes - se.bytes_sampled)) / 9.0f, 0.0f, 1.0f));
         if (se.activity.size() > 20) se.activity.erase(se.activity.begin());
-        se.bytes = 0;
+        se.bytes_sampled = se.bytes;
     }
     return pane_sync(m);   // catches an `ssh` started inside the tab
 }

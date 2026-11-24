@@ -39,26 +39,25 @@ void overlays(const Ctx& c, const Model& m) {
     if (se.hint && !se.file) hint_bar(c, "hint.tip", {.count = se.hint->hints.size(), .typed = se.hint->typed, .font_size = m.font_size, .y = m.size.y - 40.0f});
     ssh_overlays(c, m);
     if (m.quick.open) {   // ⌘P: the project's files, fuzzy-found
-        const auto ranked = quick_open_ranked(m);
-        std::vector<PickerItem> items;
-        Ranked rk;
-        for (const auto& [i, fm] : ranked) {
-            const std::string& f = m.quick.files[static_cast<std::size_t>(i)];
+        const auto& ranked = quick_open_ranked(m);
+        const auto& files = *m.quick.files;
+        const auto row = [&](int k) {   // only the rows on screen: the ranked list is 200 long
+            const auto& [i, fm] = ranked[static_cast<std::size_t>(k)];
+            const std::string& f = files[static_cast<std::size_t>(i)];
             const auto slash = f.find_last_of('/');
             const std::string name = slash == std::string::npos ? f : f.substr(slash + 1);
             // the name, its folder dimmed after it; matched letters in the name only
-            FuzzyMatch shown;
+            PickerRow r;
             for (auto pos : fm.positions)
-                if (slash == std::string::npos || pos > slash) shown.positions.push_back(static_cast<std::uint16_t>(slash == std::string::npos ? pos : pos - slash - 1));
+                if (slash == std::string::npos || pos > slash) r.positions.push_back(static_cast<std::uint16_t>(slash == std::string::npos ? pos : pos - slash - 1));
             bool open_tab = false;
             for (std::size_t t = 0; t < m.tab_count(); ++t) open_tab = open_tab || (m.at(t).file && m.at(t).file->path == m.quick.root + "/" + f);
-            rk.order.push_back(static_cast<int>(items.size()));
-            rk.matches.push_back(std::move(shown));
-            items.push_back({.label = name, .detail = slash == std::string::npos ? std::string{} : f.substr(0, slash),
-                             .hint = open_tab ? "open" : "", .icon_name = name});
-        }
+            r.item = {.label = name, .detail = slash == std::string::npos ? std::string{} : f.substr(0, slash),
+                      .hint = open_tab ? "open" : "", .icon_name = name};
+            return r;
+        };
         const std::string where = m.quick.root.substr(m.quick.root.find_last_of('/') + 1) + (m.quick.host ? " on " + m.quick.host->alias : std::string{});
-        picker(c, "quick", m.quick.q, items, rk, m.quick.sel,
+        picker(c, "quick", m.quick.q, PickerCount{static_cast<int>(ranked.size()), ranked.size()}, row, m.quick.sel,
                PickerStyle{.placeholder = m.quick.loading ? "Listing " + where + "\u2026" : "Open a file in " + where, .prefix = "\u2192",
                            .width = std::min(680.0f, m.win.x - 80.0f),
                            .empty_text = m.quick.loading ? "Listing files\u2026" : "No file matches",
@@ -67,9 +66,8 @@ void overlays(const Ctx& c, const Model& m) {
     }
     if (m.search_all.open) {   // ⌘⇧F: every line in the project with the text
         const auto& s = m.search_all;
-        std::vector<PickerItem> items;
-        Ranked rk;
-        for (const auto& h : s.hits) {
+        const auto row = [&](int k) {   // only the rows on screen, of up to 2000 hits
+            const SearchHit& h = s.hits[static_cast<std::size_t>(k)];
             // the line, its indent dropped, and cut to keep the match in view
             std::size_t a = h.text.find_first_not_of(" \t");
             if (a == std::string::npos) a = 0;
@@ -78,21 +76,20 @@ void overlays(const Ctx& c, const Model& m) {
             std::string line = h.text.substr(a, 140);
             const bool cut_front = a > h.text.find_first_not_of(" \t");
             if (cut_front) line = "\u2026" + line;
-            FuzzyMatch fm;
+            PickerRow r;
             const std::size_t at = static_cast<std::size_t>(h.col) - a + (cut_front ? 3 : 0);   // … is 3 bytes
-            for (int k = 0; k < h.len; ++k) if (at + static_cast<std::size_t>(k) < line.size()) fm.positions.push_back(static_cast<std::uint16_t>(at + static_cast<std::size_t>(k)));
+            for (int j = 0; j < h.len; ++j) if (at + static_cast<std::size_t>(j) < line.size()) r.positions.push_back(static_cast<std::uint16_t>(at + static_cast<std::size_t>(j)));
             const auto slash = h.file.find_last_of('/');
             const std::string name = slash == std::string::npos ? h.file : h.file.substr(slash + 1);
-            rk.order.push_back(static_cast<int>(items.size()));
-            rk.matches.push_back(std::move(fm));
-            items.push_back({.label = std::move(line), .detail = h.file, .hint = std::to_string(h.line + 1), .icon_name = name});
-        }
+            r.item = {.label = std::move(line), .detail = h.file, .hint = std::to_string(h.line + 1), .icon_name = name};
+            return r;
+        };
         // how many files the hits are in
         std::size_t files = 0;
         for (std::size_t i = 0; i < s.hits.size(); ++i) files += i == 0 || s.hits[i].file != s.hits[i - 1].file ? 1 : 0;
         const std::string where = (s.root.empty() || s.root == "." ? std::string{"the project"} : s.root.substr(s.root.find_last_of('/') + 1)) +
                                   (s.host ? " on " + s.host->alias : std::string{});
-        picker(c, "search_all", s.q, items, rk, s.sel,
+        picker(c, "search_all", s.q, PickerCount{static_cast<int>(s.hits.size()), s.hits.size()}, row, s.sel,
                PickerStyle{.placeholder = "Search the text of every file in " + where,
                            .prefix = "/",   // the search idiom (⌕ is missing from most UI fonts)
                            .width = std::min(820.0f, m.win.x - 60.0f),

@@ -255,15 +255,24 @@ App::Cmd App::update(Model& m, FileStat s) {
 
 namespace {
 /// The files, ranked against the query: (index into files, hits). An empty
-/// query keeps git's order.
-std::vector<std::pair<int, FuzzyMatch>> quick_ranked(const Model& m) {
-    std::vector<std::pair<int, FuzzyMatch>> out;
+/// query keeps git's order. Ranking 50k paths is ~15 ms, and the view, the
+/// key handler and a click each asked for it -- every frame, so a pointer
+/// move over the list re-ranked the whole project. The answer is kept (a memo
+/// on the model, like the file pane's order) until the list or the query
+/// changes.
+const std::vector<std::pair<int, FuzzyMatch>>& quick_ranked(const Model& m) {
     const auto& q = m.quick.q.text;
-    for (std::size_t i = 0; i < m.quick.files.size(); ++i) {
-        auto fm = fuzzy_match(q, m.quick.files[i]);
+    if (const auto& r = m.quick.ranked; r && r->files == m.quick.files && r->q == q) return r->rows;
+    auto memo = std::make_shared<QuickRanked>();
+    memo->files = m.quick.files;
+    memo->q = q;
+    auto& out = memo->rows;
+    const auto& files = *m.quick.files;
+    for (std::size_t i = 0; i < files.size(); ++i) {
+        auto fm = fuzzy_match(q, files[i]);
         if (!fm.ok) continue;
         // the file NAME matching counts more than its folders
-        const auto& f = m.quick.files[i];
+        const auto& f = files[i];
         const auto slash = f.find_last_of('/');
         const std::size_t name_at = slash == std::string::npos ? 0 : slash + 1;
         int bonus = 0;
@@ -274,7 +283,8 @@ std::vector<std::pair<int, FuzzyMatch>> quick_ranked(const Model& m) {
     }
     if (!q.empty()) std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) { return a.second.score > b.second.score; });
     if (out.size() > 200) out.resize(200);
-    return out;
+    m.quick.ranked = std::move(memo);
+    return m.quick.ranked->rows;
 }
 /// Where ⌘P starts: the front tab's folder (list_project climbs to its repo's top).
 }  // namespace
@@ -288,10 +298,10 @@ App::Cmd App::update(Model& m, QuickOpen) {
     const Site w = where_now(m);
     const std::string alias = w.host ? w.host->alias : std::string{};
     const bool same_machine = alias == (m.quick.host ? m.quick.host->alias : std::string{});
-    if (!m.quick.files.empty() && same_machine && (w.dir == m.quick.root || w.dir.rfind(m.quick.root + "/", 0) == 0))
+    if (!m.quick.files->empty() && same_machine && (w.dir == m.quick.root || w.dir.rfind(m.quick.root + "/", 0) == 0))
         return {};   // still inside the listed project
     m.quick.loading = true;
-    m.quick.files.clear();
+    m.quick.files = std::make_shared<const std::vector<std::string>>();
     m.quick.host = w.host;
     m.quick.root = w.dir;
     if (m.cfg.demo) return {};
@@ -302,7 +312,7 @@ App::Cmd App::update(Model& m, QuickOpen) {
 App::Cmd App::update(Model& m, QuickListed l) {
     m.quick.loading = false;
     m.quick.root = l.root;   // the repo's top when it is one: paths are relative to it
-    m.quick.files = std::move(l.files);
+    m.quick.files = std::make_shared<const std::vector<std::string>>(std::move(l.files));
     m.quick.truncated = l.truncated;
     return {};
 }
@@ -324,14 +334,14 @@ App::Cmd App::update(Model& m, QuickText t) {
 }
 
 App::Cmd App::update(Model& m, QuickPick p) {
-    const auto r = quick_ranked(m);
+    const auto& r = quick_ranked(m);
+    if (p.index < 0 || p.index >= static_cast<int>(r.size())) { m.quick.open = false; return {}; }
+    const std::string rel = (*m.quick.files)[static_cast<std::size_t>(r[static_cast<std::size_t>(p.index)].first)];
     m.quick.open = false;
-    if (p.index < 0 || p.index >= static_cast<int>(r.size())) return {};
-    const std::string& rel = m.quick.files[static_cast<std::size_t>(r[static_cast<std::size_t>(p.index)].first)];
     return update(m, OpenFile{.path = m.quick.root + "/" + rel, .host = m.quick.host});
 }
 
-std::vector<std::pair<int, FuzzyMatch>> quick_open_ranked(const Model& m) { return quick_ranked(m); }
+const std::vector<std::pair<int, FuzzyMatch>>& quick_open_ranked(const Model& m) { return quick_ranked(m); }
 
 // ── ⌘⇧F: text across the project ───────────────────────────────────────────
 

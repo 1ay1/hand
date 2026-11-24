@@ -100,5 +100,6 @@ mayag::dsl::FilePaneProps pane_props(const Model& m);
 
 namespace hand {
 /// ⌘P's list ranked against its query (src/app/editor.cpp): (file index, hits).
-std::vector<std::pair<int, mayag::dsl::FuzzyMatch>> quick_open_ranked(const Model& m);
+/// Memoised on the model: valid until the next update.
+const std::vector<std::pair<int, mayag::dsl::FuzzyMatch>>& quick_open_ranked(const Model& m);
 }  // namespace hand

@@ -9,6 +9,7 @@
 #include <hand/ssh/hosts.hpp>
 
 #include <mayag/mayag.hpp>
+#include <mayag/widget/fuzzy.hpp>
 #include <mayag/widget/text_editor.hpp>
 #include <mayag/widget/terminal_view.hpp>
 
@@ -73,6 +74,13 @@ struct FileDoc {
     std::optional<mayag::editor::Range> jump;     ///< where to land once the text arrives (a search hit)
 };
 
+/// ⌘P's files ranked against one query: (index into files, hits), best first.
+struct QuickRanked {
+    std::shared_ptr<const std::vector<std::string>>      files;   ///< the list it ranked (held: its address can't be reused)
+    std::string                                          q;
+    std::vector<std::pair<int, mayag::dsl::FuzzyMatch>>  rows;
+};
+
 /// ⌘P: every file of the project, fuzzy-found.
 struct QuickOpenModel {
     bool                     open = false;
@@ -81,8 +89,11 @@ struct QuickOpenModel {
     int                      sel = 0;
     std::string              root;              ///< absolute; files are relative to it
     std::optional<Host>      host;              ///< the machine listed (none: this one)
-    std::vector<std::string> files;
+    /// Up to 50k paths, never edited once listed: shared, so copying the model
+    /// (every update) does not copy them.
+    std::shared_ptr<const std::vector<std::string>> files = std::make_shared<const std::vector<std::string>>();
     bool                     truncated = false; ///< the project has more than the list holds
+    mutable std::shared_ptr<const QuickRanked> ranked;   // memo: quick_open_ranked of (files, q)
 };
 
 /// One line that matched (⌘⇧F): `file` relative to the searched root; the
@@ -153,7 +164,11 @@ struct Session {
     // what the tab strip shows while it is in the background
     bool                    unread = false;
     bool                    bell = false;
-    std::size_t             bytes = 0;            ///< output since the last activity sample
+    /// Output since the tab opened. Never reset: the activity sample keeps its
+    /// own mark, so a reader of the total (the echo gate, flood's MB/s) can't
+    /// race the 1 Hz sample -- it did, and a key's echo read as lost.
+    std::uint64_t           bytes = 0;
+    std::uint64_t           bytes_sampled = 0;    ///< `bytes` at the last activity sample
     std::vector<float>      activity;             ///< output rate, one sample a second
     // what runs in it, as the last probe found (Probe / Probed)
     std::string             proc;                 ///< the foreground process ("fish", "nvim")
