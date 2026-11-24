@@ -4,7 +4,9 @@
 #include <hand/core/hint_scan.hpp>
 
 #include <toe/input/keymap.hpp>
+#include <toe/core/target.hpp>
 #include <toe/term/update.hpp>
+#include <mayag/core/target.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -13,6 +15,12 @@
 #include <variant>
 
 namespace hand {
+
+// toe reads the vector ISA itself (it stands alone); the rest of the stack
+// reads it once below mayag (MAYAG_ISA_*). Here, the one file that sees both, they
+// must be the same answer -- or the stack would have two.
+static_assert(TOE_ISA_NEON == MAYAG_ISA_NEON && TOE_ISA_SSE2 == MAYAG_ISA_SSE2 && TOE_ISA_AVX2 == MAYAG_ISA_AVX2,
+              "toe/core/target.hpp and mayag/core/target.hpp disagree about the vector ISA");
 
 using toe::term::Screen;
 namespace dsl = mayag::dsl;

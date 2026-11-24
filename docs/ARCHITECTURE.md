@@ -45,6 +45,31 @@ between three hand-kept keymaps.
 | the OS: pty, processes, home, time, files | `src/core` (`hand::plat`, `pty_*`, `proc_*`) | `plat::home_dir()`, `plat::local_time()`, ... |
 | what the OS's tools can do | `plat::ssh_can_share()` (ControlMaster) | `remote::control_dir`, the one place that decides |
 
+Under that, the platform itself is a fact read ONCE per kind, for the whole
+stack (hand, toe, mayag, jaal):
+
+| fact | read from the compiler / build in | everyone else tests |
+|---|---|---|
+| OS, compiler, CPU, vector ISA | `jaal/meta/target.hpp` | `MAYAG_OS_*` `MAYAG_CC_*` `MAYAG_CPU_*` `MAYAG_ISA_*` (`<mayag/core/target.hpp>`) |
+| toe's ISA and builtins (toe stands alone) | `toe/core/target.hpp` | `TOE_ISA_*`, `toe::prefetch_for_write`; `src/core/term.cpp` static_asserts it equals `MAYAG_ISA_*` |
+| which renderers, which window system | `mayag/core/target.hpp` (from CMake's `MAYAG_WITH_*`) | `MAYAG_GPU_*`, and `MAYAG_WINDOW_*`: exactly one of cocoa / wayland / win32 / headless |
+| which jaal backend (epoll, kqueue, poll, wait) | `jaal/platform/backend.hpp` | `platform/select.hpp`, and jaal's source list |
+| the OS, for the build | asked OF those headers by a one-line compile (`jaal_target_is`, `cmake/JaalTarget.cmake`) | `MAYAG_SYSTEM` (apple / windows / freedesktop / other): mayag's backend table, hand's link lines |
+
+Every derived name is always defined, 0 or 1, and a file that tests one
+includes its header itself, so a missing include can never read as "not this
+platform". The build asks the C++ rather than re-deriving the answer from
+`WIN32` / `APPLE` / `CMAKE_SYSTEM_NAME`, because two copies drift: jaal's
+source list compiled kqueue for every "*BSD" while its header chose poll on
+one of them, and toe's SIMD scanner tested `__x86_64__ || __SSE2__`, which
+MSVC defines neither of, so Windows silently ran the scalar loop.
+
+Lints, each mutation-tested: `one_os` (no raw target macro outside the
+readers; no `MAYAG_WITH_*` / `MAYAG_PLATFORM_HEADLESS` outside
+`mayag/core/target.hpp`; the include rule), `one_os_cmake` (no `if()` on
+the OS in any CMakeLists), `one_hand` and `one_look` (where a platform may
+be branched on at all).
+
 Because the keymap is data, the self-test presses BOTH conventions on every
 machine: the `editor` suite runs once with the Mac's keys and once with the
 PC's, `mac` checks ⌘ chords (and that the PC's Super is left to the desktop),

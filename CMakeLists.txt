@@ -184,7 +184,9 @@ endif()
 # The pty is the only part of hand that is not portable C++: forkpty lives in
 # libutil on glibc, and on Windows it is ConPTY (kernel32) plus shlwapi for
 # the host-glob fallback. It all belongs to hand_core, and travels up from it.
-if(WIN32)
+# Which OS: mayag's one answer (MAYAG_SYSTEM: apple | windows | freedesktop |
+# other), never WIN32 / APPLE again here.
+if(MAYAG_SYSTEM STREQUAL "windows")
     target_link_libraries(hand_core PUBLIC shlwapi)
     # ConPTY needs Windows 10 1809 (the API that makes a real terminal
     # possible at all); say so rather than inheriting MinGW's older default.
@@ -194,13 +196,13 @@ if(WIN32)
     # (A fully static MinGW link was measured: +15 ms to first text, as the
     # bigger image pages in cold, while the shared runtime DLLs are already
     # resident. So the runtime stays dynamic.)
-elseif(NOT APPLE)
+elseif(NOT MAYAG_SYSTEM STREQUAL "apple")
     target_link_libraries(hand_core PUBLIC util)   # glibc forkpty
 endif()
 # Release ships no symbols: an 8.9 MB unstripped hand.exe took 11 ms longer
 # to launch than the stripped 5.1 MB one (on-access scanning reads the whole
 # image). RelWithDebInfo keeps them for profiling.
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND NOT APPLE)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND NOT MAYAG_SYSTEM STREQUAL "apple")
     target_link_options(hand PRIVATE $<$<CONFIG:Release,MinSizeRel>:-s>)
 endif()
 

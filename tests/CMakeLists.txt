@@ -13,8 +13,11 @@
 #   mayag_one_look               mayag's graphics are one source on every platform
 #   one_hand                     hand is one source on every platform: platform conditionals only in the
 #                                OS seam (src/core), the rest decides from data (tests/one_hand.cmake)
-#   one_os                       the OS is read in ONE file for hand, mayag and jaal
-#                                (jaal/meta/target.hpp); everything tests JAAL_OS_* / MAYAG_OS_*
+#   one_os                       the target (OS, compiler, CPU, ISA) is read in ONE file for hand, toe,
+#                                mayag and jaal; the build's renderer / window choices in one more
+#                                (jaal/meta/target.hpp, mayag/core/target.hpp)
+#   one_os_cmake                 no CMakeLists branches on WIN32 / APPLE / UNIX / CMAKE_SYSTEM_NAME: the build asks
+#                                the C++ headers (jaal_target_is) or reads MAYAG_SYSTEM
 #   mayag_no_byte_hash           cache keys are values, never an object's padded bytes
 #   echo_latency                 keystroke -> pty -> echo -> frame, through the real loop (hand --echo):
 #                                fails if the median passes 8 ms (baseline ~1 ms release, ~2.3 ms dev)
@@ -36,7 +39,7 @@ add_test(NAME hint_scan_build
 set_tests_properties(hint_scan_build PROPERTIES FIXTURES_SETUP hint_scan_bin)
 add_test(NAME hint_scan COMMAND hint_scan_test)
 set_tests_properties(hint_scan PROPERTIES FIXTURES_REQUIRED hint_scan_bin)
-if(NOT WIN32)   # `cat` is the echo program
+if(NOT MAYAG_SYSTEM STREQUAL "windows")   # `cat` is the echo program
     add_test(NAME echo_latency COMMAND hand --echo --last-resort)
     set_tests_properties(echo_latency PROPERTIES RUN_SERIAL TRUE TIMEOUT 60 LABELS "perf")
 endif()
@@ -80,9 +83,14 @@ add_test(NAME one_hand
                  -P ${CMAKE_SOURCE_DIR}/tests/one_hand.cmake)
 add_test(NAME one_os
          COMMAND ${CMAKE_COMMAND}
-                 "-DROOTS=${CMAKE_SOURCE_DIR}/src;${CMAKE_SOURCE_DIR}/include;${_MAYAG}/include;${_MAYAG}/third_party/jaal/include;${_MAYAG}/third_party/jaal/src"
-                 -DSOURCE=${_MAYAG}/third_party/jaal/include/jaal/meta/target.hpp
+                 "-DROOTS=${CMAKE_SOURCE_DIR}/src;${CMAKE_SOURCE_DIR}/include;${CMAKE_SOURCE_DIR}/tests;${CMAKE_SOURCE_DIR}/external/toe/src;${CMAKE_SOURCE_DIR}/external/toe/include;${CMAKE_SOURCE_DIR}/external/toe/tests;${_MAYAG}/include;${_MAYAG}/tests;${_MAYAG}/examples;${_MAYAG}/third_party/jaal/include;${_MAYAG}/third_party/jaal/src;${_MAYAG}/third_party/jaal/tests"
+                 "-DSOURCE=${_MAYAG}/third_party/jaal/include/jaal/meta/target.hpp;${CMAKE_SOURCE_DIR}/external/toe/include/toe/core/target.hpp"
+                 -DBUILD_SOURCE=${_MAYAG}/include/mayag/core/target.hpp
                  -P ${_MAYAG}/third_party/jaal/tests/lint/one_os.cmake)
+add_test(NAME one_os_cmake
+         COMMAND ${CMAKE_COMMAND}
+                 "-DFILES=${CMAKE_SOURCE_DIR}/CMakeLists.txt;${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt;${CMAKE_SOURCE_DIR}/external/toe/CMakeLists.txt;${CMAKE_SOURCE_DIR}/external/toe/src/CMakeLists.txt;${_MAYAG}/CMakeLists.txt;${_MAYAG}/third_party/jaal/CMakeLists.txt;${_MAYAG}/third_party/jaal/tests/CMakeLists.txt"
+                 -P ${_MAYAG}/third_party/jaal/tests/lint/one_os_cmake.cmake)
 set_tests_properties(layering purity concurrency_src concurrency_include_hand concurrency_allowlist_tight_src
                      concurrency_allowlist_tight_include_hand mayag_layering mayag_uses_jaal_public_api
-                     mayag_concurrency jaal_upward mayag_one_look mayag_no_byte_hash mayag_type_scale one_hand one_os PROPERTIES LABELS "static")
+                     mayag_concurrency jaal_upward mayag_one_look mayag_no_byte_hash mayag_type_scale one_hand one_os one_os_cmake PROPERTIES LABELS "static")
