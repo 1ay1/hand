@@ -140,13 +140,17 @@ App::Session App::spawn_session(Model& m, const std::string& cwd) {
                                      static_cast<int>(m.cfg.scrollback), m.env.entropy ^ se.sid.get());
     if (m.cfg.demo) return se;
     // `-e CMD`: a bare program runs as is; a command line (arguments, pipes)
-    // goes through sh -c, the way every terminal's -e behaves
-    const bool cmdline = !m.cfg.shell_cli.empty() && m.cfg.shell_cli.find_first_of(" \t|;&<>$'\"") != std::string::npos;
+    // goes through this OS's command runner (sh -c; cmd /c on Windows), the
+    // way every terminal's -e behaves. Which runner is the OS seam's call,
+    // made where the pty starts (fx::spawn): update only says "a command line".
+    const bool cmdline = m.cfg.shell_args.empty() && !m.cfg.shell_cli.empty() &&
+                         m.cfg.shell_cli.find_first_of(" \t|;&<>$'\"") != std::string::npos;
     Launch l{.spec = {.cols = m.metrics.fit_cols, .rows = m.metrics.fit_rows,
-                      .shell = cmdline ? std::string{"/bin/sh"} : m.cfg.shell_cli.empty() ? m.cfg.shell : m.cfg.shell_cli,
+                      .shell = cmdline ? std::string{} : m.cfg.shell_cli.empty() ? m.cfg.shell : m.cfg.shell_cli,
+                      .args = m.cfg.shell_cli.empty() ? std::vector<std::string>{} : m.cfg.shell_args,
                       .cwd = cwd},
-             .integrate = m.cfg.shell_integration && !cmdline};
-    if (cmdline) l.spec.args = {"-c", m.cfg.shell_cli};
+             .integrate = m.cfg.shell_integration && !cmdline && m.cfg.shell_args.empty()};
+    if (cmdline) l.command_line = m.cfg.shell_cli;
     if (!cwd.empty()) l.spec.env.emplace_back("PWD", cwd);
     se.launch = std::move(l);   // the drain after this step starts it (fx::spawn)
     return se;

@@ -45,6 +45,27 @@ std::tm local_time(std::time_t t) {
     return tm;
 }
 
+std::vector<std::string> command_runner() { return {"/bin/sh", "-c"}; }
+
+long read_stdin(char* buf, std::size_t n) {
+    for (;;) {
+        const ssize_t r = ::read(0, buf, n);
+        if (r < 0 && errno == EINTR) continue;
+        return static_cast<long>(r);
+    }
+}
+
+bool write_stdout(const char* buf, std::size_t n) {
+    while (n > 0) {
+        const ssize_t w = ::write(1, buf, n);
+        if (w < 0 && errno == EINTR) continue;
+        if (w <= 0) return false;
+        buf += w;
+        n -= static_cast<std::size_t>(w);
+    }
+    return true;
+}
+
 std::string self_exe() {
 #if MAYAG_OS_APPLE
     std::uint32_t n = 0;

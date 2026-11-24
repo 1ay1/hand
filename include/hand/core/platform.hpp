@@ -15,9 +15,9 @@
 //
 // On POSIX these are one-line passthroughs to the real thing, so the native
 // platform pays nothing for the portability. On Windows (4) and (5) are the
-// interesting ones: ConPTY hands back anonymous pipes, which are NOT
-// selectable, so readiness is modelled with an overlapped peek instead (see
-// src/core/platform_win.cpp).
+// interesting ones: ConPTY's output is read through an overlapped named
+// pipe, so readiness is a real kernel wait on its read's event (see
+// src/core/platform_win.cpp and pty_win.cpp).
 
 #include <cstdint>
 #include <ctime>
@@ -69,6 +69,17 @@ namespace hand::plat {
 /// `name.exe`), or "" when it is not there. An absolute or relative path is
 /// returned as is if it exists. The one PATH lookup hand does itself.
 [[nodiscard]] std::string find_program(std::string_view name);
+
+/// The argv prefix that runs a command LINE (arguments, pipes, quotes) the
+/// way this OS's terminals run `-e CMD`: {"/bin/sh", "-c"} on POSIX,
+/// {"cmd.exe", "/d", "/s", "/c"} on Windows (which has no /bin/sh). The
+/// command line itself is appended as the last argument.
+[[nodiscard]] std::vector<std::string> command_runner();
+
+/// One OS read from stdin (no stdio buffering): bytes read, 0 at EOF, <0 on error.
+[[nodiscard]] long read_stdin(char* buf, std::size_t n);
+/// Write all of `n` bytes to stdout, unbuffered. False when the reader is gone.
+bool write_stdout(const char* buf, std::size_t n);
 
 // ── 3. how much memory we used ──────────────────────────────────────────
 /// Peak resident set size in bytes, 0 when the OS will not say.

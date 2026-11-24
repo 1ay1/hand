@@ -29,6 +29,7 @@
 #include <array>
 #include <cstdio>
 #include <cstring>
+#include <cwchar>
 #include <mutex>
 #include <thread>
 #include <string>
@@ -39,7 +40,7 @@ namespace {
 
 struct Session {
     HANDLE in = INVALID_HANDLE_VALUE;    ///< we write here → child's stdin
-    HANDLE out = INVALID_HANDLE_VALUE;   ///< child's stdout → we read here
+    HANDLE out = INVALID_HANDLE_VALUE;   ///< child's stdout → we read here (an OVERLAPPED named pipe: waitable)
     HPCON pc = nullptr;
     HANDLE proc = INVALID_HANDLE_VALUE;
     DWORD pid = 0;
@@ -49,6 +50,12 @@ struct Session {
     /// sees EOF, so the tab stays open showing it (as a sync failure did).
     HANDLE out_w = INVALID_HANDLE_VALUE;
     COORD size{80, 24};                  ///< the latest size asked for (applied once pc exists)
+    // The read always in flight on `out` (reader thread only): its event is
+    // what the reader sleeps on, so output wakes it the instant it lands.
+    HANDLE ev = nullptr;                 ///< manual-reset; signalled when the read completes
+    OVERLAPPED ov{};
+    bool pending = false;                ///< a read was issued and not yet harvested
+    std::array<char, 65536> rbuf{};
 };
 
 // 64 concurrent ptys is far more than tabs anyone opens, and a fixed table
@@ -178,7 +185,15 @@ Pty::~Pty() {
     // then the handles. Closing the HPCON first can hang on a busy child.
     if (s->in != INVALID_HANDLE_VALUE) ::CloseHandle(s->in);
     if (s->pc != nullptr) ::ClosePseudoConsole(s->pc);
-    if (s->out != INVALID_HANDLE_VALUE) ::CloseHandle(s->out);
+    if (s->out != INVALID_HANDLE_VALUE) {
+        if (s->pending) {   // the kernel writes into rbuf until the read is gone
+            DWORD got = 0;
+            ::CancelIoEx(s->out, &s->ov);
+            (void)::GetOverlappedResult(s->out, &s->ov, &got, TRUE);
+        }
+        ::CloseHandle(s->out);
+    }
+    if (s->ev != nullptr) ::CloseHandle(s->ev);
     if (s->proc != INVALID_HANDLE_VALUE) {
         // The shell gets the chance to notice the closed pipe; if it is wedged
         // it is killed, because a leaked conhost outlives the window.
@@ -235,14 +250,42 @@ Pty::Started Pty::start(const PtySpec& spec) {
     // pipe. We keep the far ends; the HPCON owns the near ones. Made HERE,
     // synchronously, so the pty is usable the moment spawn returns: the
     // reader can wait on `out`, keys typed early queue in `in`.
+    //
+    // The output pipe is a NAMED pipe opened for overlapped reads (as Windows
+    // Terminal does): an anonymous pipe cannot be waited on, so it had to be
+    // polled, and the poll's back-off (up to 16 ms once idle) sat between
+    // every keystroke and its echo -- a 16 ms p50. Now a read is always in
+    // flight and its event wakes the reader the moment conhost writes.
     HANDLE in_read = INVALID_HANDLE_VALUE, out_write = INVALID_HANDLE_VALUE;
-    if (::CreatePipe(&in_read, &s.in, nullptr, 0) == FALSE || ::CreatePipe(&s.out, &out_write, nullptr, 0) == FALSE) {
+    const auto overlapped_pipe = [&](HANDLE& rd, HANDLE& wr) {
+        static unsigned long serial = 0;
+        unsigned long n;
+        {
+            std::lock_guard lk{g_mu};
+            n = ++serial;
+        }
+        wchar_t name[96];
+        std::swprintf(name, 96, L"\\\\.\\pipe\\hand-pty-%lu-%d-%lu", ::GetCurrentProcessId(), slot, n);
+        rd = ::CreateNamedPipeW(name, PIPE_ACCESS_INBOUND | FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE,
+                                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+                                1, 0, 128 * 1024, 0, nullptr);
+        if (rd == INVALID_HANDLE_VALUE) return false;
+        wr = ::CreateFileW(name, GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (wr == INVALID_HANDLE_VALUE) { ::CloseHandle(rd); rd = INVALID_HANDLE_VALUE; return false; }
+        return true;
+    };
+    s.ev = ::CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (s.ev == nullptr || ::CreatePipe(&in_read, &s.in, nullptr, 0) == FALSE || !overlapped_pipe(s.out, out_write)) {
         std::lock_guard lk{g_mu};
         if (in_read != INVALID_HANDLE_VALUE) ::CloseHandle(in_read);
         if (s.in != INVALID_HANDLE_VALUE) ::CloseHandle(s.in);
+        if (s.ev != nullptr) ::CloseHandle(s.ev);
         s = Session{};
         return {};
     }
+    s.ov = OVERLAPPED{};
+    s.ov.hEvent = s.ev;
+    s.pending = false;
     s.out_w = out_write;
     s.size = COORD{static_cast<SHORT>(cols > 0 ? cols : 80), static_cast<SHORT>(rows > 0 ? rows : 24)};
     const Started started{slot, static_cast<pid_t>(pending_pid(slot))};
@@ -387,60 +430,83 @@ void Pty::resize(int cols, int rows, int /*px_w*/, int /*px_h*/) const {
     if (s->pc != nullptr) (void)::ResizePseudoConsole(s->pc, size);
 }
 
+namespace {
+/// Issue the next overlapped read on `s.out` unless one is in flight.
+/// Reader thread only. False: the pipe is broken (conhost is gone).
+bool arm(Session& s) {
+    if (s.pending) return true;
+    s.ov.Offset = s.ov.OffsetHigh = 0;
+    if (::ReadFile(s.out, s.rbuf.data(), static_cast<DWORD>(s.rbuf.size()), nullptr, &s.ov) != FALSE ||
+        ::GetLastError() == ERROR_IO_PENDING) {
+        s.pending = true;   // done now or later, the event says when
+        return true;
+    }
+    return false;
+}
+
+/// Take the in-flight read's bytes if it finished. 1: bytes taken (or a
+/// zero-length completion), 0: still in flight, -1: the pipe is broken.
+int harvest(Session& s, std::string& out) {
+    if (!s.pending) return 0;
+    DWORD got = 0;
+    if (::GetOverlappedResult(s.out, &s.ov, &got, FALSE) == FALSE) {
+        const DWORD e = ::GetLastError();
+        if (e == ERROR_IO_INCOMPLETE) return 0;
+        s.pending = false;
+        return e == ERROR_MORE_DATA ? (out.append(s.rbuf.data(), s.rbuf.size()), 1) : -1;
+    }
+    s.pending = false;
+    out.append(s.rbuf.data(), got);
+    return 1;
+}
+}  // namespace
+
 bool pty_read(int fd, std::string& out, int timeout_ms) {
     Session* s = session_of(fd);
     if (s == nullptr || s->out == INVALID_HANDLE_VALUE) return false;
 
-    // Only read what is actually buffered: ReadFile on a pipe blocks until it
-    // gets at least one byte, and the reader thread must not block here (it
-    // owns the stop check). The caller polls via plat::wait_readable.
+    // Never blocks past timeout_ms: the reader thread owns the stop check.
+    // Harvest the read in flight, then keep reading while reads complete at
+    // once (a burst drains in one call), and leave one read in flight so the
+    // next byte signals the event plat::wait_readable sleeps on.
     //
     // EOF: unlike a POSIX pty, ConPTY's output pipe does NOT break when the
     // shell exits -- conhost holds it open until ClosePseudoConsole -- so
     // `exit` left a dead tab (and a window that never closed). An empty pipe
     // whose shell has exited is EOF.
+    const std::size_t before = out.size();
+    const auto pump = [&]() -> bool {   // false: broken
+        for (;;) {
+            const int h = harvest(*s, out);
+            if (h < 0) return false;
+            if (h == 0 && s->pending) return true;   // in flight: the event will say
+            if (out.size() - before >= (1u << 20)) return true;
+            if (!arm(*s)) return false;
+        }
+    };
+    if (!pump()) return out.size() > before;   // drained what was there; EOF next call
+    if (out.size() > before) return true;
     const auto exited = [&] {
         const HANDLE p = s->proc;
         return p != INVALID_HANDLE_VALUE && ::WaitForSingleObject(p, 0) == WAIT_OBJECT_0;
     };
-    const auto avail = [&]() -> DWORD {
-        DWORD n = 0;
-        if (::PeekNamedPipe(s->out, nullptr, 0, nullptr, &n, nullptr) == FALSE) return 0xFFFFFFFFu;
-        if (n == 0 && exited()) {
-            // The shell's last bytes may still be in flight through conhost:
-            // look once more after it has had a moment to flush them.
-            ::Sleep(15);
-            if (::PeekNamedPipe(s->out, nullptr, 0, nullptr, &n, nullptr) == FALSE || n == 0) return 0xFFFFFFFFu;
-        }
-        return n;
-    };
-
-    DWORD n = avail();
-    if (n == 0xFFFFFFFFu) return false;   // broken pipe: the child is gone
-    if (n == 0) {
-        if (timeout_ms <= 0) return true;   // nothing yet, still alive
-        ::Sleep(static_cast<DWORD>(timeout_ms));
-        n = avail();
-        if (n == 0xFFFFFFFFu) return false;
-        if (n == 0) return true;
-    }
-
-    char buf[65536];
-    while (n > 0) {
-        DWORD got = 0;
-        const DWORD want = std::min<DWORD>(n, static_cast<DWORD>(sizeof buf));
-        if (::ReadFile(s->out, buf, want, &got, nullptr) == FALSE || got == 0) return false;
-        out.append(buf, got);
-        if (out.size() >= (1u << 20)) return true;
-        n = avail();
-        if (n == 0xFFFFFFFFu) return true;   // drained what we had; report EOF next call
-    }
-    return true;
+    // The shell's last bytes may still be in flight through conhost: give
+    // them a moment before calling an exited shell's empty pipe EOF.
+    const DWORD wait = exited() ? 15u : static_cast<DWORD>(std::max(timeout_ms, 0));
+    if (wait == 0) return true;   // nothing yet, still alive
+    (void)::WaitForSingleObject(s->ev, wait);
+    if (!pump()) return out.size() > before;
+    if (out.size() > before) return true;
+    return !exited();
 }
 
 std::intptr_t pty_handle(int fd) {
+    // On Windows the thing to wait on is the in-flight read's event (armed
+    // here, so the very first wait already has a read behind it).
     Session* s = session_of(fd);
-    return s != nullptr && s->out != INVALID_HANDLE_VALUE ? reinterpret_cast<std::intptr_t>(s->out) : -1;
+    if (s == nullptr || s->out == INVALID_HANDLE_VALUE || s->ev == nullptr) return -1;
+    if (!arm(*s)) ::SetEvent(s->ev);   // broken: wake the reader now, its read reports EOF
+    return reinterpret_cast<std::intptr_t>(s->ev);
 }
 
 int Pty::reap() {

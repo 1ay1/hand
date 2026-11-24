@@ -144,10 +144,12 @@ int main(int argc, char** argv) {
         else if (a == "--shot" && i + 1 < argc) shot = argv[++i];
         else if (a == "--bench") { mode = Mode::png; shot = "bench"; }
         else if (a == "--panelag") { mode = Mode::png; shot = "panelag"; }
-        else if (a == "--motion") { mode = Mode::png; shot = "motion"; }
+        else if (a == "--motion") { mode = Mode::png; shot = "motion"; if (cfg.shell_cli.empty()) { cfg.shell_cli = hand::self_exe(); cfg.shell_args = {"--cat"}; } }
         else if (a == "--idle") { mode = Mode::png; shot = "idle"; if (i + 1 < argc && argv[i + 1][0] != '-') cfg.shell_cli = argv[++i]; }
-        else if (a == "--echo") { mode = Mode::png; shot = "echo"; cfg.shell_cli = (i + 1 < argc && argv[i + 1][0] != '-') ? argv[++i] : "cat"; }
-        else if (a == "--flood") { mode = Mode::png; shot = "flood"; cfg.shell_cli = (i + 1 < argc && argv[i + 1][0] != '-') ? argv[++i] : "yes"; }
+        // --echo / --flood default to hand's own `cat` / `yes` (src/cli/fixtures.cpp): the same
+        // program on every OS, no coreutils needed; argv given split, so a path with spaces is fine.
+        else if (a == "--echo") { mode = Mode::png; shot = "echo"; if (i + 1 < argc && argv[i + 1][0] != '-') cfg.shell_cli = argv[++i]; else { cfg.shell_cli = hand::self_exe(); cfg.shell_args = {"--cat"}; } }
+        else if (a == "--flood") { mode = Mode::png; shot = "flood"; if (i + 1 < argc && argv[i + 1][0] != '-') cfg.shell_cli = argv[++i]; else { cfg.shell_cli = hand::self_exe(); cfg.shell_args = {"--yes"}; } }
     }
     startup::mark("hand: main");
     if (mode == Mode::window) mayag::gpu_prestart();   // ~100 ms of device bring-up, overlapped with all below

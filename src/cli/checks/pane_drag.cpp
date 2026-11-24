@@ -8,6 +8,7 @@
 #include "suites.hpp"
 
 #include <hand/app.hpp>
+#include <hand/core/output_slice.hpp>
 
 #include <chrono>
 #include <cmath>
@@ -75,10 +76,18 @@ void pane_drag([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& 
            (std::string{what} + ": released, the grid fits the new width").c_str());
     };
     drag(true, "short history");
-    {   // a full scrollback
+    {   // a full scrollback, fed in the slices the pty reader would send
+        // (output_slice: each Output bounded by its parse cost). One 1.1 MB
+        // Output is a message the reader never sends, and it -- not the
+        // drag -- went over the fold budget on Windows.
         std::string hist;
         for (int i = 0; i < 10000; ++i) hist += std::to_string(i) + " " + std::string(100, 'x') + "\r\n";
-        rt.send(App::Msg{App::Output{hist}});
+        std::string_view rest = hist;
+        while (!rest.empty()) {
+            const std::size_t n = output_slice(rest);
+            rt.send(App::Msg{App::Output{std::string{rest.substr(0, n)}}});
+            rest.remove_prefix(n);
+        }
     }
     drag(false, "10k-line history");
     rt.send(App::Msg{App::TogglePane{}});   // closed again for the suites after

@@ -57,6 +57,7 @@ struct Launch {
     PtySpec                  spec;
     bool                     integrate = false;
     std::optional<SshTarget> ssh;
+    std::string              command_line;   ///< `-e "a b | c"`: run through the OS's runner (sh -c / cmd /c)
 };
 
 /// A file open in a tab: what the editor holds, and where it came from.

@@ -399,20 +399,33 @@ if (shot == "echo") {   // keystroke -> pty -> echo -> parsed -> frame drawn: ha
     // in a frame or two while another shell floods the loop.
     if (const char* load = std::getenv("HAND_ECHO_LOAD"); load && *load) {
         const std::string echo_cli = rt.model().cfg.shell_cli;
-        rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[l = std::string{load}](hand::App::Model& m) { m.cfg.shell_cli = l; }}});
+        const std::vector<std::string> echo_args = rt.model().cfg.shell_args;
+        rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[l = std::string{load}](hand::App::Model& m) {
+            if (l == "yes") { m.cfg.shell_cli = hand::self_exe(); m.cfg.shell_args = {"--yes"}; }   // hand's own, on every OS
+            else { m.cfg.shell_cli = l; m.cfg.shell_args.clear(); }
+        }}});
         rt.send(hand::App::Msg{hand::App::NewTab{}});
         rt.settle([](const auto& m) { return static_cast<bool>(m.tab().pty); }, std::chrono::seconds(3));
-        rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[echo_cli](hand::App::Model& m) { m.cfg.shell_cli = echo_cli; }}});
+        rt.send(hand::App::Msg{mayag::Edit<hand::App::Model>{[echo_cli, echo_args](hand::App::Model& m) { m.cfg.shell_cli = echo_cli; m.cfg.shell_args = echo_args; }}});
         rt.send(hand::App::Msg{hand::App::SelectTab{hand::TabIndex{0}}});   // back to the echo tab; the flood runs behind it
         for (int i = 0; i < 30; ++i) { rt.settle([](const auto&) { return false; }, std::chrono::milliseconds(5)); rt.tick(); }
     }
     for (int i = 0; i < 20; ++i) { rt.settle([](const auto&) { return false; }, std::chrono::milliseconds(5)); rt.tick(); }
     const int n = std::getenv("HAND_ECHO_N") ? std::atoi(std::getenv("HAND_ECHO_N")) : 200;
+    // HAND_ECHO_GAP_MS: idle between keys, as a person types (~60-120 ms).
+    // Back to back (0, the default) measures a different thing on Windows:
+    // conhost's renderer rests one 16 ms frame after every paint, so a key
+    // sent the instant the last echo landed always waits out that rest.
+    const int gap_ms = std::getenv("HAND_ECHO_GAP_MS") ? std::atoi(std::getenv("HAND_ECHO_GAP_MS")) : 0;
     std::vector<double> lat;
     lat.reserve(static_cast<std::size_t>(n));
     int lost = 0;
     double trip = 0, frame = 0, keyframe = 0;
     for (int i = 0; i < n; ++i) {
+        if (gap_ms > 0) {   // idle, but keep the loop turning (a real window would)
+            const auto until = clk::now() + std::chrono::milliseconds(gap_ms);
+            while (clk::now() < until) { rt.settle([](const auto&) { return false; }, std::chrono::milliseconds(4)); rt.tick(); }
+        }
         const std::uint64_t before = rt.model().tab().bytes;
         const auto a = clk::now();
         rt.type(std::string(1, static_cast<char>('a' + i % 26)));   // the key, as the window delivers it

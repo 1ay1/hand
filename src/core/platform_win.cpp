@@ -6,16 +6,12 @@
 // single syscall with no buffer to overflow, and WaitForMultipleObjects takes
 // it directly.
 //
-// wait_readable is the interesting one. ConPTY hands back ANONYMOUS pipes,
-// and anonymous pipes cannot be waited on for readability — they are always
-// signalled as objects, and overlapped I/O is not supported on them. So
-// readiness is polled with PeekNamedPipe on a short duty cycle, while the
-// WAKER is waited on properly. That ordering matters: a stop request or new
-// output credit returns immediately (ctrl-C stays crisp), and only the
-// "is there data yet" question costs a 1 ms tick. Peak cost is ~1000
-// cheap peeks/second on an idle terminal, which does not show up on a
-// profile; the alternative (a per-pty pump thread doing blocking ReadFile)
-// costs a thread and a copy per session.
+// wait_readable is the interesting one. ConPTY's output comes through a
+// named pipe hand opens for OVERLAPPED reads (pty_win.cpp), with one read
+// always in flight; its event is what the reader waits on, together with
+// the waker, in a single WaitForMultipleObjects. No polling: output, a
+// returned credit and a stop request all wake it the moment they happen,
+// and an idle terminal costs no wakeups at all.
 
 #include <mayag/core/target.hpp>
 #include <hand/core/platform.hpp>
@@ -105,6 +101,32 @@ std::string user_token() {
 
 int self_pid() { return static_cast<int>(::GetCurrentProcessId()); }
 
+std::vector<std::string> command_runner() {
+    // %ComSpec% is cmd.exe's own answer for where it lives. /d: no AutoRun
+    // (a user's cmd macros must not run first), /s /c: run the rest as typed.
+    std::string cmd = "cmd.exe";
+    if (const char* cs = std::getenv("ComSpec"); cs != nullptr && *cs != '\0') cmd = cs;
+    return {cmd, "/d", "/s", "/c"};
+}
+
+long read_stdin(char* buf, std::size_t n) {
+    DWORD got = 0;
+    if (::ReadFile(::GetStdHandle(STD_INPUT_HANDLE), buf, static_cast<DWORD>(std::min<std::size_t>(n, 1u << 30)), &got, nullptr) == FALSE)
+        return ::GetLastError() == ERROR_BROKEN_PIPE ? 0 : -1;
+    return static_cast<long>(got);
+}
+
+bool write_stdout(const char* buf, std::size_t n) {
+    const HANDLE h = ::GetStdHandle(STD_OUTPUT_HANDLE);
+    while (n > 0) {
+        DWORD w = 0;
+        if (::WriteFile(h, buf, static_cast<DWORD>(std::min<std::size_t>(n, 1u << 30)), &w, nullptr) == FALSE || w == 0) return false;
+        buf += w;
+        n -= w;
+    }
+    return true;
+}
+
 std::string self_exe() {
     std::wstring buf(MAX_PATH, L'\0');
     for (;;) {
@@ -166,62 +188,28 @@ void Waker::drain() const noexcept {
 }
 
 Ready wait_readable(const Waker& w, std::intptr_t pty, int timeout_ms) {
+    // `pty` is the ConPTY output's in-flight read EVENT (pty_handle arms an
+    // overlapped read on a named pipe and hands back its event), so both
+    // halves are real kernel waits: one WaitForMultipleObjects, no polling,
+    // no duty cycle. A byte from the shell, a keystroke's credit or a stop
+    // request each wake the reader the moment they happen, and an idle tab
+    // costs nothing at all.
     Ready out;
     const HANDLE wake = reinterpret_cast<HANDLE>(w.handle());
-    const HANDLE pipe = pty > 0 ? reinterpret_cast<HANDLE>(pty) : INVALID_HANDLE_VALUE;
-
-    // Already have bytes? Say so without sleeping at all.
-    const auto peek = [&]() -> bool {
-        if (pipe == INVALID_HANDLE_VALUE) return false;
-        DWORD avail = 0;
-        if (::PeekNamedPipe(pipe, nullptr, 0, nullptr, &avail, nullptr) == FALSE)
-            return true;  // broken pipe: "readable" so the caller reads EOF
-        return avail > 0;
-    };
-    if (peek()) {
-        out.data = true;
+    const HANDLE data = pty > 0 ? reinterpret_cast<HANDLE>(pty) : nullptr;
+    const DWORD total = timeout_ms < 0 ? INFINITE : static_cast<DWORD>(timeout_ms);
+    const HANDLE hs[2] = {wake, data};
+    const DWORD n = data != nullptr ? 2u : 1u;
+    const DWORD r = ::WaitForMultipleObjects(n, hs, FALSE, total);
+    if (r == WAIT_FAILED) {
+        out.error = true;
         return out;
     }
-
-    // Otherwise wait on the waker in slices, peeking between them.
-    //
-    // The slice length is the whole performance question here. Anonymous
-    // pipes are not waitable, so "has the shell written something" can only
-    // be answered by asking -- but asking every millisecond forever costs a
-    // timer wakeup per millisecond per tab, which is ~25% of a core for an
-    // idle terminal. So the duty cycle ADAPTS: start tight, because output
-    // usually arrives in bursts and the first byte after a keystroke is the
-    // one a human perceives, then relax toward 16 ms once nothing has shown
-    // up. A burst is caught within a millisecond; an idle shell costs ~60
-    // wakeups a second instead of a thousand.
-    //
-    // Latency is unaffected in the cases that matter: the WAKER is waited on
-    // properly, so a keystroke, a resize, or a stop request returns at once
-    // regardless of where the backoff has got to.
-    const DWORD total = timeout_ms < 0 ? INFINITE : static_cast<DWORD>(timeout_ms);
-    DWORD slice = 1;
-    constexpr DWORD kMaxSlice = 16;
-    for (DWORD spent = 0; total == INFINITE || spent < total;) {
-        const DWORD step = total == INFINITE ? slice : std::min(slice, total - spent);
-        const DWORD r = ::WaitForSingleObject(wake, step);
-        if (r == WAIT_OBJECT_0) {
-            out.woke = true;
-            // Report data alongside the wakeup when both are pending.
-            out.data = peek();
-            return out;
-        }
-        if (r == WAIT_FAILED) {
-            out.error = true;
-            return out;
-        }
-        if (peek()) {
-            out.data = true;
-            return out;
-        }
-        spent += step;
-        if (slice < kMaxSlice) slice *= 2;
-    }
-    return out;  // timeout: nothing ready, nothing wrong
+    if (r == WAIT_TIMEOUT) return out;   // nothing ready, nothing wrong
+    // Report both when both are pending: the reader drains the credit and reads.
+    out.woke = ::WaitForSingleObject(wake, 0) == WAIT_OBJECT_0;
+    out.data = data != nullptr && ::WaitForSingleObject(data, 0) == WAIT_OBJECT_0;
+    return out;
 }
 
 }  // namespace hand::plat

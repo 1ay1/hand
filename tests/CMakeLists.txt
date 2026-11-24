@@ -40,15 +40,21 @@ add_test(NAME hint_scan_build
 set_tests_properties(hint_scan_build PROPERTIES FIXTURES_SETUP hint_scan_bin)
 add_test(NAME hint_scan COMMAND hint_scan_test)
 set_tests_properties(hint_scan PROPERTIES FIXTURES_REQUIRED hint_scan_bin)
-if(NOT MAYAG_SYSTEM STREQUAL "windows")   # `cat` is the echo program
-    add_test(NAME echo_latency COMMAND hand --echo --last-resort)
-    set_tests_properties(echo_latency PROPERTIES RUN_SERIAL TRUE TIMEOUT 60 LABELS "perf")
-    # ...and with `yes` flooding a second tab: a key still echoes within a
-    # frame (measured p50 ~0.3 ms, max ~5 ms; the gate is the same 8 ms p50)
-    add_test(NAME echo_latency_under_flood COMMAND hand --echo --last-resort)
-    set_tests_properties(echo_latency_under_flood PROPERTIES RUN_SERIAL TRUE TIMEOUT 60 LABELS "perf"
-                         ENVIRONMENT "HAND_ECHO_LOAD=yes")
-endif()
+# The echo program is hand's own `cat` (hand --cat; --flood's is hand --yes):
+# the same bytes on every OS, so these gates run on Windows too (they were
+# skipped there for want of coreutils, and the ConPTY path went unmeasured).
+# Keys come at a typing cadence (60 ms apart, ~200 wpm): timed from each
+# key, so hand's whole share is in the number; but back to back on Windows
+# every key landed in conhost's 16 ms paint rest and measured conhost, not
+# hand (p50 15.6 ms back to back, 1.0 ms at a cadence).
+add_test(NAME echo_latency COMMAND hand --echo --last-resort)
+set_tests_properties(echo_latency PROPERTIES RUN_SERIAL TRUE TIMEOUT 60 LABELS "perf"
+                     ENVIRONMENT "HAND_ECHO_GAP_MS=60;HAND_ECHO_N=100")
+# ...and with `yes` flooding a second tab: a key still echoes within a
+# frame (measured p50 ~0.3 ms, max ~5 ms; the gate is the same 8 ms p50)
+add_test(NAME echo_latency_under_flood COMMAND hand --echo --last-resort)
+set_tests_properties(echo_latency_under_flood PROPERTIES RUN_SERIAL TRUE TIMEOUT 60 LABELS "perf"
+                     ENVIRONMENT "HAND_ECHO_LOAD=yes;HAND_ECHO_GAP_MS=60;HAND_ECHO_N=100")
 # the self-test again, alone on the machine, failing on any update over
 # jaal's 8 ms fold budget (it names the message: "slow update: hand::msg::X")
 add_test(NAME fold_budget COMMAND hand --headless --last-resort)
@@ -57,10 +63,8 @@ set_tests_properties(fold_budget PROPERTIES RUN_SERIAL TRUE TIMEOUT 120 LABELS "
 # every animation alone, from rest to rest: each one stops, and its frames
 # change pixels (a toast held 193 frames that changed nothing; a bell ran
 # past its flash). Machine-independent: frames and tiles, not milliseconds.
-if(NOT MAYAG_SYSTEM STREQUAL "windows")
-    add_test(NAME motion_economy COMMAND hand --motion --last-resort -e cat)
-    set_tests_properties(motion_economy PROPERTIES TIMEOUT 60 LABELS "perf")
-endif()
+add_test(NAME motion_economy COMMAND hand --motion --last-resort)
+set_tests_properties(motion_economy PROPERTIES TIMEOUT 60 LABELS "perf")
 add_test(NAME layering COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/layering.cmake)
 # Every source compiles for Windows, where a mingw-w64 cross compiler is
 # installed (nothing else here builds the Windows code; see the script).

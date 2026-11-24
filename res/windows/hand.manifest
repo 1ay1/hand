@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0"
+          xmlns:asmv3="urn:schemas-microsoft-com:asm.v3">
+  <!-- hand on Windows: what the OS should know before main() runs.
+       (Windows' manifest parser rejects anything before the root element and
+       anything but ASCII in it: keep comments in here, plain.) -->
+  <assemblyIdentity type="win32" name="hand.terminal" version="1.0.0.0"/>
+  <description>hand terminal</description>
+
+  <!-- Windows 10/11: the real GetVersion, no compatibility shims. -->
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+    </application>
+  </compatibility>
+
+  <asmv3:application>
+    <asmv3:windowsSettings>
+      <!-- Per-monitor v2 DPI from the first instruction (mayag also asks at
+           runtime; this makes it true before any window exists). -->
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+      <!-- The ANSI code page is UTF-8: narrow Win32 / CRT calls agree with
+           hand's UTF-8 std::string paths (a non-ASCII user name works). -->
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+      <!-- Paths past MAX_PATH (deep node_modules, build trees). -->
+      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
+      <!-- A console program (so headless / echo / version print into the
+           terminal that ran them) that opens no stray console window when
+           started from Explorer or a shortcut. Windows 11 24H2+. -->
+      <consoleAllocationPolicy xmlns="http://schemas.microsoft.com/SMI/2024/WindowsSettings">detached</consoleAllocationPolicy>
+      <!-- The segment heap: less fragmentation for a long-lived app. -->
+      <heapType xmlns="http://schemas.microsoft.com/SMI/2020/WindowsSettings">SegmentHeap</heapType>
+    </asmv3:windowsSettings>
+  </asmv3:application>
+
+  <!-- No elevation, no virtualization. -->
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+</assembly>

@@ -3,8 +3,14 @@
 //
 //   hand --emit-red   print red text and exit 7 (colour through a ConPTY)
 //   hand --cat-v      raw mode + mouse reporting, echo input in caret notation
+//   hand --cat        `cat`: copy stdin to stdout (the tty echoes each key) -- the echo_latency program
+//   hand --yes        `yes`: "y" lines as fast as the pty takes them -- the flood
+//
+// --cat and --yes make the perf gates one program on every OS: Windows has no
+// coreutils, so they used to be skipped there, and its pty path went unmeasured.
 
 #include <mayag/core/target.hpp>
+#include <hand/core/platform.hpp>
 #include "cli.hpp"
 
 #include <algorithm>
@@ -90,6 +96,26 @@ std::optional<int> fixture(int argc, char** argv) {
             else std::putchar(static_cast<char>(u));
             std::fflush(stdout);   // the test reads this back through a pty
         }
+        return 0;
+    }
+
+    // ── --cat / --yes: coreutils' two, the same bytes on every OS ───────
+    if (argc >= 2 && std::string_view{argv[1]} == "--cat") {
+        // The terminal's own echo (the tty line discipline; conhost's cooked
+        // read) shows each key; the line comes back whole after enter. One
+        // OS read per chunk, never stdio's fill-the-buffer fread.
+        std::array<char, 4096> b{};
+        for (;;) {
+            const long n = plat::read_stdin(b.data(), b.size());
+            if (n <= 0) break;
+            plat::write_stdout(b.data(), static_cast<std::size_t>(n));
+        }
+        return 0;
+    }
+    if (argc >= 2 && std::string_view{argv[1]} == "--yes") {
+        std::string chunk;   // one big write per call, as GNU yes does
+        for (int i = 0; i < 8192; ++i) chunk += "y\n";
+        while (plat::write_stdout(chunk.data(), chunk.size())) {}
         return 0;
     }
     return std::nullopt;

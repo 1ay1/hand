@@ -29,10 +29,21 @@ find_program(HAND_CCACHE ccache)
 if(HAND_CCACHE AND NOT CMAKE_CXX_COMPILER_LAUNCHER)
     set(CMAKE_C_COMPILER_LAUNCHER ${HAND_CCACHE})
     set(CMAKE_CXX_COMPILER_LAUNCHER ${HAND_CCACHE})
+    # No size cap: ccache's default 5 GB fills with ONE Dev + Release pair of
+    # trees (mayag's PCH objects are large), and then evicts what the next
+    # build needs -- a 10% hit rate was measured on a full cache. Unlimited,
+    # once, at configure (HAND_CCACHE_SIZE=20G to cap it instead).
+    set(HAND_CCACHE_SIZE "0" CACHE STRING "ccache max_size for this machine (0 = unlimited)")
+    execute_process(COMMAND ${HAND_CCACHE} --max-size=${HAND_CCACHE_SIZE} OUTPUT_QUIET ERROR_QUIET)
 endif()
 find_program(HAND_MOLD mold)
+find_program(HAND_LLD NAMES ld.lld lld)
 if(HAND_MOLD AND NOT CMAKE_LINKER_TYPE)
     set(CMAKE_LINKER_TYPE MOLD)
+elseif(HAND_LLD AND NOT CMAKE_LINKER_TYPE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    # No mold (Windows, most macOS): lld. GNU ld spent 25 minutes and 5 GB
+    # linking the clang Dev build's PCH code on Windows; lld takes seconds.
+    set(CMAKE_LINKER_TYPE LLD)
 endif()
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -168,6 +179,14 @@ if(HAND_PCH AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         target_compile_options(${t} PRIVATE "SHELL:-include-pch $<TARGET_OBJECTS:hand_pch>")
     endforeach()
     target_sources(hand PRIVATE ${_code})
+    # -fpch-codegen emits EVERY inline in the PCH's headers, used or not, so
+    # the object links what those inlines import: on Windows, libstdc++'s
+    # std::print terminal hooks (stdc++exp). GNU ld let unused references
+    # slide, lld does not. (commctrl's DPA_/DSA_ inlines are kept out at the
+    # source: mayag defines NO_COMMCTRL_DA.)
+    if(MAYAG_SYSTEM STREQUAL "windows" AND NOT MSVC)
+        target_link_libraries(hand PRIVATE stdc++exp)
+    endif()
     # ccache caches PCH users only with these
     if(CMAKE_CXX_COMPILER_LAUNCHER MATCHES "ccache")
         set_property(TARGET hand_pch hand_app hand PROPERTY CXX_COMPILER_LAUNCHER
@@ -188,6 +207,17 @@ endif()
 # other), never WIN32 / APPLE again here.
 if(MAYAG_SYSTEM STREQUAL "windows")
     target_link_libraries(hand_core PUBLIC shlwapi)
+    # The manifest + version block (res/windows): no stray console from
+    # Explorer, per-monitor DPI before the first window, and the UTF-8 code
+    # page -- every std::string in hand is UTF-8, and with this so are the
+    # narrow Win32 / CRT calls (getenv, *A APIs) a non-ASCII user name reaches.
+    enable_language(RC)
+    target_sources(hand PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/res/windows/hand.rc)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/res/windows/hand.rc PROPERTIES
+                                OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/res/windows/hand.manifest)
+    if(MSVC)
+        target_link_options(hand PRIVATE /MANIFEST:NO)   # ours is in the .rc; no second, generated one
+    endif()
     # ConPTY needs Windows 10 1809 (the API that makes a real terminal
     # possible at all); say so rather than inheriting MinGW's older default.
     # NOGDI is deliberately NOT set: mayag's Win32 backend blits through GDI.

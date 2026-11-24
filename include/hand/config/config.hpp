@@ -149,6 +149,7 @@ struct Config {
     // not settings: launch options
     std::string shell;          ///< [main] shell (from the file)
     std::string shell_cli;      ///< -e CMD: this run only, never saved
+    std::vector<std::string> shell_args;   ///< argv for shell_cli, already split (hand's own fixtures): no runner, no quoting
     /// [main] url_launcher=: a program run with the link, or empty for the
     /// system's own opener (open on macOS, xdg-open, the Windows shell).
     std::string url_launcher;

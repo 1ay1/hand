@@ -3,6 +3,7 @@
 
 #include "fx.hpp"
 
+#include <hand/core/platform.hpp>
 #include <hand/core/shell.hpp>
 
 #include <algorithm>
@@ -19,6 +20,11 @@ App::Msg spawn(SessionId sid, Launch l) {
         const auto argv = ssh_argv(l.ssh->host, l.ssh->book, l.ssh->flags);
         spec.shell = "ssh";
         spec.args.assign(argv.begin() + 1, argv.end());
+    } else if (!l.command_line.empty()) {   // the OS's runner: sh -c / cmd /c
+        auto run = plat::command_runner();
+        spec.shell = run.front();
+        spec.args.assign(run.begin() + 1, run.end());
+        spec.args.push_back(std::move(l.command_line));
     } else if (l.integrate) {
         spec.shell = Pty::resolve_shell(spec.shell);
         ShellLaunch si = shell_integration(spec.shell);   // writes the scripts beside $XDG_RUNTIME_DIR
