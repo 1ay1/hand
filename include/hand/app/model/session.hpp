@@ -71,6 +71,9 @@ struct FileDoc {
     std::string                    error;         ///< could not open it (the tab says why, and edits nothing)
     std::string                    save_error;    ///< the last save failed: why (the text is still here)
     std::optional<std::uint64_t>   saving;        ///< a write of this save point is in flight
+    /// Saved again while that write was in flight: written once it lands. One
+    /// write per file at a time -- two at once raced on the same temp file.
+    bool                           save_again = false;
     bool                           close_after_save = false;   ///< "save" in the close dialog
     std::int64_t                   disk_mtime = 0; ///< the file's mtime when last read or written (watching for outside edits)
     std::optional<mayag::editor::Range> jump;     ///< where to land once the text arrives (a search hit)

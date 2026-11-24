@@ -199,6 +199,10 @@ App::Cmd App::save_file(Model& m, std::size_t i) {
     if (i >= m.tab_count() || !m.at(i).file) return {};
     FileDoc& d = *m.at(i).file;
     if (d.loading || !d.error.empty()) return {};   // nothing was opened: nothing to write over the file
+    // one write per file at a time: two in flight raced on the same temp file
+    // (over the channel both start within a millisecond). The newest text is
+    // written as soon as this one lands.
+    if (d.saving && !m.cfg.demo) { d.save_again = true; return {}; }
     const std::uint64_t point = d.st.ed.save_point();
     d.saving = point;
     d.save_error.clear();
@@ -213,6 +217,10 @@ App::Cmd App::update(Model& m, FileSaved s) {
     FileDoc* d = doc_of(m, s.sid);
     if (d == nullptr) return {};
     if (d->saving == s.point) d->saving.reset();
+    if (std::exchange(d->save_again, false) && !d->saving) {   // saved again meanwhile: write the newest text now
+        if (s.error.empty()) { text_editor_ops::saved(d->st, s.point); d->disk_mtime = s.mtime; }
+        if (const auto i = m.tabs.find(s.sid)) return save_file(m, *i);
+    }
     if (!s.error.empty()) {
         d->save_error = s.error;   // the text is still here: a toast and the status line, never a dead tab
         d->close_after_save = false;

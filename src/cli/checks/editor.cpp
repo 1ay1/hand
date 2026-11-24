@@ -156,6 +156,25 @@ void editor_in(Runtime& rt, Check& ok) {
         ok(rt.model().tab().file && rt.model().tab().file->loading, "edited and discarded: forgotten, read afresh (never a version the host lacks)");
         close_front();
     }
+    {   // one write per file at a time: a second save while one is in flight
+        // waits, then writes the newest text (two at once raced on one temp file)
+        rt.send(App::Msg{App::OpenFile{"/tmp/hand-selftest/queue.txt"}});
+        const SessionId qs = rt.model().tab().sid;
+        rt.send(App::Msg{App::FileLoaded{qs, "/tmp/hand-selftest/queue.txt", "a\n", "", false}});
+        rt.send(App::Msg{mayag::Edit<App::Model>{[](App::Model& mm) { mm.cfg.demo = false; }}});   // real saves, answered by hand below
+        rt.send(App::Msg{mayag::Edit<App::Model>{[](App::Model& mm) {
+            auto& d = *mm.tab().file;
+            d.saving = 7;   // a write is in flight
+            text_editor_ops::text(d.st, "b");
+        }}});
+        rt.press_key(Key::s, primary());
+        ok(rt.model().tab().file->save_again && rt.model().tab().file->saving == 7u, "saving while a write is in flight waits for it");
+        rt.send(App::Msg{mayag::Edit<App::Model>{[](App::Model& mm) { mm.cfg.demo = true; }}});   // the queued write lands without touching disk
+        rt.send(App::Msg{App::FileSaved{qs, 7, {}, 5}});
+        ok(!rt.model().tab().file->save_again && !rt.model().tab().file->saving && !rt.model().tab().file->st.ed.dirty(),
+           "...then, once it lands, the newest text is written");
+        rt.send(App::Msg{App::CloseTab{TabIndex{rt.model().active()}, Confirm::given}});
+    }
     {   // the file pane on a remote host: a folder visited before shows at once on return
         using A = FilePaneAction;
         const bool was_open = rt.model().pane.open;
