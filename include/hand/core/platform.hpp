@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <ctime>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #if MAYAG_OS_WINDOWS
@@ -63,6 +64,11 @@ namespace hand::plat {
 /// The absolute path of the running executable. Used to re-exec ourselves as
 /// a test fixture (`--cat-v`), so the tests need no external programs.
 [[nodiscard]] std::string self_exe();
+
+/// `name` found on PATH (`:`-separated, executable; on Windows `;` and
+/// `name.exe`), or "" when it is not there. An absolute or relative path is
+/// returned as is if it exists. The one PATH lookup hand does itself.
+[[nodiscard]] std::string find_program(std::string_view name);
 
 // ── 3. how much memory we used ──────────────────────────────────────────
 /// Peak resident set size in bytes, 0 when the OS will not say.

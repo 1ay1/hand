@@ -129,6 +129,12 @@ struct ImportSource {
 struct SshFlags { bool multiplex = true; bool keepalive = true; };
 /// The argv hand runs for `h` (argv[0] = "ssh").
 [[nodiscard]] std::vector<std::string> ssh_argv(const Host& h, const HostBook& book, SshFlags f);
+/// Where ssh (or sftp: -P for the port) reaches `h`, appended to `a`: its
+/// alias when ~/.ssh/config defines it (config supplies the rest), else
+/// [-p N] [-J jump] [-i key] user@host with folder defaults applied. The one
+/// place a Host becomes ssh's destination -- the terminal's ssh, every file
+/// action, sftp.
+void ssh_destination(const Host& h, const HostBook& book, std::vector<std::string>& a, bool sftp = false);
 /// What a person would type: "ssh prod-db", "ssh -p 2222 deploy@10.0.3.4".
 [[nodiscard]] std::string ssh_command(const Host& h);
 

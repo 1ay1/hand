@@ -165,12 +165,12 @@ std::string narrow(const std::wstring& w) {
 }  // namespace
 
 Pty::~Pty() {
-    if (fd_ < 0 || fd_ >= kMaxSessions) return;
+    if (master < 0 || master >= kMaxSessions) return;
     // The spawn worker writes the slot; let it finish first (outside g_mu,
     // which it takes).
-    if (auto& t = g_spawners[static_cast<std::size_t>(fd_)]; t.joinable()) t.join();
+    if (auto& t = g_spawners[static_cast<std::size_t>(master)]; t.joinable()) t.join();
     std::lock_guard lk{g_mu};
-    Session* s = session_of(fd_);
+    Session* s = session_of(master);
     if (s == nullptr) return;
     if (s->out_w != INVALID_HANDLE_VALUE) ::CloseHandle(s->out_w);
     // Order matters: close our input end first so the shell sees EOF and
@@ -212,8 +212,12 @@ bool start_child(HPCON pc, const std::string& shell, const std::vector<std::pair
                  const std::vector<std::string>& args, const std::string& cwd, HANDLE& proc_out, DWORD& pid_out);
 }  // namespace
 
-bool Pty::spawn(int cols, int rows, std::string shell, const std::vector<std::pair<std::string, std::string>>& env,
-                const std::vector<std::string>& args, const std::string& cwd) {
+Pty::Started Pty::start(const PtySpec& spec) {
+    const int cols = spec.cols, rows = spec.rows;
+    std::string shell = spec.shell;
+    const auto& env = spec.env;
+    const auto& args = spec.args;
+    const auto& cwd = spec.cwd;
     int slot = -1;
     {
         std::lock_guard lk{g_mu};
@@ -224,7 +228,7 @@ bool Pty::spawn(int cols, int rows, std::string shell, const std::vector<std::pa
                 break;
             }
     }
-    if (slot < 0) return false;
+    if (slot < 0) return {};
     Session& s = g_sessions[static_cast<std::size_t>(slot)];
 
     // Two pipes, crossed: conhost reads our input pipe and writes our output
@@ -237,17 +241,16 @@ bool Pty::spawn(int cols, int rows, std::string shell, const std::vector<std::pa
         if (in_read != INVALID_HANDLE_VALUE) ::CloseHandle(in_read);
         if (s.in != INVALID_HANDLE_VALUE) ::CloseHandle(s.in);
         s = Session{};
-        return false;
+        return {};
     }
     s.out_w = out_write;
     s.size = COORD{static_cast<SHORT>(cols > 0 ? cols : 80), static_cast<SHORT>(rows > 0 ? rows : 24)};
-    fd_ = slot;
-    pid_ = static_cast<pid_t>(pending_pid(slot));
+    const Started started{slot, static_cast<pid_t>(pending_pid(slot))};
 
     // conhost (~20 ms) and the shell's process (~30 ms) start on a worker:
     // the window draws its first frame meanwhile instead of after them.
     g_spawners[static_cast<std::size_t>(slot)] =
-        std::thread{[slot, in_read, shell = std::move(shell), env, args, cwd]() mutable {
+        std::thread{[slot, in_read, shell = std::move(shell), env = env, args = args, cwd = cwd]() mutable {
             Session& ss = g_sessions[static_cast<std::size_t>(slot)];
             const auto fail = [&](const char* what) {
                 // The message goes down the output pipe, so it shows in the
@@ -286,7 +289,7 @@ bool Pty::spawn(int cols, int rows, std::string shell, const std::vector<std::pa
             ::CloseHandle(ss.out_w);   // conhost holds its own copy; EOF now follows the shell
             ss.out_w = INVALID_HANDLE_VALUE;
         }};
-    return true;
+    return started;
 }
 
 namespace {
@@ -364,7 +367,7 @@ bool start_child(HPCON pc, const std::string& shell, const std::vector<std::pair
 }  // namespace
 
 void Pty::write(std::string_view bytes) const {
-    Session* s = session_of(fd_);
+    Session* s = session_of(master);
     if (s == nullptr || s->in == INVALID_HANDLE_VALUE) return;
     while (!bytes.empty()) {
         DWORD wrote = 0;
@@ -376,7 +379,7 @@ void Pty::write(std::string_view bytes) const {
 
 void Pty::resize(int cols, int rows, int /*px_w*/, int /*px_h*/) const {
     std::lock_guard lk{g_mu};   // the spawn worker may be creating the HPCON
-    Session* s = session_of(fd_);
+    Session* s = session_of(master);
     if (s == nullptr) return;
     // ConPTY has no pixel geometry; cells are all it models.
     const COORD size{static_cast<SHORT>(cols > 0 ? cols : 80), static_cast<SHORT>(rows > 0 ? rows : 24)};
@@ -438,6 +441,13 @@ bool pty_read(int fd, std::string& out, int timeout_ms) {
 std::intptr_t pty_handle(int fd) {
     Session* s = session_of(fd);
     return s != nullptr && s->out != INVALID_HANDLE_VALUE ? reinterpret_cast<std::intptr_t>(s->out) : -1;
+}
+
+int Pty::reap() {
+    if (reaped.read([](const bool& r) { return r; })) return -1;
+    const int code = pty_reap(child);
+    if (code >= 0) reaped.with([](bool& r) { r = true; });
+    return code;
 }
 
 int pty_reap(pid_t pid) {

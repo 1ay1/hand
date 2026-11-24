@@ -20,21 +20,6 @@ namespace {
 
 std::string home_dir() { return plat::home_dir(); }   // the one definition of ~ (ssh's too)
 
-/// Where to reach `h`: its alias when ~/.ssh/config defines it (config
-/// supplies the rest), else user@host with hand's own -p / -J / -i.
-void destination(const Host& host, const HostBook& book, std::vector<std::string>& a, bool sftp) {
-    const Host h = effective_host(host, book);
-    if (h.source == HostSource::config) { a.push_back(h.alias); return; }
-    if (h.port != 22) a.insert(a.end(), {sftp ? "-P" : "-p", std::to_string(h.port)});
-    if (!h.jump.empty()) a.insert(a.end(), {"-J", h.jump});
-    if (!h.identity.empty()) {
-        std::string id = h.identity;
-        if (id.rfind("~/", 0) == 0) id = home_dir() + id.substr(1);
-        a.insert(a.end(), {"-i", id});
-    }
-    a.push_back(h.user.empty() ? h.hostname : h.user + "@" + h.hostname);
-}
-
 }  // namespace
 
 std::string control_dir() {
@@ -64,7 +49,7 @@ std::vector<std::string> ssh_args(const Host& h, const HostBook& book) {
     std::vector<std::string> a{"ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10"};
     const auto c = control_opts(book);
     a.insert(a.end(), c.begin(), c.end());
-    destination(h, book, a, false);
+    ssh_destination(h, book, a, false);
     return a;
 }
 
@@ -73,7 +58,7 @@ std::vector<std::string> sftp_args(const Host& h, const HostBook& book, const st
     const auto c = control_opts(book);
     a.insert(a.end(), c.begin(), c.end());
     a.insert(a.end(), {"-b", batch_file});
-    destination(h, book, a, true);
+    ssh_destination(h, book, a, true);
     return a;
 }
 
@@ -162,8 +147,7 @@ std::unique_ptr<proc::Channel> open_channel(const Host& h, const HostBook& book,
         "elif printf aGk= | base64 -D >/dev/null 2>&1; then D='base64 -D'; else D=; fi; "
         // the host's stat, found once: scripts write `$S "$f"` for "mtime:size"
         // instead of trying GNU then BSD per call (a failed fork each time, ~2 ms)
-        "if stat -c %Y:%s / >/dev/null 2>&1; then S='stat -c %Y:%s'; else S='stat -f %m:%z'; fi; "
-        "export S; "
+        + std::string{kStatProbe} +
         "echo \"hand-ready ${D:+b64}\"\n";
     std::string line;
     if (!ch->write(init, by) || !ch->read_line(line, by) || line.rfind("hand-ready", 0) != 0) {

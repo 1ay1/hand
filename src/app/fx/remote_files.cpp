@@ -28,9 +28,7 @@ namespace {
 
 constexpr std::uint64_t kMaxBytes = 32u * 1024u * 1024u;
 
-// A file's identity for change detection: "mtime:size" from GNU or BSD stat.
-// Over a channel $S is the host's stat, found once (remote.cpp): one fork.
-constexpr const char* kStat = "if [ -n \"$S\" ]; then $S \"$f\" 2>/dev/null; else stat -c %Y:%s \"$f\" 2>/dev/null || stat -f %m:%z \"$f\" 2>/dev/null; fi";
+using remote::kStat;   // "mtime:size" of $f: the one spelling (hand/ssh/remote.hpp)
 
 /// "mtime:size" -> a non-zero token (0 is "gone").
 std::int64_t token_of(const std::string& s) {
@@ -80,8 +78,8 @@ App::FileSaved write_file(SessionId sid, const Host& h, const HostBook& book, co
     // renamed over the file -- a dropped link mid-write leaves the old file whole
     App::FileSaved r{.sid = sid, .point = point};
     const std::string script = std::string{"f=$1; t=\"$f.hand-save~\"; cat > \"$t\" || { rm -f \"$t\"; exit 5; }; "
-                                           "if [ -e \"$f\" ]; then chmod \"$(stat -c %a \"$f\" 2>/dev/null || stat -f %Lp \"$f\")\" \"$t\" 2>/dev/null; fi; "
-                                           "mv -f \"$t\" \"$f\" || { rm -f \"$t\"; exit 6; }; "} + kStat;
+                                           "if [ -e \"$f\" ]; then chmod \"$("} + remote::kMode + ")\" \"$t\" 2>/dev/null; fi; "
+                                           "mv -f \"$t\" \"$f\" || { rm -f \"$t\"; exit 6; }; " + kStat;
     const auto x = remote::exec_sh(h, book, script, {path}, text, 120000);
     if (!x.started || x.code != 0) {
         r.error = x.timed_out ? "the host did not answer in time; the file on it is unchanged"

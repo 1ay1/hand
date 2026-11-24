@@ -62,6 +62,14 @@ if(NOT MAYAG_SYSTEM STREQUAL "windows")
     set_tests_properties(motion_economy PROPERTIES TIMEOUT 60 LABELS "perf")
 endif()
 add_test(NAME layering COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/layering.cmake)
+# Every source compiles for Windows, where a mingw-w64 cross compiler is
+# installed (nothing else here builds the Windows code; see the script).
+find_program(HAND_MINGW_CXX NAMES x86_64-w64-mingw32-g++ x86_64-w64-mingw32-g++-posix)
+if(HAND_MINGW_CXX AND NOT MAYAG_SYSTEM STREQUAL "windows")
+    add_test(NAME windows_compile COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DCXX=${HAND_MINGW_CXX}
+             -P ${CMAKE_CURRENT_SOURCE_DIR}/windows_compile.cmake)
+    set_tests_properties(windows_compile PROPERTIES TIMEOUT 900 LABELS "static;slow")
+endif()
 add_test(NAME purity COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/purity.cmake)
 
 # jaal's banlist takes one root; hand's sources and headers are two

@@ -68,6 +68,18 @@ void drop(const Host& h, const HostBook& book);
 /// `s` as one word for a POSIX shell: 'it'\''s'.
 [[nodiscard]] std::string sh_quote(std::string_view s);
 
+/// A POSIX sh snippet printing "mtime:size" of the file named by $f -- a
+/// file's change token. GNU (`stat -c`) and BSD/macOS (`stat -f`) spell it
+/// differently; a channel finds the host's once at open ($S), the one-off
+/// path tries both. The only place either spelling lives.
+inline constexpr const char* kStat =
+    "if [ -n \"$S\" ]; then $S \"$f\" 2>/dev/null; else stat -c %Y:%s \"$f\" 2>/dev/null || stat -f %m:%z \"$f\" 2>/dev/null; fi";
+/// ...and the snippet a channel runs once to set $S (remote.cpp).
+inline constexpr const char* kStatProbe =
+    "if stat -c %Y:%s / >/dev/null 2>&1; then S='stat -c %Y:%s'; else S='stat -f %m:%z'; fi; export S; ";
+/// A POSIX sh snippet printing the octal mode of $f (GNU %a / BSD %Lp).
+inline constexpr const char* kMode = "stat -c %a \"$f\" 2>/dev/null || stat -f %Lp \"$f\"";
+
 /// ssh / sftp stderr and exit code -> a sentence ("" when it is fine).
 [[nodiscard]] std::string explain(std::string_view err, int code);
 

@@ -1,6 +1,7 @@
 // hand::cli::checks — the injected shell integration in a real fish.
 
 #include "suites.hpp"
+#include <hand/core/platform.hpp>
 
 #include <hand/core/shell.hpp>
 
@@ -23,7 +24,7 @@ using namespace mayag;
 
 void fish_integration([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& ok) {
     // ── the injected script, in a REAL fish (bounded) ───────────────────
-    if (::access("/usr/bin/fish", X_OK) == 0) {
+    if (const std::string fish_path = plat::find_program("/usr/bin/fish"); !fish_path.empty()) {
         const auto si = hand::shell_integration("/usr/bin/fish");
         hand::Term t{80, 10, hand::palette_of(hand::Config{})};
         t.set_prompt_protect(!si.reflow_aware);

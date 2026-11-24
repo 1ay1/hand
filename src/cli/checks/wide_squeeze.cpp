@@ -1,6 +1,7 @@
 // hand::cli::checks — wide output squeezed thin and back: no gap above the prompt.
 
 #include "suites.hpp"
+#include <hand/core/platform.hpp>
 
 #include <hand/core/shell.hpp>
 
@@ -23,7 +24,7 @@ using namespace mayag;
 
 void wide_squeeze([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& ok) {
     // ── wide output, squeezed thin and back, in a real fish: no gap ────────
-    if (::access("/usr/bin/fish", X_OK) == 0) {
+    if (const std::string fish_path = plat::find_program("/usr/bin/fish"); !fish_path.empty()) {
         const auto si = hand::shell_integration("/usr/bin/fish");
         hand::Term t{100, 30, hand::palette_of(hand::Config{})};
         t.set_prompt_protect(!si.reflow_aware);

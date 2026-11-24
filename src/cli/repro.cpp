@@ -7,6 +7,7 @@
 //   hand --repro-resize [fish] a 40-step drag burst
 
 #include "cli.hpp"
+#include <hand/core/platform.hpp>
 
 #include <hand/core/shell.hpp>
 
@@ -143,16 +144,7 @@ std::optional<int> repro(int argc, char** argv) {
         // Bounded: every read is ≤ 50 ms. `--repro-resize /bin/zsh` for another.
         const std::string shell = [&]() -> std::string {
             if (i + 1 < argc && argv[i + 1][0] != '-') return argv[i + 1];
-            if (const char* path = std::getenv("PATH")) {   // fish wherever it lives (/opt/homebrew/bin on macOS)
-                std::string_view p = path;
-                while (!p.empty()) {
-                    const auto c = p.find(':');
-                    const std::string cand = std::string{p.substr(0, c)} + "/fish";
-                    if (::access(cand.c_str(), X_OK) == 0) return cand;
-                    if (c == std::string_view::npos) break;
-                    p.remove_prefix(c + 1);
-                }
-            }
+            if (std::string fish = hand::plat::find_program("fish"); !fish.empty()) return fish;   // wherever it lives (/opt/homebrew/bin on macOS)
             return hand::Pty::resolve_shell({});
         }();
         std::printf("shell: %s\n", shell.c_str());

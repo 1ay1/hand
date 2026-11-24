@@ -767,24 +767,26 @@ std::vector<std::string> ssh_argv(const Host& host, const HostBook& book, SshFla
     // the host manager's forwards: -L / -R / -D, each checked on save and again here
     for (const auto& fw : h.forwards)
         if (auto p = parse_forward(fw)) a.insert(a.end(), {p->first, p->second});
-    if (h.source == HostSource::config) {
-        a.push_back(h.alias);   // ssh applies the config itself
-    } else {
-        if (h.port != 22) a.insert(a.end(), {"-p", std::to_string(h.port)});
-        if (!h.jump.empty()) a.insert(a.end(), {"-J", h.jump});
-        if (!h.identity.empty()) {
-            std::string id = h.identity;
-            if (id.rfind("~/", 0) == 0) id = home() + id.substr(1);
-            a.insert(a.end(), {"-i", id});
-        }
-        a.push_back(h.user.empty() ? h.hostname : h.user + "@" + h.hostname);
-    }
+    ssh_destination(h, book, a);
     // a command on connect needs a tty (tmux, a shell with flags)
     if (!h.command.empty()) {
         a.insert(a.begin() + 1, "-t");
         a.push_back(h.command);
     }
     return a;
+}
+
+void ssh_destination(const Host& host, const HostBook& book, std::vector<std::string>& a, bool sftp) {
+    const Host h = effective_host(host, book);
+    if (h.source == HostSource::config) { a.push_back(h.alias); return; }   // ssh applies the config itself
+    if (h.port != 22) a.insert(a.end(), {sftp ? "-P" : "-p", std::to_string(h.port)});
+    if (!h.jump.empty()) a.insert(a.end(), {"-J", h.jump});
+    if (!h.identity.empty()) {
+        std::string id = h.identity;
+        if (id.rfind("~/", 0) == 0) id = home() + id.substr(1);
+        a.insert(a.end(), {"-i", id});
+    }
+    a.push_back(h.user.empty() ? h.hostname : h.user + "@" + h.hostname);
 }
 
 std::string ssh_command(const Host& h) {
