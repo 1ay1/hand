@@ -517,17 +517,40 @@ if (shot == "drag") {   // the scrollback through a window drag, the whole app: 
     const float px = std::getenv("HAND_DRAG_PX") ? static_cast<float>(std::atof(std::getenv("HAND_DRAG_PX"))) : 6.0f;
     const int steps = std::getenv("HAND_DRAG_STEPS") ? std::atoi(std::getenv("HAND_DRAG_STEPS")) : 160;
     const int frame_ms = std::getenv("HAND_DRAG_FRAME_MS") ? std::atoi(std::getenv("HAND_DRAG_FRAME_MS")) : 16;
+    std::vector<double> frame;   // resize -> painted, per step: a drag must keep up with the pointer
     for (int k = 0; k < steps; ++k) {
         const int d = k % 120 < 60 ? k % 120 : 120 - k % 120;
         const float dx = shape == 'h' ? 0.0f : static_cast<float>(d) * px;
         const float dy = shape == 'w' ? 0.0f : static_cast<float>(d) * px * 0.5f;
+        const auto t0 = clk::now();
         rt.window().resize(mayag::Vec2{std::max(s0.x - dx, 300.0f), std::max(s0.y - dy, 200.0f)});
         rt.tick();
+        frame.push_back(std::chrono::duration<double, std::milli>(clk::now() - t0).count());
         if (frame_ms > 0) idle(frame_ms);   // one frame of a real drag
     }
+    std::sort(frame.begin(), frame.end());
+    if (!frame.empty())
+        std::printf("drag frames: p50 %.2f ms  p95 %.2f ms  max %.2f ms\n", frame[frame.size() / 2],
+                    frame[frame.size() * 95 / 100], frame.back());
     rt.window().resize(s0);
     rt.tick();
+    // what the screen shows the moment the drag ends, vs once the shell has
+    // had its say: anything the shell's late redraw changes is a visible snap
+    const auto screen = [&] {
+        std::vector<std::u32string> rows;
+        const std::int64_t top = term().total_rows() - term().rows();
+        for (int r = 0; r < term().rows(); ++r) rows.push_back(term().line(top + r));
+        return rows;
+    };
+    const auto at_release = screen();
+    const auto cur0 = term().cursor();
     idle(1500);
+    const auto settled = screen();
+    const auto cur1 = term().cursor();
+    int changed = 0;
+    for (std::size_t r = 0; r < std::min(at_release.size(), settled.size()); ++r) changed += at_release[r] != settled[r];
+    std::printf("drag release: %d of %zu screen rows change after it; cursor %d,%d -> %d,%d\n", changed, settled.size(),
+                cur0.row, cur0.col, cur1.row, cur1.col);
     const int after = count();
     const int lost = before - after, doubled = dups - dups0;
     std::printf("drag: %s, %d lines; after the drag %d (lost %d), doubled %d; history %d rows, %dx%d\n", sh.c_str(), before, after, lost,
