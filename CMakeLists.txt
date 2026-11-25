@@ -223,31 +223,42 @@ if(MAYAG_SYSTEM STREQUAL "windows")
     # NOGDI is deliberately NOT set: mayag's Win32 backend blits through GDI.
     target_compile_definitions(hand_core PUBLIC _WIN32_WINNT=0x0A00 WINVER=0x0A00
                                                 WIN32_LEAN_AND_MEAN NOMINMAX)
-    # Modern ConPTY beside hand.exe: Microsoft's Microsoft.Windows.Console.ConPTY
-    # package (conpty.dll + OpenConsole.exe, MIT; what Windows Terminal and
+    # Microsoft's current pseudoconsole host, embedded: OpenConsole.exe from the
+    # Microsoft.Windows.Console.ConPTY package (MIT; what Windows Terminal and
     # WezTerm ship). The inbox conhost repaints the whole viewport on every
     # resize, reflowed by its own rules -- a window drag doubled lines in the
-    # scrollback and cut the head off a line wrapped across the top. The
-    # modern one, told PSEUDOCONSOLE_RESIZE_QUIRK, leaves reflow to toe.
-    # Fetched once at configure; hand falls back to the inbox one without it.
-    set(HAND_CONPTY_VERSION "1.25.261109001" CACHE STRING "Microsoft.Windows.Console.ConPTY version shipped beside hand.exe ('' = none)")
+    # scrollback and cut the head off a line wrapped across the top. hand stays
+    # one file: the host rides in hand.exe as a resource and src/core/pty_win.cpp
+    # launches it itself (no conpty.dll). Fetched once at configure, pinned by
+    # hash; without it hand falls back to the system conhost.
+    set(HAND_CONPTY_VERSION "1.25.261109001" CACHE STRING "Microsoft.Windows.Console.ConPTY embedded in hand.exe ('' = none)")
+    set(HAND_CONPTY_SHA256 "3D77F535DF848E44225C2A8912AC844FECB23F3057732B639F3034B587496F09" CACHE STRING "SHA-256 of that .nupkg")
     if(HAND_CONPTY_VERSION)
         set(_cp ${CMAKE_BINARY_DIR}/_deps/conpty-${HAND_CONPTY_VERSION})
-        if(NOT EXISTS ${_cp}/runtimes/win-x64/native/conpty.dll)
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|aarch64")
+            set(_arch arm64)
+        else()
+            set(_arch x64)
+        endif()
+        set(_host ${_cp}/build/native/runtimes/${_arch}/OpenConsole.exe)
+        if(NOT EXISTS ${_host})
+            # TLS_VERIFY OFF for intercepting proxies; the hash is the check.
             file(DOWNLOAD https://www.nuget.org/api/v2/package/Microsoft.Windows.Console.ConPTY/${HAND_CONPTY_VERSION}
-                 ${_cp}.zip STATUS _st TLS_VERIFY OFF)
+                 ${_cp}.zip STATUS _st TLS_VERIFY OFF EXPECTED_HASH SHA256=${HAND_CONPTY_SHA256})
             list(GET _st 0 _code)
             if(_code EQUAL 0)
                 file(ARCHIVE_EXTRACT INPUT ${_cp}.zip DESTINATION ${_cp})
             else()
-                message(WARNING "hand: could not fetch ConPTY ${HAND_CONPTY_VERSION} (${_st}); the inbox ConPTY will be used")
+                message(WARNING "hand: could not fetch ConPTY ${HAND_CONPTY_VERSION} (${_st}); the system conhost will be used")
             endif()
         endif()
-        if(EXISTS ${_cp}/runtimes/win-x64/native/conpty.dll)
-            add_custom_command(TARGET hand POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_cp}/runtimes/win-x64/native/conpty.dll $<TARGET_FILE_DIR:hand>
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_cp}/build/native/runtimes/x64/OpenConsole.exe $<TARGET_FILE_DIR:hand>
-                COMMENT "hand: modern ConPTY beside hand.exe")
+        if(EXISTS ${_host})
+            file(WRITE ${CMAKE_BINARY_DIR}/conpty.rc.in "OPENCONSOLE RCDATA \"${_host}\"\n")
+            configure_file(${CMAKE_BINARY_DIR}/conpty.rc.in ${CMAKE_BINARY_DIR}/conpty.rc COPYONLY)
+            target_sources(hand PRIVATE ${CMAKE_BINARY_DIR}/conpty.rc)
+            set_source_files_properties(${CMAKE_BINARY_DIR}/conpty.rc PROPERTIES OBJECT_DEPENDS ${_host})
+            set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/src/core/pty_win.cpp PROPERTIES
+                                        COMPILE_DEFINITIONS "HAND_CONPTY_VERSION=L\"${HAND_CONPTY_VERSION}\"")
         endif()
     endif()
     # (A fully static MinGW link was measured: +15 ms to first text, as the

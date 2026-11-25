@@ -70,6 +70,11 @@ set_tests_properties(motion_economy PROPERTIES TIMEOUT 60 LABELS "perf")
 # fit, the drain, the pty): every line must still be there, none twice.
 add_test(NAME resize_drag COMMAND hand --drag --last-resort)
 set_tests_properties(resize_drag PROPERTIES RUN_SERIAL TRUE TIMEOUT 120)
+if(MAYAG_SYSTEM STREQUAL "windows")
+    # The fallback rung: the system conhost, started by hand with --resizeQuirk.
+    add_test(NAME resize_drag_conhost COMMAND hand --drag --last-resort)
+    set_tests_properties(resize_drag_conhost PROPERTIES RUN_SERIAL TRUE TIMEOUT 120 ENVIRONMENT HAND_CONPTY=system)
+endif()
 add_test(NAME layering COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/layering.cmake)
 # Every source compiles for Windows, where a mingw-w64 cross compiler is
 # installed (nothing else here builds the Windows code; see the script).

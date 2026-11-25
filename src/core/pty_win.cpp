@@ -23,6 +23,7 @@
 #include <hand/core/platform.hpp>
 
 #include <windows.h>
+#include <winternl.h>   // NtOpenFile's types: ConDrv, for the pseudoconsole host
 
 #include <shlwapi.h>    // PathMatchSpecA — Win32's fnmatch
 #include <tlhelp32.h>   // process enumeration, for the foreground child
@@ -30,7 +31,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cstdint>
 #include <cwchar>
+#include <filesystem>
+#include <string_view>
 #include <mutex>
 #include <thread>
 #include <string>
@@ -80,46 +84,244 @@ Session* session_of(int fd) {
     return s.used ? &s : nullptr;
 }
 
-// The pseudoconsole implementation. Modern ConPTY (conpty.dll + OpenConsole.exe
-// beside hand.exe -- Microsoft's Microsoft.Windows.Console.ConPTY package, what
-// Windows Terminal and WezTerm ship) when present; else the inbox one in
-// kernel32. The inbox conhost repaints the whole viewport after every
-// resize, reflowed by ITS rules: a drag then doubled lines in the scrollback
-// and cut the head off a line wrapped across the top of the screen. The
-// modern one, told PSEUDOCONSOLE_RESIZE_QUIRK, leaves reflow to the terminal.
-struct ConptyApi {
-    using Create = HRESULT(WINAPI*)(COORD, HANDLE, HANDLE, DWORD, HPCON*);
-    using Resize = HRESULT(WINAPI*)(HPCON, COORD);
-    using Close = void(WINAPI*)(HPCON);
-    Create create = nullptr;
-    Resize resize = nullptr;
-    Close close = nullptr;
-    bool modern = false;
+// ── the pseudoconsole host ───────────────────────────────────────────────────
+// The inbox ConPTY (kernel32's CreatePseudoConsole) repaints its whole
+// viewport after every resize, reflowed by ITS rules: a window drag doubled
+// lines in the scrollback and cut the head off a line wrapped across the top
+// of the screen. Windows Terminal and WezTerm ship Microsoft's current host
+// instead (OpenConsole.exe, Microsoft.Windows.Console.ConPTY, MIT), which
+// leaves reflow to the terminal. hand stays ONE binary: OpenConsole is
+// embedded as a resource and extracted once per version to
+// %LOCALAPPDATA%\hand\conpty\<ver>\, and conpty.dll -- only a launcher --
+// is replaced by the few lines below (src/winconpty/winconpty.cpp upstream).
+// The ladder, best first:
+//   bundled  embedded OpenConsole, verified byte-for-byte against the resource
+//            and held open deny-write so it cannot change under us
+//   system   the inbox conhost.exe started by us with --resizeQuirk, which
+//            kernel32 never passes (Windows 11+; older parsers would take an
+//            unknown flag for the client command line)
+//   inbox    kernel32's own: repaints on resize (hand then settles + rewinds)
+// HAND_CONPTY=bundled|system|inbox pins one (for tests and bisecting).
+enum class Host { bundled, system, inbox };
+
+/// The HPCON ABI (winconpty.h): kernelbase reads this when a child is
+/// attached with PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, so layout is fixed.
+struct PseudoConsole {
+    HANDLE signal;      ///< our end of the signal pipe (resize packets)
+    HANDLE reference;   ///< \Reference on the ConDrv server: keeps the host alive
+    HANDLE host;        ///< the host process
 };
-const ConptyApi& conpty() {
-    static const ConptyApi api = [] {
-        ConptyApi a;
-        if (!std::getenv("HAND_INBOX_CONPTY")) {
-            wchar_t path[MAX_PATH] = {};
-            const DWORD n = ::GetModuleFileNameW(nullptr, path, MAX_PATH);
-            std::wstring dir(path, n);
-            dir.resize(dir.find_last_of(L"\\/") + 1);
-            if (HMODULE m = ::LoadLibraryExW((dir + L"conpty.dll").c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH)) {
-                a.create = reinterpret_cast<ConptyApi::Create>(reinterpret_cast<void*>(::GetProcAddress(m, "ConptyCreatePseudoConsole")));
-                a.resize = reinterpret_cast<ConptyApi::Resize>(reinterpret_cast<void*>(::GetProcAddress(m, "ConptyResizePseudoConsole")));
-                a.close = reinterpret_cast<ConptyApi::Close>(reinterpret_cast<void*>(::GetProcAddress(m, "ConptyClosePseudoConsole")));
-                a.modern = a.create && a.resize && a.close;
-            }
-        }
-        if (!a.modern) { a.create = &::CreatePseudoConsole; a.resize = &::ResizePseudoConsole; a.close = &::ClosePseudoConsole; }
-        return a;
-    }();
-    return api;
+
+#ifndef OBJ_INHERIT
+#define OBJ_INHERIT 0x00000002L
+#endif
+#ifndef OBJ_CASE_INSENSITIVE
+#define OBJ_CASE_INSENSITIVE 0x00000040L
+#endif
+constexpr ULONG kSyncIoNonAlert = 0x00000020;   // FILE_SYNCHRONOUS_IO_NONALERT
+
+FARPROC ntdll(const char* fn) { return ::GetProcAddress(::GetModuleHandleW(L"ntdll.dll"), fn); }
+
+/// NtOpenFile on a ConDrv object (server/DeviceHandle.cpp upstream).
+HANDLE condrv(const wchar_t* name, ACCESS_MASK access, HANDLE parent, bool inherit, ULONG options) {
+    using Open = LONG(NTAPI*)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, PIO_STATUS_BLOCK, ULONG, ULONG);
+    static const auto open = reinterpret_cast<Open>(reinterpret_cast<void*>(ntdll("NtOpenFile")));
+    if (open == nullptr) return nullptr;
+    std::wstring buf{name};   // UNICODE_STRING wants a mutable buffer
+    UNICODE_STRING n{};
+    n.Buffer = buf.data();
+    n.Length = static_cast<USHORT>(buf.size() * sizeof(wchar_t));
+    n.MaximumLength = static_cast<USHORT>(n.Length + sizeof(wchar_t));
+    OBJECT_ATTRIBUTES oa{};
+    oa.Length = sizeof oa;
+    oa.RootDirectory = parent;
+    oa.ObjectName = &n;
+    oa.Attributes = OBJ_CASE_INSENSITIVE | (inherit ? OBJ_INHERIT : 0);
+    IO_STATUS_BLOCK io{};
+    HANDLE h = nullptr;
+    const LONG st = open(&h, access, &oa, &io, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, options);
+    return st >= 0 ? h : nullptr;
 }
-constexpr DWORD kResizeQuirk = 0x2;   // PSEUDOCONSOLE_RESIZE_QUIRK (modern ConPTY: no repaint on resize)
+
+/// ConDrv may not be loaded yet on a machine that never opened a console.
+void load_condrv() {
+    using Set = LONG(NTAPI*)(ULONG, PVOID, ULONG);
+    if (const auto set = reinterpret_cast<Set>(reinterpret_cast<void*>(ntdll("NtSetSystemInformation")))) {
+        ULONG loaded = 1;   // SYSTEM_CONSOLE_INFORMATION{ .DriverLoaded = 1 }
+        (void)set(132 /* SystemConsoleInformation */, &loaded, sizeof loaded);
+    }
+}
+
+DWORD os_build() {
+    using Get = LONG(NTAPI*)(PRTL_OSVERSIONINFOW);
+    RTL_OSVERSIONINFOW v{};
+    v.dwOSVersionInfoSize = sizeof v;
+    const auto get = reinterpret_cast<Get>(reinterpret_cast<void*>(ntdll("RtlGetVersion")));
+    return get != nullptr && get(&v) >= 0 ? v.dwBuildNumber : 0;
+}
+
+/// The embedded OpenConsole, extracted beside hand's other per-user files.
+/// Empty when hand was built without it or the copy cannot be trusted.
+std::wstring bundled_host() {
+#ifdef HAND_CONPTY_VERSION
+    HRSRC r = ::FindResourceW(nullptr, L"OPENCONSOLE", MAKEINTRESOURCEW(10) /* RT_RCDATA */);
+    HGLOBAL g = r != nullptr ? ::LoadResource(nullptr, r) : nullptr;
+    const auto* bytes = g != nullptr ? static_cast<const char*>(::LockResource(g)) : nullptr;
+    const DWORD size = r != nullptr ? ::SizeofResource(nullptr, r) : 0;
+    const wchar_t* base = ::_wgetenv(L"LOCALAPPDATA");
+    if (bytes == nullptr || size == 0 || base == nullptr || *base == L'\0') return {};
+    const std::wstring dir = std::wstring{base} + L"\\hand\\conpty\\" L"" HAND_CONPTY_VERSION;
+    const std::wstring exe = dir + L"\\OpenConsole.exe";
+    // Opened deny-write and never closed: what was checked is what runs.
+    const auto pin = [&]() -> bool {
+        const HANDLE f = ::CreateFileW(exe.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                                       FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (f == INVALID_HANDLE_VALUE) return false;
+        LARGE_INTEGER len{};
+        std::vector<char> have;
+        DWORD got = 0;
+        bool same = ::GetFileSizeEx(f, &len) != FALSE && len.QuadPart == size;
+        if (same) {
+            have.resize(size);
+            same = ::ReadFile(f, have.data(), size, &got, nullptr) != FALSE && got == size &&
+                   std::memcmp(have.data(), bytes, size) == 0;
+        }
+        if (!same) ::CloseHandle(f);
+        return same;
+    };
+    if (pin()) return exe;
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    const std::wstring tmp = exe + L"." + std::to_wstring(::GetCurrentProcessId()) + L".tmp";
+    const HANDLE f = ::CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return {};
+    DWORD wrote = 0;
+    const bool ok = ::WriteFile(f, bytes, size, &wrote, nullptr) != FALSE && wrote == size;
+    ::CloseHandle(f);
+    if (!ok || ::MoveFileExW(tmp.c_str(), exe.c_str(), MOVEFILE_REPLACE_EXISTING) == FALSE) {
+        ::DeleteFileW(tmp.c_str());
+        // Another hand may have just written it: take theirs if it checks out.
+    }
+    return pin() ? exe : std::wstring{};
+#else
+    return {};
+#endif
+}
+
+struct HostChoice {
+    Host kind = Host::inbox;
+    std::wstring exe;
+};
+const HostChoice& host() {
+    static const HostChoice h = [] {
+        const char* e = std::getenv("HAND_CONPTY");
+        const std::string_view want = e != nullptr ? e : "";
+        if (want == "inbox") return HostChoice{};
+        if (want != "system")
+            if (std::wstring exe = bundled_host(); !exe.empty()) return HostChoice{Host::bundled, std::move(exe)};
+        if (want == "system" || os_build() >= 22000) {
+            wchar_t sys[MAX_PATH];
+            const UINT n = ::GetSystemDirectoryW(sys, MAX_PATH);
+            if (n > 0 && n < MAX_PATH) return HostChoice{Host::system, std::wstring(sys, n) + L"\\conhost.exe"};
+        }
+        return HostChoice{};
+    }();
+    return h;
+}
+
+/// winconpty's _CreatePseudoConsole: a ConDrv server, a \Reference on it,
+/// a signal pipe, and the host started headless on them.
+HRESULT own_create(COORD size, HANDLE in, HANDLE out, HPCON* pc) {
+    *pc = nullptr;
+    if (size.X <= 0 || size.Y <= 0) return E_INVALIDARG;
+    HANDLE server = condrv(L"\\Device\\ConDrv\\Server", GENERIC_ALL, nullptr, true, 0);
+    if (server == nullptr) {
+        load_condrv();
+        server = condrv(L"\\Device\\ConDrv\\Server", GENERIC_ALL, nullptr, true, 0);
+    }
+    if (server == nullptr) return E_FAIL;
+    HANDLE ref = condrv(L"\\Reference", GENERIC_READ | GENERIC_WRITE | SYNCHRONIZE, server, false, kSyncIoNonAlert);
+    HANDLE sig_host = nullptr, sig_ours = nullptr, hin = nullptr, hout = nullptr;
+    const HANDLE self = ::GetCurrentProcess();
+    PROCESS_INFORMATION pi{};
+    bool ok = ref != nullptr && ::CreatePipe(&sig_host, &sig_ours, nullptr, 0) != FALSE &&
+              ::SetHandleInformation(sig_host, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) != FALSE &&
+              ::DuplicateHandle(self, in, self, &hin, 0, TRUE, DUPLICATE_SAME_ACCESS) != FALSE &&
+              ::DuplicateHandle(self, out, self, &hout, 0, TRUE, DUPLICATE_SAME_ACCESS) != FALSE;
+    if (ok) {
+        // bundled: widths measured per codepoint, as toe does (wcswidth), so
+        // both sides wrap a line at the same column.
+        const wchar_t* opts = host().kind == Host::bundled ? L"--textMeasurement wcswidth " : L"--resizeQuirk ";
+        std::wstring cmd(host().exe.size() + 160, L'\0');
+        const int n = std::swprintf(cmd.data(), cmd.size(), L"\"%ls\" --headless %ls--width %d --height %d --signal 0x%llx --server 0x%llx",
+                                    host().exe.c_str(), opts, size.X, size.Y,
+                                    static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(sig_host)),
+                                    static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(server)));
+        cmd.resize(n > 0 ? static_cast<std::size_t>(n) : 0);
+        cmd.push_back(L'\0');
+        STARTUPINFOEXW si{};
+        si.StartupInfo.cb = sizeof si;
+        si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+        si.StartupInfo.hStdInput = hin;
+        si.StartupInfo.hStdOutput = hout;
+        si.StartupInfo.hStdError = hout;
+        // Only these four reach the host -- not whatever another tab's
+        // spawn worker has made inheritable at this very moment.
+        HANDLE inherit[4] = {server, hin, hout, sig_host};
+        SIZE_T attr_size = 0;
+        ::InitializeProcThreadAttributeList(nullptr, 1, 0, &attr_size);
+        std::vector<char> attrs(attr_size);
+        si.lpAttributeList = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attrs.data());
+        ok = ::InitializeProcThreadAttributeList(si.lpAttributeList, 1, 0, &attr_size) != FALSE;
+        if (ok) {
+            ok = ::UpdateProcThreadAttribute(si.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherit,
+                                             sizeof inherit, nullptr, nullptr) != FALSE &&
+                 ::CreateProcessW(host().exe.c_str(), cmd.data(), nullptr, nullptr, TRUE, EXTENDED_STARTUPINFO_PRESENT,
+                                  nullptr, nullptr, &si.StartupInfo, &pi) != FALSE;
+            ::DeleteProcThreadAttributeList(si.lpAttributeList);
+        }
+    }
+    for (HANDLE h : {server, sig_host, hin, hout, pi.hThread})
+        if (h != nullptr) ::CloseHandle(h);
+    if (!ok) {
+        for (HANDLE h : {ref, sig_ours})
+            if (h != nullptr) ::CloseHandle(h);
+        return HRESULT_FROM_WIN32(::GetLastError());
+    }
+    *pc = reinterpret_cast<HPCON>(new PseudoConsole{sig_ours, ref, pi.hProcess});
+    return S_OK;
+}
+
+HRESULT pc_create(COORD size, HANDLE in, HANDLE out, HPCON* pc) {
+    if (host().kind == Host::inbox) return ::CreatePseudoConsole(size, in, out, 0, pc);
+    return own_create(size, in, out, pc);
+}
+
+void pc_resize(HPCON pc, COORD size) {
+    if (host().kind == Host::inbox) {
+        (void)::ResizePseudoConsole(pc, size);
+        return;
+    }
+    const unsigned short packet[3] = {8 /* PTY_SIGNAL_RESIZE_WINDOW */, static_cast<unsigned short>(size.X),
+                                      static_cast<unsigned short>(size.Y)};
+    DWORD wrote = 0;
+    (void)::WriteFile(reinterpret_cast<PseudoConsole*>(pc)->signal, packet, sizeof packet, &wrote, nullptr);
+}
+
+void pc_close(HPCON pc) {
+    if (host().kind == Host::inbox) {
+        ::ClosePseudoConsole(pc);
+        return;
+    }
+    // Closing the signal pipe and the reference is the host's cue to exit.
+    auto* p = reinterpret_cast<PseudoConsole*>(pc);
+    for (HANDLE h : {p->signal, p->reference, p->host})
+        if (h != nullptr && h != INVALID_HANDLE_VALUE) ::CloseHandle(h);
+    delete p;
+}
 }  // namespace
 
-bool pty_repaints_on_resize_now() { return !conpty().modern; }
+bool pty_repaints_on_resize_now() { return host().kind == Host::inbox; }
 namespace plat { bool pty_repaints_on_resize() { return pty_repaints_on_resize_now(); } }
 
 namespace {
@@ -229,7 +431,7 @@ Pty::~Pty() {
     // exits on its own, then the HPCON (which waits for conhost to drain),
     // then the handles. Closing the HPCON first can hang on a busy child.
     if (s->in != INVALID_HANDLE_VALUE) ::CloseHandle(s->in);
-    if (s->pc != nullptr) conpty().close(s->pc);
+    if (s->pc != nullptr) pc_close(s->pc);
     if (s->out != INVALID_HANDLE_VALUE) {
         if (s->pending) {   // the kernel writes into rbuf until the read is gone
             DWORD got = 0;
@@ -355,8 +557,7 @@ Pty::Started Pty::start(const PtySpec& spec) {
                 std::lock_guard lk{g_mu};
                 size = ss.size;
             }
-            const DWORD flags = conpty().modern ? kResizeQuirk : 0;
-            const HRESULT hr = conpty().create(size, in_read, ss.out_w, flags, &pc);
+            const HRESULT hr = pc_create(size, in_read, ss.out_w, &pc);
             if (FAILED(hr) || pc == nullptr) return fail("CreatePseudoConsole");
             // conhost dup'd both ends; ours are dead weight now and MUST be
             // closed, or the child never sees EOF when the pty goes away.
@@ -366,7 +567,7 @@ Pty::Started Pty::start(const PtySpec& spec) {
             const bool ok = start_child(pc, shell, env, args, cwd, proc, pid);
             std::lock_guard lk{g_mu};
             ss.pc = pc;
-            if (ss.size.X != size.X || ss.size.Y != size.Y) (void)conpty().resize(pc, ss.size);   // resized meanwhile
+            if (ss.size.X != size.X || ss.size.Y != size.Y) pc_resize(pc, ss.size);   // resized meanwhile
             if (!ok) {
                 const std::string msg = "\x1b[31mhand: could not start a shell (" + shell + ")\x1b[0m\r\n";
                 DWORD w = 0;
@@ -473,7 +674,7 @@ void Pty::resize(int cols, int rows, int /*px_w*/, int /*px_h*/) const {
     // ConPTY has no pixel geometry; cells are all it models.
     const COORD size{static_cast<SHORT>(cols > 0 ? cols : 80), static_cast<SHORT>(rows > 0 ? rows : 24)};
     s->size = size;   // still starting: the worker applies it
-    if (s->pc != nullptr) (void)conpty().resize(s->pc, size);
+    if (s->pc != nullptr) pc_resize(s->pc, size);
 }
 
 namespace {

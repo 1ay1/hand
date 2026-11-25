@@ -98,10 +98,10 @@ bool write_stdout(const char* buf, std::size_t n);
 
 /// Does this OS's pty repaint the whole viewport from its own buffer after a
 /// resize? The inbox Windows ConPTY does (it re-sends every visible row,
-/// reflowed by its own rules); the modern one hand ships beside it
-/// (conpty.dll + OpenConsole.exe, told PSEUDOCONSOLE_RESIZE_QUIRK) does not,
-/// nor does a POSIX pty -- the app redraws what it owns. Asked at run time:
-/// it depends on which ConPTY loaded.
+/// reflowed by its own rules); the host hand launches itself (the
+/// OpenConsole embedded in hand.exe, or the system conhost with
+/// --resizeQuirk) does not, nor does a POSIX pty -- the app redraws what it
+/// owns. Asked at run time: it depends on which host could start.
 [[nodiscard]] bool pty_repaints_on_resize();
 
 /// Can this OS's OpenSSH share a connection (ControlMaster over a Unix

@@ -33,8 +33,9 @@ Env read_env(bool scripted) {
     e.config_path = config_path();
     // The inbox ConPTY repaints its viewport on every resize: it hears a
     // drag's size once it holds 150 ms (measured: 60-100 still doubled lines
-    // on some drags; 150 never did). The modern ConPTY beside hand.exe does
-    // not repaint: at once. HAND_RESIZE_SETTLE_MS overrides (measuring).
+    // on some drags; 150 never did). The host hand launches itself (embedded
+    // OpenConsole / conhost --resizeQuirk) does not repaint: at once.
+    // HAND_RESIZE_SETTLE_MS overrides (measuring).
     e.resize_settle_ms = plat::pty_repaints_on_resize() ? 150 : 0;
     if (const std::string s = var("HAND_RESIZE_SETTLE_MS"); !s.empty()) e.resize_settle_ms = std::atoi(s.c_str());
     e.wall_epoch_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
