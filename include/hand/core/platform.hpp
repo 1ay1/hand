@@ -96,6 +96,18 @@ bool write_stdout(const char* buf, std::size_t n);
 /// Local broken-down time, thread-safe (localtime_r / localtime_s).
 [[nodiscard]] std::tm local_time(std::time_t t);
 
+/// Does this OS's pty repaint the whole viewport from its own buffer after a
+/// resize? Windows ConPTY does (it re-sends every visible row at the new
+/// size); a POSIX pty never does -- the app redraws what it owns. A capability
+/// toe needs: history it brought down into view would be painted over.
+[[nodiscard]] constexpr bool pty_repaints_on_resize() noexcept {
+#if MAYAG_OS_WINDOWS
+    return true;
+#else
+    return false;
+#endif
+}
+
 /// Can this OS's OpenSSH share a connection (ControlMaster over a Unix
 /// socket)? POSIX yes; Microsoft's OpenSSH for Windows no -- every
 /// connection with the options died with "getsockname failed: Not a socket".

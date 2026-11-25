@@ -32,6 +32,7 @@ void visual_settings(Runtime& rt, mayag::Vec2 size, Check& ok);   ///< visual se
 void terminal_features(Runtime& rt, mayag::Vec2 size, Check& ok);   ///< shell marks, links, search, hints, the minimap, cursor motion
 void fish_integration(Runtime& rt, mayag::Vec2 size, Check& ok);   ///< the injected shell integration in a real fish
 void resize_fish(Runtime& rt, mayag::Vec2 size, Check& ok);   ///< resize never corrupts: real fish, a drag of sizes
+void resize_history(Runtime& rt, mayag::Vec2 size, Check& ok);   ///< the scrollback survives a resize: system shell, real pty
 void wide_squeeze(Runtime& rt, mayag::Vec2 size, Check& ok);   ///< wide output squeezed thin and back: no gap above the prompt
 void wrap_spaces(Runtime& rt, mayag::Vec2 size, Check& ok);   ///< a real space at a wrap point survives a rewrap
 void selection(Runtime& rt, mayag::Vec2 size, Check& ok);   ///< selection, copy mode, paste and its guard

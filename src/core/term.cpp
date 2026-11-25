@@ -2,6 +2,7 @@
 
 #include <hand/core/term.hpp>
 #include <hand/core/hint_scan.hpp>
+#include <hand/core/platform.hpp>
 
 #include <toe/input/keymap.hpp>
 #include <toe/core/target.hpp>
@@ -105,7 +106,11 @@ struct Term::Impl {
     toe::term::Model m;
     Impl(int cols, int rows, const Palette& pal, int scrollback, std::uint64_t entropy)
         : m(toe::term::Config{.default_fg = rgb_of(pal.fg), .default_bg = rgb_of(pal.bg), .word_separators = {},
-                              .scrollback_lines = scrollback, .entropy = entropy},
+                              .scrollback_lines = scrollback,
+                              // ConPTY repaints the viewport after a resize: history
+                              // brought down into it would be painted over (lost)
+                              .pull_history_on_resize = !plat::pty_repaints_on_resize(),
+                              .entropy = entropy},
             toe::Extent{cols, rows}) {
         // the scheme's 16 colours are the palette's first 16 slots
         auto& s = m.screen;
