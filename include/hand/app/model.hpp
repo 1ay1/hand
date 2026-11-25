@@ -43,6 +43,13 @@ struct Env {
     std::string   config_path;     ///< hand.vibe (hosts.vibe sits beside it)
     std::int64_t  wall_epoch_ms = 0;   ///< the wall clock when the run began (unix ms)
     std::uint64_t entropy = 0;     ///< seeds what must be unguessable (DEC 2034 tokens)
+    /// How long a new grid size must hold before the pty is told (ms; 0 =
+    /// at once). A pty that repaints its whole viewport after every resize
+    /// (ConPTY) answers each size of a drag with a repaint; one that lands
+    /// after the grid has moved on to another size scrolls copies of lines
+    /// into the scrollback. Told only once the size settles, it repaints
+    /// once, at the size the grid has (foot's resize-delay-ms).
+    int           resize_settle_ms = 0;
     /// The keyboard conventions shortcuts are SHOWN in (⌘P vs Ctrl+P). Keys
     /// themselves carry theirs (Mods.keymap); a test sets this to draw the
     /// other platform's hints on any machine.
@@ -60,6 +67,7 @@ struct Model {
     mayag::SteadyClock::time_point began{};        ///< the first step (wall_ms counts from here)
     std::int64_t            wall_ms = 0;          ///< this step on the wall clock (unix ms): command timings, "3h ago"
     bool                    probe_due = false;    ///< a Probe is scheduled (output came: what runs may have changed)
+    bool                    resize_due = false;   ///< a ResizeSettle is scheduled (a grid size waits to reach its pty)
     Palette                 palette;
     mayag::Vec2             win{800, 540};        ///< the window
     mayag::Vec2             size{800, 500};       ///< the terminal area (the window below the tab strip)

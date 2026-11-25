@@ -83,6 +83,7 @@ struct App {
     using SearchAllDone = msg::SearchAllDone; using SearchAllPick = msg::SearchAllPick; using SearchHit = msg::SearchHit;
     using Notice = msg::Notice;
     using Spawned = msg::Spawned;       using Probe = msg::Probe;           using Probed = msg::Probed;
+    using ResizeSettle = msg::ResizeSettle;
     using HostsLoaded = msg::HostsLoaded;
 
     /// What a run starts with (Elm's flags): the configuration main loaded
@@ -111,6 +112,7 @@ struct App {
     static Cmd update(Model& m, Spawned s);
     static Cmd update(Model& m, Probe);
     static Cmd update(Model& m, Probed p);
+    static Cmd update(Model& m, ResizeSettle);
     // ClockMsg (src/app/session.cpp)
     static Cmd update(Model& m, Blink);
     static Cmd update(Model& m, Tick t);

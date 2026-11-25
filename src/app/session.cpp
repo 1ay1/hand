@@ -410,10 +410,33 @@ App::Cmd App::drain(Model& m) {
             continue;
         }
         if (se.term && (se.term->cols() != se.pty_cols || se.term->rows() != se.pty_rows)) {
-            se.pty_cols = se.term->cols();
-            se.pty_rows = se.term->rows();
-            cmds.push_back(Cmd::run(fx::pty_resize, se.pty.share(), se.pty_cols, se.pty_rows,
-                                    static_cast<int>(m.size.x), static_cast<int>(m.size.y)));
+            // the pty hears a size once it has held Env::resize_settle_ms (a
+            // drag's sizes are the grid's alone; the pty repaints once, at the end)
+            if (se.term->cols() != se.size_cols || se.term->rows() != se.size_rows) {
+                se.size_cols = se.term->cols();
+                se.size_rows = se.term->rows();
+                se.size_since = m.now;
+            }
+            const auto settle = std::chrono::milliseconds(m.env.resize_settle_ms);
+            const auto held = m.now - se.size_since;
+            if (held >= settle) {
+                // the grid was reshaped frame by frame while the pty heard
+                // nothing: reach this size from the model the pty last saw
+                if (m.env.resize_settle_ms > 0) {
+                    const int c = se.term->cols(), r = se.term->rows();
+                    se.term->resize_for_pty(c, r);
+                    se.grid_key = 0;
+                }
+                se.term->drop_pty_sized();
+                se.pty_cols = se.term->cols();
+                se.pty_rows = se.term->rows();
+                cmds.push_back(Cmd::run(fx::pty_resize, se.pty.share(), se.pty_cols, se.pty_rows,
+                                        static_cast<int>(m.size.x), static_cast<int>(m.size.y)));
+            } else if (!m.resize_due) {
+                m.resize_due = true;
+                cmds.push_back(Cmd::after(std::chrono::duration_cast<std::chrono::milliseconds>(settle - held) + std::chrono::milliseconds(1),
+                                          Msg{ResizeSettle{}}));
+            }
         }
         if (!se.input.empty()) cmds.push_back(Cmd::run(fx::pty_write, se.pty.share(), std::exchange(se.input, {})));
     }
@@ -441,6 +464,12 @@ App::Cmd App::probe_soon(Model& m) {
     if (m.probe_due || m.cfg.demo) return {};
     m.probe_due = true;
     return Cmd::after(std::chrono::milliseconds(400), Msg{Probe{}});
+}
+
+/// The drain re-checks every tab's size (and reschedules one still moving).
+App::Cmd App::update(Model& m, ResizeSettle) {
+    m.resize_due = false;
+    return {};
 }
 
 App::Cmd App::update(Model& m, Probe) {

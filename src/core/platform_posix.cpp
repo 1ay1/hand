@@ -47,6 +47,8 @@ std::tm local_time(std::time_t t) {
 
 std::vector<std::string> command_runner() { return {"/bin/sh", "-c"}; }
 
+bool pty_repaints_on_resize() { return false; }
+
 long read_stdin(char* buf, std::size_t n) {
     for (;;) {
         const ssize_t r = ::read(0, buf, n);

@@ -150,6 +150,9 @@ int main(int argc, char** argv) {
         // program on every OS, no coreutils needed; argv given split, so a path with spaces is fine.
         else if (a == "--echo") { mode = Mode::png; shot = "echo"; if (i + 1 < argc && argv[i + 1][0] != '-') cfg.shell_cli = argv[++i]; else { cfg.shell_cli = hand::self_exe(); cfg.shell_args = {"--cat"}; } }
         else if (a == "--flood") { mode = Mode::png; shot = "flood"; if (i + 1 < argc && argv[i + 1][0] != '-') cfg.shell_cli = argv[++i]; else { cfg.shell_cli = hand::self_exe(); cfg.shell_args = {"--yes"}; } }
+        // --drag: the system shell prints numbered lines, the window is dragged through sizes the
+        // way a person drags it (frames, the real resize path), and nothing may be lost or doubled
+        else if (a == "--drag") { mode = Mode::png; shot = "drag"; }
     }
     startup::mark("hand: main");
     if (mode == Mode::window) mayag::gpu_prestart();   // ~100 ms of device bring-up, overlapped with all below
@@ -165,7 +168,7 @@ int main(int argc, char** argv) {
         if (!problems.empty()) std::fprintf(stderr, "hand: %s:\n%s", hand::config_path().c_str(), problems.c_str());
     }
     startup::mark("hand: config loaded");
-    cfg.demo = mode != Mode::window && shot != "flood" && shot != "echo" && shot != "idle";
+    cfg.demo = mode != Mode::window && shot != "flood" && shot != "echo" && shot != "idle" && shot != "drag";
     // Scripted shots in any colour scheme: HAND_SCHEME="Clu" (by name).
     if (const char* sch = std::getenv("HAND_SCHEME"); sch && *sch && mode != Mode::window)
         for (std::size_t k = 0; k < hand::presets::all.size(); ++k)

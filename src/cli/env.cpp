@@ -31,6 +31,12 @@ Env read_env(bool scripted) {
     std::error_code ec;
     e.cwd = std::filesystem::current_path(ec).generic_string();
     e.config_path = config_path();
+    // The inbox ConPTY repaints its viewport on every resize: it hears a
+    // drag's size once it holds 150 ms (measured: 60-100 still doubled lines
+    // on some drags; 150 never did). The modern ConPTY beside hand.exe does
+    // not repaint: at once. HAND_RESIZE_SETTLE_MS overrides (measuring).
+    e.resize_settle_ms = plat::pty_repaints_on_resize() ? 150 : 0;
+    if (const std::string s = var("HAND_RESIZE_SETTLE_MS"); !s.empty()) e.resize_settle_ms = std::atoi(s.c_str());
     e.wall_epoch_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                           std::chrono::system_clock::now().time_since_epoch()).count();
     // scripted runs are reproducible: a fixed seed and a fixed epoch

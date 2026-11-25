@@ -50,7 +50,11 @@ int selftest(Runtime& rt, Vec2 size) {
         checks::ssh,
         checks::config_roundtrip,
     };
-    for (const auto suite : suites) {
+    // HAND_ONLY_SUITE=n: run suite n alone (0-based; iterating on one check)
+    const char* only = std::getenv("HAND_ONLY_SUITE");
+    for (std::size_t si = 0; si < suites.size(); ++si) {
+        if (only && *only && static_cast<std::size_t>(std::atoi(only)) != si) continue;
+        const auto suite = suites[si];
         suite(rt, size, ok);
         // A toast or the size HUD leaves on a REAL-time timer (no frames while
         // it is up); a suite runs faster than that, so the next one would start

@@ -223,6 +223,33 @@ if(MAYAG_SYSTEM STREQUAL "windows")
     # NOGDI is deliberately NOT set: mayag's Win32 backend blits through GDI.
     target_compile_definitions(hand_core PUBLIC _WIN32_WINNT=0x0A00 WINVER=0x0A00
                                                 WIN32_LEAN_AND_MEAN NOMINMAX)
+    # Modern ConPTY beside hand.exe: Microsoft's Microsoft.Windows.Console.ConPTY
+    # package (conpty.dll + OpenConsole.exe, MIT; what Windows Terminal and
+    # WezTerm ship). The inbox conhost repaints the whole viewport on every
+    # resize, reflowed by its own rules -- a window drag doubled lines in the
+    # scrollback and cut the head off a line wrapped across the top. The
+    # modern one, told PSEUDOCONSOLE_RESIZE_QUIRK, leaves reflow to toe.
+    # Fetched once at configure; hand falls back to the inbox one without it.
+    set(HAND_CONPTY_VERSION "1.25.261109001" CACHE STRING "Microsoft.Windows.Console.ConPTY version shipped beside hand.exe ('' = none)")
+    if(HAND_CONPTY_VERSION)
+        set(_cp ${CMAKE_BINARY_DIR}/_deps/conpty-${HAND_CONPTY_VERSION})
+        if(NOT EXISTS ${_cp}/runtimes/win-x64/native/conpty.dll)
+            file(DOWNLOAD https://www.nuget.org/api/v2/package/Microsoft.Windows.Console.ConPTY/${HAND_CONPTY_VERSION}
+                 ${_cp}.zip STATUS _st TLS_VERIFY OFF)
+            list(GET _st 0 _code)
+            if(_code EQUAL 0)
+                file(ARCHIVE_EXTRACT INPUT ${_cp}.zip DESTINATION ${_cp})
+            else()
+                message(WARNING "hand: could not fetch ConPTY ${HAND_CONPTY_VERSION} (${_st}); the inbox ConPTY will be used")
+            endif()
+        endif()
+        if(EXISTS ${_cp}/runtimes/win-x64/native/conpty.dll)
+            add_custom_command(TARGET hand POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_cp}/runtimes/win-x64/native/conpty.dll $<TARGET_FILE_DIR:hand>
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_cp}/build/native/runtimes/x64/OpenConsole.exe $<TARGET_FILE_DIR:hand>
+                COMMENT "hand: modern ConPTY beside hand.exe")
+        endif()
+    endif()
     # (A fully static MinGW link was measured: +15 ms to first text, as the
     # bigger image pages in cold, while the shared runtime DLLs are already
     # resident. So the runtime stays dynamic.)

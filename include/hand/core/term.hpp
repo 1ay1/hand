@@ -49,6 +49,19 @@ class Term {
     /// ms), the time OSC 133 command blocks are stamped with.
     Effects feed(std::string_view bytes, std::int64_t now_ms = 0);
     void resize(int cols, int rows);
+    /// For a pty that repaints its viewport after a resize (ConPTY): a
+    /// drag reshapes the grid every frame, but the pty only hears the final
+    /// size. Lines the drag pushed into history are still in the PTY's
+    /// viewport, and its repaint would paint them on screen a second time.
+    /// So the model is kept as it was when the pty last heard a size
+    /// (mark_pty_sized), and the size the pty is about to hear is reached
+    /// from THAT in one step (resize_for_pty): every line exactly once.
+    void mark_pty_sized();
+    void resize_for_pty(int cols, int rows);
+    /// Keep the pty-sized model: resize() snapshots the model before the
+    /// first resize away from the size the pty heard (a pty that repaints).
+    void set_pty_repaints(bool on) noexcept { pty_repaints_ = on; }
+    void drop_pty_sized() noexcept;
     /// Cells moved by re-wraps so far (history + screen, per resize): the
     /// cost a caller must keep out of interactive frames.
     [[nodiscard]] std::uint64_t reflowed_cells() const noexcept { return reflowed_cells_; }
@@ -98,6 +111,8 @@ class Term {
     [[nodiscard]] std::int64_t view_to_abs(int row) const;
     /// One absolute row as one codepoint per column (U' ' for blank, 0 for a wide glyph's spacer).
     [[nodiscard]] std::u32string line(std::int64_t abs) const;
+    /// Does absolute row `abs` soft-wrap into the next (one logical line continues)?
+    [[nodiscard]] bool wrapped(std::int64_t abs) const;
     [[nodiscard]] bool bracketed() const;   ///< the app asked for bracketed paste
     void select_extend(int col, int row);
     void select_clear();
@@ -186,6 +201,9 @@ class Term {
   private:
     struct Impl;
     std::unique_ptr<Impl> p_;
+    std::unique_ptr<Impl> pty_sized_;   ///< the model when the pty last heard a size (pty repaints on resize)
+    std::string           out_since_mark_;   ///< output fed since pty_sized_ (replayed onto it)
+    bool                  pty_repaints_ = false;
     mutable std::vector<mayag::dsl::ScrollbackRun> mm_;
     mutable std::uint64_t mm_key_ = 0;
     std::uint64_t         epoch_ = 1;

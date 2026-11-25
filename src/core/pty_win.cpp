@@ -28,6 +28,7 @@
 #include <tlhelp32.h>   // process enumeration, for the foreground child
 #include <array>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <cwchar>
 #include <mutex>
@@ -78,6 +79,50 @@ Session* session_of(int fd) {
     Session& s = g_sessions[static_cast<std::size_t>(fd)];
     return s.used ? &s : nullptr;
 }
+
+// The pseudoconsole implementation. Modern ConPTY (conpty.dll + OpenConsole.exe
+// beside hand.exe -- Microsoft's Microsoft.Windows.Console.ConPTY package, what
+// Windows Terminal and WezTerm ship) when present; else the inbox one in
+// kernel32. The inbox conhost repaints the whole viewport after every
+// resize, reflowed by ITS rules: a drag then doubled lines in the scrollback
+// and cut the head off a line wrapped across the top of the screen. The
+// modern one, told PSEUDOCONSOLE_RESIZE_QUIRK, leaves reflow to the terminal.
+struct ConptyApi {
+    using Create = HRESULT(WINAPI*)(COORD, HANDLE, HANDLE, DWORD, HPCON*);
+    using Resize = HRESULT(WINAPI*)(HPCON, COORD);
+    using Close = void(WINAPI*)(HPCON);
+    Create create = nullptr;
+    Resize resize = nullptr;
+    Close close = nullptr;
+    bool modern = false;
+};
+const ConptyApi& conpty() {
+    static const ConptyApi api = [] {
+        ConptyApi a;
+        if (!std::getenv("HAND_INBOX_CONPTY")) {
+            wchar_t path[MAX_PATH] = {};
+            const DWORD n = ::GetModuleFileNameW(nullptr, path, MAX_PATH);
+            std::wstring dir(path, n);
+            dir.resize(dir.find_last_of(L"\\/") + 1);
+            if (HMODULE m = ::LoadLibraryExW((dir + L"conpty.dll").c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH)) {
+                a.create = reinterpret_cast<ConptyApi::Create>(reinterpret_cast<void*>(::GetProcAddress(m, "ConptyCreatePseudoConsole")));
+                a.resize = reinterpret_cast<ConptyApi::Resize>(reinterpret_cast<void*>(::GetProcAddress(m, "ConptyResizePseudoConsole")));
+                a.close = reinterpret_cast<ConptyApi::Close>(reinterpret_cast<void*>(::GetProcAddress(m, "ConptyClosePseudoConsole")));
+                a.modern = a.create && a.resize && a.close;
+            }
+        }
+        if (!a.modern) { a.create = &::CreatePseudoConsole; a.resize = &::ResizePseudoConsole; a.close = &::ClosePseudoConsole; }
+        return a;
+    }();
+    return api;
+}
+constexpr DWORD kResizeQuirk = 0x2;   // PSEUDOCONSOLE_RESIZE_QUIRK (modern ConPTY: no repaint on resize)
+}  // namespace
+
+bool pty_repaints_on_resize_now() { return !conpty().modern; }
+namespace plat { bool pty_repaints_on_resize() { return pty_repaints_on_resize_now(); } }
+
+namespace {
 
 /// Quote one argv element the way the CRT's parser will unquote it.
 /// Windows has no execv: the child gets a single string and splits it, so
@@ -184,7 +229,7 @@ Pty::~Pty() {
     // exits on its own, then the HPCON (which waits for conhost to drain),
     // then the handles. Closing the HPCON first can hang on a busy child.
     if (s->in != INVALID_HANDLE_VALUE) ::CloseHandle(s->in);
-    if (s->pc != nullptr) ::ClosePseudoConsole(s->pc);
+    if (s->pc != nullptr) conpty().close(s->pc);
     if (s->out != INVALID_HANDLE_VALUE) {
         if (s->pending) {   // the kernel writes into rbuf until the read is gone
             DWORD got = 0;
@@ -310,7 +355,8 @@ Pty::Started Pty::start(const PtySpec& spec) {
                 std::lock_guard lk{g_mu};
                 size = ss.size;
             }
-            const HRESULT hr = ::CreatePseudoConsole(size, in_read, ss.out_w, 0, &pc);
+            const DWORD flags = conpty().modern ? kResizeQuirk : 0;
+            const HRESULT hr = conpty().create(size, in_read, ss.out_w, flags, &pc);
             if (FAILED(hr) || pc == nullptr) return fail("CreatePseudoConsole");
             // conhost dup'd both ends; ours are dead weight now and MUST be
             // closed, or the child never sees EOF when the pty goes away.
@@ -320,7 +366,7 @@ Pty::Started Pty::start(const PtySpec& spec) {
             const bool ok = start_child(pc, shell, env, args, cwd, proc, pid);
             std::lock_guard lk{g_mu};
             ss.pc = pc;
-            if (ss.size.X != size.X || ss.size.Y != size.Y) (void)::ResizePseudoConsole(pc, ss.size);   // resized meanwhile
+            if (ss.size.X != size.X || ss.size.Y != size.Y) (void)conpty().resize(pc, ss.size);   // resized meanwhile
             if (!ok) {
                 const std::string msg = "\x1b[31mhand: could not start a shell (" + shell + ")\x1b[0m\r\n";
                 DWORD w = 0;
@@ -427,7 +473,7 @@ void Pty::resize(int cols, int rows, int /*px_w*/, int /*px_h*/) const {
     // ConPTY has no pixel geometry; cells are all it models.
     const COORD size{static_cast<SHORT>(cols > 0 ? cols : 80), static_cast<SHORT>(rows > 0 ? rows : 24)};
     s->size = size;   // still starting: the worker applies it
-    if (s->pc != nullptr) (void)::ResizePseudoConsole(s->pc, size);
+    if (s->pc != nullptr) (void)conpty().resize(s->pc, size);
 }
 
 namespace {

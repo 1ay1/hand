@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <optional>
 #include <variant>
 
@@ -134,10 +135,42 @@ Term::Term(int cols, int rows, const Palette& pal, int scrollback, std::uint64_t
     z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
     z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
     id_ = z ^ (z >> 31);
+    pty_repaints_ = plat::pty_repaints_on_resize();
 }
 Term::~Term() = default;
 Term::Term(Term&&) noexcept = default;
 Term& Term::operator=(Term&&) noexcept = default;
+
+void Term::mark_pty_sized() {
+    pty_sized_ = std::make_unique<Impl>(*p_);
+    out_since_mark_.clear();
+}
+
+void Term::drop_pty_sized() noexcept {
+    pty_sized_.reset();
+    out_since_mark_.clear();
+}
+
+void Term::resize_for_pty(int cols, int rows) {
+    cols = std::max(cols, 2);
+    rows = std::max(rows, 1);
+    // The drag's frames reshaped the live model; the pty never saw those
+    // sizes. Its viewport still holds what it held at the last size it
+    // heard -- so the model goes back to that moment, replays the output
+    // that came since, and makes ONE resize to the size the pty now hears:
+    // the rows its repaint paints are exactly the rows the screen keeps.
+    if (pty_sized_ && !p_->m.screen.on_alt_screen()) {
+        auto back = std::move(pty_sized_);
+        (void)toe::term::feed_output(back->m, out_since_mark_);
+        p_ = std::move(back);
+        out_since_mark_.clear();
+        ++epoch_; ++content_epoch_;
+    }
+    const bool armed = pty_repaints_;
+    pty_repaints_ = false;   // this resize IS the one the pty hears: no snapshot
+    resize(cols, rows);
+    pty_repaints_ = armed;
+}
 
 int Term::cols() const { return p_->m.screen.size().cols; }
 int Term::rows() const { return p_->m.screen.size().rows; }
@@ -146,6 +179,10 @@ Effects Term::feed(std::string_view bytes, std::int64_t now_ms) {
     Effects fx;
     if (bytes.empty()) return fx;
     ++epoch_; ++content_epoch_;
+    if (pty_sized_) {   // the pty-sized model replays it when the pty hears the new size
+        if (out_since_mark_.size() + bytes.size() < (8u << 20)) out_since_mark_.append(bytes);
+        else drop_pty_sized();   // a flood during a drag: no rewind this time
+    }
     for (auto& c : toe::term::feed_output(p_->m, bytes, now_ms)) {
         std::visit([&](auto& x) {
             using T = std::decay_t<decltype(x)>;
@@ -162,6 +199,9 @@ void Term::resize(int cols, int rows) {
     cols = std::max(cols, 2);
     rows = std::max(rows, 1);
     if (cols == this->cols() && rows == this->rows()) return;
+    // a pty that repaints: keep the model it last saw, before the first
+    // reshape it will not hear of (see resize_for_pty)
+    if (pty_repaints_ && !pty_sized_ && !p_->m.screen.on_alt_screen()) mark_pty_sized();
     // what this re-wrap costs: the screen's cells (history is logical lines
     // in toe and is never re-wrapped, whatever its size)
     reflowed_cells_ += static_cast<std::uint64_t>(this->rows()) * static_cast<std::uint64_t>(this->cols());
@@ -341,6 +381,8 @@ Term::SelInfo Term::selection_info() const {
     for (unsigned char ch : s.selected_text()) i.chars += (ch & 0xC0) != 0x80 ? 1 : 0;
     return i;
 }
+
+bool Term::wrapped(std::int64_t abs) const { return p_->m.screen.wrapped_abs(abs); }
 
 std::int64_t Term::view_to_abs(int row) const { return p_->m.screen.viewport_to_abs(row); }
 

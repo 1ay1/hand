@@ -210,6 +210,8 @@ struct Session {
     std::optional<Launch>   launch;               ///< start this (taken by the next drain)
     bool                    starting = false;     ///< asked for; its pty has not arrived yet
     int                     pty_cols = 0, pty_rows = 0;   ///< the size the pty was last told
+    int                     size_cols = 0, size_rows = 0; ///< the grid size last seen by the drain...
+    mayag::SteadyClock::time_point size_since{};      ///< ...and since when it has held (Env::resize_settle_ms)
     std::shared_ptr<Term>   term;
     std::string             title = "hand";       ///< OSC 0/2
     std::string             name;                 ///< a name the user gave the tab ("" = automatic)

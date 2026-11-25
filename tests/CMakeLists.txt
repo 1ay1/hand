@@ -65,6 +65,11 @@ set_tests_properties(fold_budget PROPERTIES RUN_SERIAL TRUE TIMEOUT 120 LABELS "
 # past its flash). Machine-independent: frames and tiles, not milliseconds.
 add_test(NAME motion_economy COMMAND hand --motion --last-resort)
 set_tests_properties(motion_economy PROPERTIES TIMEOUT 60 LABELS "perf")
+# The system shell prints 400 numbered lines on a real pty, the window is
+# dragged through 160 sizes the way a person drags it (the whole app: frames,
+# fit, the drain, the pty): every line must still be there, none twice.
+add_test(NAME resize_drag COMMAND hand --drag --last-resort)
+set_tests_properties(resize_drag PROPERTIES RUN_SERIAL TRUE TIMEOUT 120)
 add_test(NAME layering COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/layering.cmake)
 # Every source compiles for Windows, where a mingw-w64 cross compiler is
 # installed (nothing else here builds the Windows code; see the script).

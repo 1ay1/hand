@@ -467,6 +467,84 @@ if (shot == "echo") {   // keystroke -> pty -> echo -> parsed -> frame drawn: ha
     const double p50_max = std::getenv("HAND_ECHO_P50") ? std::atof(std::getenv("HAND_ECHO_P50")) : 8.0;
     return (lost == 0 && pct(0.5) < p50_max) ? 0 : 1;
 }
+if (shot == "drag") {   // the scrollback through a window drag, the whole app: real shell, frames, the real resize path
+    using clk = std::chrono::steady_clock;
+    const auto idle = [&](int ms) {
+        const auto until = clk::now() + std::chrono::milliseconds(ms);
+        while (clk::now() < until) { rt.settle([](const auto&) { return false; }, std::chrono::milliseconds(8)); rt.tick(); }
+    };
+    rt.settle([](const auto& m) { return static_cast<bool>(m.tab().pty); }, std::chrono::seconds(5));
+    idle(2500);   // the shell's banner and first prompt
+    const int N = std::getenv("HAND_DRAG_N") ? std::atoi(std::getenv("HAND_DRAG_N")) : 400;
+    const std::string sh = hand::Pty::resolve_shell("");
+    const bool ps = sh.find("pwsh") != std::string::npos || sh.find("powershell") != std::string::npos;
+    const bool cmd = sh.find("cmd") != std::string::npos;
+    const std::string n1 = std::to_string(N - 1);
+    // mixed lengths: every 7th line wraps at narrow widths
+    rt.type(ps ? "0.." + n1 + " | % { \"L$_.\" + $(if ($_ % 7 -eq 0) { 'w' * 150 } else { 'x' * ($_ % 40) }) }"
+               : cmd ? "for /L %i in (0,1," + n1 + ") do @echo L%i.xxxxxxxxxxxxxxxx"
+                     : "i=0; while [ $i -lt " + std::to_string(N) + " ]; do echo L$i.xxxx; i=$((i+1)); done");
+    rt.press_key(mayag::Key::enter);
+    const auto& term = [&]() -> const hand::Term& { return *rt.model().tab().term; };
+    int dups = 0;
+    const auto count = [&] {
+        std::string all;
+        for (std::int64_t a = 0; a < term().total_rows(); ++a) {
+            for (char32_t c : term().line(a)) all += (c >= 0x20 && c < 0x7f) ? static_cast<char>(c) : ' ';
+            if (!term().wrapped(a)) all += '\n';
+        }
+        std::vector<int> times(static_cast<std::size_t>(N), 0);
+        int distinct = 0;
+        for (std::size_t i = 0; (i = all.find('L', i)) != std::string::npos; ++i) {
+            std::size_t j = i + 1;
+            int v = 0;
+            bool d = false;
+            while (j < all.size() && all[j] >= '0' && all[j] <= '9') { v = v * 10 + (all[j] - '0'); ++j; d = true; }
+            if (d && j < all.size() && all[j] == '.' && v < N && (i == 0 || all[i - 1] == '\n'))
+                if (times[static_cast<std::size_t>(v)]++ == 0) ++distinct;
+        }
+        dups = 0;
+        for (int c : times) dups += c > 1 ? c - 1 : 0;
+        return distinct;
+    };
+    for (int w = 0; w < 60000 && count() < N; w += 250) idle(250);
+    idle(800);
+    const int before = count(), dups0 = dups;
+    const mayag::Vec2 s0 = size;
+    // the drag: HAND_DRAG_SHAPE w(idth) / h(eight) / b(oth); steps of HAND_DRAG_PX px a frame, out and back
+    const char* shp = std::getenv("HAND_DRAG_SHAPE");
+    const char shape = shp ? shp[0] : 'b';
+    const float px = std::getenv("HAND_DRAG_PX") ? static_cast<float>(std::atof(std::getenv("HAND_DRAG_PX"))) : 6.0f;
+    const int steps = std::getenv("HAND_DRAG_STEPS") ? std::atoi(std::getenv("HAND_DRAG_STEPS")) : 160;
+    const int frame_ms = std::getenv("HAND_DRAG_FRAME_MS") ? std::atoi(std::getenv("HAND_DRAG_FRAME_MS")) : 16;
+    for (int k = 0; k < steps; ++k) {
+        const int d = k % 120 < 60 ? k % 120 : 120 - k % 120;
+        const float dx = shape == 'h' ? 0.0f : static_cast<float>(d) * px;
+        const float dy = shape == 'w' ? 0.0f : static_cast<float>(d) * px * 0.5f;
+        rt.window().resize(mayag::Vec2{std::max(s0.x - dx, 300.0f), std::max(s0.y - dy, 200.0f)});
+        rt.tick();
+        if (frame_ms > 0) idle(frame_ms);   // one frame of a real drag
+    }
+    rt.window().resize(s0);
+    rt.tick();
+    idle(1500);
+    const int after = count();
+    const int lost = before - after, doubled = dups - dups0;
+    std::printf("drag: %s, %d lines; after the drag %d (lost %d), doubled %d; history %d rows, %dx%d\n", sh.c_str(), before, after, lost,
+                doubled, term().history(), term().cols(), term().rows());
+    if (const char* dump = std::getenv("HAND_DRAG_DUMP"); dump && *dump) {
+        if (FILE* f = std::fopen(dump, "wb")) {
+            for (std::int64_t a = 0; a < term().total_rows(); ++a) {
+                std::string row;
+                for (char32_t c : term().line(a)) row += (c >= 0x20 && c < 0x7f) ? static_cast<char>(c) : ' ';
+                while (!row.empty() && row.back() == ' ') row.pop_back();
+                std::fprintf(f, "%5lld%c%s\n", static_cast<long long>(a), term().wrapped(a) ? '+' : '|', row.c_str());
+            }
+            std::fclose(f);
+        }
+    }
+    return (before == N && lost == 0 && doubled == 0) ? 0 : 1;
+}
 if (shot == "rows") {   // where glyphs sit in their cells: inverse video makes each cell's box visible
     rt.send(hand::App::Msg{hand::App::Output{"\x1b[2J\x1b[H\x1b[7mHxgM\x1b[0m \x1b[7m|_^Ag\x1b[0m\r\n\x1b[7mHHHH\x1b[0m\r\n"}});
     for (int i = 0; i < 4; ++i) rt.tick();

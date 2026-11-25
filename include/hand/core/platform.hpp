@@ -97,16 +97,12 @@ bool write_stdout(const char* buf, std::size_t n);
 [[nodiscard]] std::tm local_time(std::time_t t);
 
 /// Does this OS's pty repaint the whole viewport from its own buffer after a
-/// resize? Windows ConPTY does (it re-sends every visible row at the new
-/// size); a POSIX pty never does -- the app redraws what it owns. A capability
-/// toe needs: history it brought down into view would be painted over.
-[[nodiscard]] constexpr bool pty_repaints_on_resize() noexcept {
-#if MAYAG_OS_WINDOWS
-    return true;
-#else
-    return false;
-#endif
-}
+/// resize? The inbox Windows ConPTY does (it re-sends every visible row,
+/// reflowed by its own rules); the modern one hand ships beside it
+/// (conpty.dll + OpenConsole.exe, told PSEUDOCONSOLE_RESIZE_QUIRK) does not,
+/// nor does a POSIX pty -- the app redraws what it owns. Asked at run time:
+/// it depends on which ConPTY loaded.
+[[nodiscard]] bool pty_repaints_on_resize();
 
 /// Can this OS's OpenSSH share a connection (ControlMaster over a Unix
 /// socket)? POSIX yes; Microsoft's OpenSSH for Windows no -- every

@@ -56,7 +56,8 @@ struct Spawned { SessionId sid = kNoSession; std::optional<mayag::CoOwned<Pty>> 
 struct TabProc { SessionId sid = kNoSession; std::string proc; std::optional<Host> remote; };
 struct Probe {};                                                   ///< ask the ptys what runs in them
 struct Probed { std::vector<TabProc> tabs; };                      ///< ...and they answered (only on a change)
-using ShellMsg = std::variant<Output, Exited, Spawned, Probe, Probed>;
+struct ResizeSettle {};                                            ///< a grid size may have held long enough to reach its pty
+using ShellMsg = std::variant<Output, Exited, Spawned, Probe, Probed, ResizeSettle>;
 
 // ── tabs ───────────────────────────────────────────────────────────────────
 struct NewTab {};
