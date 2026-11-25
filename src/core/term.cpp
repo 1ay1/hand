@@ -157,8 +157,9 @@ void Term::resize(int cols, int rows) {
     cols = std::max(cols, 2);
     rows = std::max(rows, 1);
     if (cols == this->cols() && rows == this->rows()) return;
-    // what this re-wrap costs: every cell of history and screen is moved
-    reflowed_cells_ += static_cast<std::uint64_t>(history() + this->rows()) * static_cast<std::uint64_t>(this->cols());
+    // what this re-wrap costs: the screen's cells (history is logical lines
+    // in toe and is never re-wrapped, whatever its size)
+    reflowed_cells_ += static_cast<std::uint64_t>(this->rows()) * static_cast<std::uint64_t>(this->cols());
     toe::term::resize(p_->m, toe::Extent{cols, rows});   // prompt-safe rewrap + command rows follow
     ++epoch_; ++content_epoch_;
 }

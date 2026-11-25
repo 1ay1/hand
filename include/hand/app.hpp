@@ -269,9 +269,9 @@ struct App {
     static Session spawn_ssh(Model& m, const Host& h);
     /// Size the grid to what the window holds (the drain tells the ptys).
     static void fit(Model& m);
-    /// The most cells one interactive frame may re-wrap (~2.5 ms of moving
-    /// cells). A drag that would re-wrap more defers it to the drag's end;
-    /// the pane_drag self-test holds every frame of a drag to this.
+    /// The most cells one interactive frame may re-wrap. toe re-wraps only
+    /// the screen (history is logical lines), so a drag stays far under it
+    /// at any scrollback size; the pane_drag self-test holds every frame to it.
     static constexpr std::uint64_t kFrameReflowCells = 300'000;
     /// What the step asked of the ptys, as effects: launches, sizes, input.
     static Cmd drain(Model& m);

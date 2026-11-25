@@ -55,18 +55,14 @@ void App::fit(Model& m) {
     const int rows = std::max(1, static_cast<int>((m.size.y - 2.0f * pad) / ch));
     m.metrics.fit_cols = cols;
     m.metrics.fit_rows = rows;
-    // A pane edge being dragged: the layout follows the pointer every frame.
-    // The grids follow too when that is cheap -- a re-wrap costs ~8 ns a cell
-    // of history, so a tab with a few thousand lines re-wraps live, like
-    // kitty or foot. A big one (10k lines: ~14 ms) would drop frames under
-    // the pointer: it keeps its size, drawn clipped or short, and fits when
-    // the grip is released. Background tabs always wait. The budget is
-    // kFrameReflowCells; the pane_drag self-test holds every frame to it.
+    // A pane edge being dragged: the layout AND the active grid follow the
+    // pointer every frame, at any scrollback size -- toe keeps history as
+    // logical lines (LineLog), so a re-wrap costs O(screen), not O(history):
+    // ~0.1 ms with 10k lines (it was ~14 ms, when big histories had to wait
+    // for the release). Background tabs fit when the drag ends.
     if (m.pane.dragging) {
         Session& se = m.tab();
-        const auto cells = static_cast<std::uint64_t>(se.term ? se.term->history() + se.term->rows() : 0) *
-                           static_cast<std::uint64_t>(se.term ? se.term->cols() : 0);
-        if (se.term && cells <= kFrameReflowCells && (cols != se.term->cols() || rows != se.term->rows())) {
+        if (se.term && (cols != se.term->cols() || rows != se.term->rows())) {
             se.term->resize(cols, rows);
             se.grid_key = 0;
         }

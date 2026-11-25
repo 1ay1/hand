@@ -89,7 +89,7 @@ void pane_drag([[maybe_unused]] Runtime& rt, [[maybe_unused]] Vec2 size, Check& 
             rest.remove_prefix(n);
         }
     }
-    drag(false, "10k-line history");
+    drag(true, "10k-line history");   // toe's history is logical lines: live at any size
     rt.send(App::Msg{App::TogglePane{}});   // closed again for the suites after
     for (int i = 0; i < 3; ++i) rt.tick();
 }
