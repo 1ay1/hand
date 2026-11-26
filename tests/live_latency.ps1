@@ -71,5 +71,7 @@ $v = $lines | ? { $_ -like '*present->screen*' } | % {
   if ($_ -match 'p50 ([\d.]+)  p90 ([\d.]+)  max ([\d.]+).*?\((\d+) shown, (\d+) never.*?gaps p50 ([\d.]+) p90 ([\d.]+) max ([\d.]+)') {
     'glass p50 {0} p90 {1} max {2} ms, {3} shown {4} lost, gap p90 {6} max {7}' -f $matches[1], $matches[2], $matches[3], $matches[4], $matches[5], $matches[6], $matches[7], $matches[8] } }
 $mode = ($lines | ? { $_ -like '*mode *' } | % { ($_ -split 'mode ')[1] } | select -Unique) -join ','
+$jud = $lines | ? { $_ -like '*judder*' } | select -Last 1 | % { ($_ -split 'judder ')[1] }
+"{0,-6} judder: {1}" -f $what, $jud
 "{0,-6} [{1}] screen changed {2} px-samples | {3}" -f $what, $mode, $changed, ($v -join ' | ')
 if ($changed -lt 20) { "INVALID: the window did not visibly change (occluded?)"; exit 2 }
