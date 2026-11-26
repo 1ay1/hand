@@ -25,7 +25,10 @@ Start-Sleep 3
 $p.Refresh(); $h = $p.MainWindowHandle
 if ($h -eq 0) { "no window"; $p.Kill(); exit 1 }
 [void][W]::SetForegroundWindow($h)
-[void][W]::SetWindowPos($h, [IntPtr]::Zero, 100, 100, 1300, 850, 0x14)
+# topmost: Windows' focus lock lets other apps stay in front of a scripted
+# window, and an occluded window is composed and mostly never shown -- the
+# numbers would be of nothing the user sees
+[void][W]::SetWindowPos($h, [IntPtr](-1), 100, 100, 1300, 850, 0x0040)
 Start-Sleep -Milliseconds 500
 $dpi = [W]::GetDpiForWindow($h) / 96.0
 function key([int]$vk) { [void][W]::PostMessageW($h, 0x100, [IntPtr]$vk, [IntPtr]1); [void][W]::PostMessageW($h, 0x101, [IntPtr]$vk, [IntPtr]([int64]0xC0000001 -band 0xFFFFFFFF)) }
@@ -42,9 +45,13 @@ Start-Sleep 6
 $before = shot
 $mark = (Get-Content C:\Develop\hand\build\live_err.txt -ErrorAction SilentlyContinue | Measure-Object).Count
 switch ($what) {
-  'scroll' { for ($k = 0; $k -lt 60; $k++) { $dir = if (($k % 20) -lt 10) { 120 } else { -120 }; [void][W]::PostMessageW($h, 0x20A, [IntPtr]($dir -shl 16), (at 700 400)); Start-Sleep -Milliseconds 100 }
+  'scroll' { for ($k = 0; $k -lt 60; $k++) { $dir = if (($k % 20) -lt 10) { 120 } else { -120 }; [void][W]::PostMessageW($h, 0x20A, [IntPtr]($dir -shl 16), (at 700 400)); Start-Sleep -Milliseconds 100
+               if ($k -eq 9) { Start-Sleep -Milliseconds 300; $mid = shot } }
              Start-Sleep -Milliseconds 300 }
-  'drag'   { for ($k = 0; $k -lt 180; $k++) { $d = if ($k % 60 -lt 30) { $k % 60 } else { 60 - $k % 60 }; [void][W]::SetWindowPos($h, [IntPtr]::Zero, 100, 100, 1300 - $d * 12, 850 - $d * 6, 0x14); Start-Sleep -Milliseconds 16 } }
+  'drag'   { for ($k = 0; $k -lt 180; $k++) { $d = if ($k % 60 -lt 30) { $k % 60 } else { 60 - $k % 60 }; [void][W]::SetWindowPos($h, [IntPtr]::Zero, 100, 100, 1300 - $d * 12, 850 - $d * 6, 0x14); Start-Sleep -Milliseconds 16 }
+             # after the drag: motion must be back to full speed (the last stats window)
+             Start-Sleep -Milliseconds 400
+             for ($k = 0; $k -lt 40; $k++) { $dir = if (($k % 20) -lt 10) { 120 } else { -120 }; [void][W]::PostMessageW($h, 0x20A, [IntPtr]($dir -shl 16), (at 700 400)); Start-Sleep -Milliseconds 100 } }
   'pane'   { $gx = 297.5; $gy = 300
              [void][W]::PostMessageW($h, 0x200, [IntPtr]0, (at $gx $gy)); Start-Sleep -Milliseconds 50
              [void][W]::PostMessageW($h, 0x201, [IntPtr]1, (at $gx $gy)); Start-Sleep -Milliseconds 30
@@ -65,3 +72,4 @@ $v = $lines | ? { $_ -like '*present->screen*' } | % {
     'glass p50 {0} p90 {1} max {2} ms, {3} shown {4} lost, gap p90 {6} max {7}' -f $matches[1], $matches[2], $matches[3], $matches[4], $matches[5], $matches[6], $matches[7], $matches[8] } }
 $mode = ($lines | ? { $_ -like '*mode *' } | % { ($_ -split 'mode ')[1] } | select -Unique) -join ','
 "{0,-6} [{1}] screen changed {2} px-samples | {3}" -f $what, $mode, $changed, ($v -join ' | ')
+if ($changed -lt 20) { "INVALID: the window did not visibly change (occluded?)"; exit 2 }
