@@ -58,6 +58,15 @@ switch ($what) {
              # after the drag: motion must be back to full speed (the last stats window)
              Start-Sleep -Milliseconds 400
              for ($k = 0; $k -lt 40; $k++) { $dir = if (($k % 20) -lt 10) { 120 } else { -120 }; [void][W]::PostMessageW($h, 0x20A, [IntPtr]($dir -shl 16), (at 700 400)); pace 100 } }
+  'edge'   { # a REAL edge drag: Windows' own size/move loop, as a user's mouse drives it
+             Add-Type -Namespace E -Name U -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y); [DllImport("user32.dll")] public static extern void mouse_event(uint f, int dx, int dy, uint d, System.UIntPtr e);'
+             $rc = New-Object W+RECT; [void][W]::GetWindowRect($h, [ref]$rc)
+             $ex = $rc.r - 3; $ey = [int](($rc.t + $rc.b) / 2)
+             [void][E.U]::SetCursorPos($ex, $ey); Start-Sleep -Milliseconds 200
+             [E.U]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)   # left down on the border
+             for ($k = 0; $k -lt 360; $k++) { $d = (if2 $k 120) * 4; [void][E.U]::SetCursorPos($ex - $d, $ey); pace 8
+               if ($k -eq 50) { $mid = shot } }
+             [E.U]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero) }
   'sbar'   { $sx = 1300 / $dpi - 14; $sy = 120
              [void][W]::PostMessageW($h, 0x200, [IntPtr]0, (at $sx $sy)); Start-Sleep -Milliseconds 300
              [void][W]::PostMessageW($h, 0x201, [IntPtr]1, (at $sx $sy)); Start-Sleep -Milliseconds 30
