@@ -78,6 +78,9 @@ set_tests_properties(mayag_pacing PROPERTIES LABELS "perf")
 add_test(NAME mayag_one_pacing COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}/external/mayag/include/mayag
          -P ${PROJECT_SOURCE_DIR}/external/mayag/tests/lint/one_pacing.cmake)
 set_tests_properties(mayag_one_pacing PROPERTIES LABELS "static")
+add_test(NAME mayag_one_diag COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}/external/mayag/include/mayag
+         -P ${PROJECT_SOURCE_DIR}/external/mayag/tests/lint/one_diag.cmake)
+set_tests_properties(mayag_one_diag PROPERTIES LABELS "static")
 set_tests_properties(resize_drag PROPERTIES RUN_SERIAL TRUE TIMEOUT 120)
 if(MAYAG_SYSTEM STREQUAL "windows")
     # The fallback rung: the system conhost, started by hand with --resizeQuirk.

@@ -19,7 +19,7 @@ public static class W {
 $cfg = "C:\Develop\hand\build\live.vibe"
 Set-Content $cfg ("files { open_at_start " + $(if ($what -eq 'pane') { 'true' } else { 'false' }) + " }")
 $env:HAND_CONFIG = $cfg
-$env:MAYAG_PRESENTSTATS = '1'
+$env:MAYAG_PRESENTSTATS = if ($env:LD_STATS -eq '0') { '' } else { '1' }
 $p = Start-Process $exe -PassThru -RedirectStandardError C:\Develop\hand\build\live_err.txt -RedirectStandardOutput C:\Develop\hand\build\live_out.txt
 Start-Sleep 3
 $p.Refresh(); $h = $p.MainWindowHandle
