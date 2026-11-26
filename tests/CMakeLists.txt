@@ -69,6 +69,15 @@ set_tests_properties(motion_economy PROPERTIES TIMEOUT 60 LABELS "perf")
 # dragged through 160 sizes the way a person drags it (the whole app: frames,
 # fit, the drain, the pty): every line must still be there, none twice.
 add_test(NAME resize_drag COMMAND hand --drag --last-resort)
+# Frame pacing can't regress: mayag's scheduling rules through thousands of
+# jittered refreshes (a refresh without its frame, an uneven step: fail).
+add_executable(mayag_pacing ${PROJECT_SOURCE_DIR}/external/mayag/tests/test_pacing.cpp)
+target_link_libraries(mayag_pacing PRIVATE mayag)
+add_test(NAME mayag_pacing COMMAND mayag_pacing)
+set_tests_properties(mayag_pacing PROPERTIES LABELS "perf")
+add_test(NAME mayag_one_pacing COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}/external/mayag/include/mayag
+         -P ${PROJECT_SOURCE_DIR}/external/mayag/tests/lint/one_pacing.cmake)
+set_tests_properties(mayag_one_pacing PROPERTIES LABELS "static")
 set_tests_properties(resize_drag PROPERTIES RUN_SERIAL TRUE TIMEOUT 120)
 if(MAYAG_SYSTEM STREQUAL "windows")
     # The fallback rung: the system conhost, started by hand with --resizeQuirk.
