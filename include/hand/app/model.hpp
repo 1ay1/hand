@@ -86,6 +86,10 @@ struct Model {
     std::uint64_t           keys_typed = 0;
     double                  time = 0.0;
     mayag::dsl::TermMetrics metrics{};            ///< cell size, from the font (fit())
+    /// Where centring puts the grid's first cell (fit()); metrics.origin_x
+    /// eases toward it, so an edge being dragged moves the text smoothly
+    /// instead of a half-pixel creep and a half-cell snap per column.
+    float                   origin_goal = -1.0f;
     Tabs                    tabs;                 ///< every tab, in strip order; never empty
     SessionIds              session_ids;          ///< hands out each new session's id
     StripModel              strip;                ///< the tab strip

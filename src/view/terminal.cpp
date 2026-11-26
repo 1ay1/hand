@@ -246,9 +246,11 @@ void minimap(std::vector<Node>& layers, const Ctx& c, const Model& m, const Term
     sb.runs = se.term->minimap(sb.buckets);
     sb.runs_version = se.term->minimap_version();
     layers.push_back((node(scrollback_dock(c, "minimap", sb, m.size))
-                      | on_slide([sb, hgt](Vec2 at) -> App::Msg {
-                            const int line = scrollback_line_at(sb, at.y, hgt);
-                            return App::ScrollToLine{line};
+                      | on_press([sb, hgt](const Pressed& p) -> App::Msg {
+                            return App::ScrollToLine{scrollback_pos_at(sb, p.local.y, hgt)};   // a jump: glide there
+                        })
+                      | on_drag([sb, hgt](const Dragged& d) -> App::Msg {
+                            return App::ScrollToLine{scrollback_pos_at(sb, d.local.y, hgt), true};   // follow the pointer
                         })).build());
 
     if (m.minimap.peek_t <= 0.0f || m.minimap.hover_y < 0.0f || info.total <= 0) return;

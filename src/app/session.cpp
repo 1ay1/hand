@@ -50,7 +50,17 @@ void App::fit(Model& m) {
     const float side_gap = pad + gutter;
     const float avail = std::max(m.size.x - strip - 2.0f * side_gap, cw);
     const int cols = std::max(2, static_cast<int>(avail / cw));
-    m.metrics.origin_x = side_gap + std::round((avail - static_cast<float>(cols) * cw) * 0.5f);
+    const bool first = m.origin_goal < 0.0f;
+    m.origin_goal = side_gap + std::round((avail - static_cast<float>(cols) * cw) * 0.5f);
+    // The text must move RIGIDLY with an edge being dragged. Centring it
+    // every step did not: it crept half a pixel per pixel of travel, then
+    // snapped back half a cell each time a column fitted or dropped out --
+    // a sawtooth the eye reads as jerking (pane grip, window edge alike).
+    // So the shown origin is kept, clamped into the space, while the size
+    // moves, and eases to the centred goal in Tick (frames_wanted_by:
+    // "recentre") -- smooth both while dragging and after.
+    if (first || !m.cfg.motion || !m.sized_once) m.metrics.origin_x = m.origin_goal;
+    else m.metrics.origin_x = std::clamp(m.metrics.origin_x, side_gap, std::max(side_gap, m.size.x - strip - side_gap - static_cast<float>(cols) * cw));
     m.metrics.origin_y = pad;
     const int rows = std::max(1, static_cast<int>((m.size.y - 2.0f * pad) / ch));
     m.metrics.fit_cols = cols;
@@ -575,6 +585,13 @@ App::Cmd App::update(Model& m, Tick t) {
         }
         if (m.strip.switch_t < 1.0f) m.strip.switch_t = std::min(1.0f, m.strip.switch_t + mdt * 6.0f);
         if (m.strip.show_numbers && m.time - m.strip.numbers_at > 1.2) m.strip.show_numbers = false;   // no key-up events: a timed hint
+    }
+    {   // the grid eases back to centre after an edge moved (see fit)
+        float& ox = m.metrics.origin_x;
+        if (ox != m.origin_goal && m.origin_goal >= 0.0f) {
+            ox += (m.origin_goal - ox) * (1.0f - std::exp(-mdt * 14.0f));
+            if (std::fabs(ox - m.origin_goal) < 0.25f) ox = m.origin_goal;
+        }
     }
     {   // the blink fades; the settings panel and new lines glide
         const auto toward = [&](float& v, float goal, float rate) {

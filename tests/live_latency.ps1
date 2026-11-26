@@ -31,6 +31,12 @@ if ($h -eq 0) { "no window"; $p.Kill(); exit 1 }
 [void][W]::SetWindowPos($h, [IntPtr](-1), 100, 100, 1300, 850, 0x0040)
 Start-Sleep -Milliseconds 500
 $dpi = [W]::GetDpiForWindow($h) / 96.0
+# Start-Sleep -Milliseconds 16 really sleeps ~31 ms (the default timer tick):
+# a 'smooth 60 Hz drag' was a 32 Hz one, and 30 fps the correct answer to it.
+# A real mouse reports at 125-1000 Hz; pace events like one, on a stopwatch.
+$clock = [Diagnostics.Stopwatch]::StartNew()
+function pace([double]$ms) { $until = $clock.Elapsed.TotalMilliseconds + $ms; while ($clock.Elapsed.TotalMilliseconds -lt $until) { } }
+function if2([int]$k, [int]$n) { if ($k % $n -lt $n / 2) { $k % $n } else { $n - $k % $n } }
 function key([int]$vk) { [void][W]::PostMessageW($h, 0x100, [IntPtr]$vk, [IntPtr]1); [void][W]::PostMessageW($h, 0x101, [IntPtr]$vk, [IntPtr]([int64]0xC0000001 -band 0xFFFFFFFF)) }
 function text([string]$s) { foreach ($ch in [char[]]$s) { [void][W]::PostMessageW($h, 0x102, [IntPtr][int]$ch, [IntPtr]1) } }
 function at([double]$x, [double]$y) { [IntPtr](([int]($y * $dpi) -shl 16) -bor ([int]($x * $dpi) -band 0xFFFF)) }
@@ -45,18 +51,25 @@ Start-Sleep 6
 $before = shot
 $mark = (Get-Content C:\Develop\hand\build\live_err.txt -ErrorAction SilentlyContinue | Measure-Object).Count
 switch ($what) {
-  'scroll' { for ($k = 0; $k -lt 60; $k++) { $dir = if (($k % 20) -lt 10) { 120 } else { -120 }; [void][W]::PostMessageW($h, 0x20A, [IntPtr]($dir -shl 16), (at 700 400)); Start-Sleep -Milliseconds 100
+  'scroll' { for ($k = 0; $k -lt 60; $k++) { $dir = if (($k % 20) -lt 10) { 120 } else { -120 }; [void][W]::PostMessageW($h, 0x20A, [IntPtr]($dir -shl 16), (at 700 400)); pace 100
                if ($k -eq 9) { Start-Sleep -Milliseconds 300; $mid = shot } }
              Start-Sleep -Milliseconds 300 }
-  'drag'   { for ($k = 0; $k -lt 180; $k++) { $d = if ($k % 60 -lt 30) { $k % 60 } else { 60 - $k % 60 }; [void][W]::SetWindowPos($h, [IntPtr]::Zero, 100, 100, 1300 - $d * 12, 850 - $d * 6, 0x14); Start-Sleep -Milliseconds 16 }
+  'drag'   { for ($k = 0; $k -lt 360; $k++) { $d = (if2 $k 120) / 2; [void][W]::SetWindowPos($h, [IntPtr]::Zero, 100, 100, 1300 - $d * 12, 850 - $d * 6, 0x14); pace 8 }
              # after the drag: motion must be back to full speed (the last stats window)
              Start-Sleep -Milliseconds 400
-             for ($k = 0; $k -lt 40; $k++) { $dir = if (($k % 20) -lt 10) { 120 } else { -120 }; [void][W]::PostMessageW($h, 0x20A, [IntPtr]($dir -shl 16), (at 700 400)); Start-Sleep -Milliseconds 100 } }
+             for ($k = 0; $k -lt 40; $k++) { $dir = if (($k % 20) -lt 10) { 120 } else { -120 }; [void][W]::PostMessageW($h, 0x20A, [IntPtr]($dir -shl 16), (at 700 400)); pace 100 } }
+  'sbar'   { $sx = 1300 / $dpi - 14; $sy = 120
+             [void][W]::PostMessageW($h, 0x200, [IntPtr]0, (at $sx $sy)); Start-Sleep -Milliseconds 300
+             [void][W]::PostMessageW($h, 0x201, [IntPtr]1, (at $sx $sy)); Start-Sleep -Milliseconds 30
+             for ($k = 0; $k -lt 360; $k++) { $d = (if2 $k 180) / 2
+               [void][W]::PostMessageW($h, 0x200, [IntPtr]1, (at $sx ($sy + $d * 8))); pace 8
+               if ($k -eq 40) { $mid = shot } }
+             [void][W]::PostMessageW($h, 0x202, [IntPtr]0, (at $sx $sy)) }
   'pane'   { $gx = 297.5; $gy = 300
              [void][W]::PostMessageW($h, 0x200, [IntPtr]0, (at $gx $gy)); Start-Sleep -Milliseconds 50
              [void][W]::PostMessageW($h, 0x201, [IntPtr]1, (at $gx $gy)); Start-Sleep -Milliseconds 30
-             for ($k = 0; $k -lt 180; $k++) { $d = if ($k % 60 -lt 30) { $k % 60 } else { 60 - $k % 60 }
-               [void][W]::PostMessageW($h, 0x200, [IntPtr]1, (at ($gx + $d * 5) $gy)); Start-Sleep -Milliseconds 16
+             for ($k = 0; $k -lt 360; $k++) { $d = (if2 $k 120) / 2
+               [void][W]::PostMessageW($h, 0x200, [IntPtr]1, (at ($gx + $d * 5) $gy)); pace 8
                if ($k -eq 25) { $mid = shot } }
              [void][W]::PostMessageW($h, 0x202, [IntPtr]0, (at $gx $gy)) }
   'type'   { foreach ($ch in [char[]]'echo the quick brown fox jumps over the lazy dog 0123456789') { text ([string]$ch); Start-Sleep -Milliseconds 60 }

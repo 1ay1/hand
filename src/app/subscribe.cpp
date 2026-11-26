@@ -95,6 +95,7 @@ std::string frames_wanted_by(const Model& m) {
         {"minimap", m.minimap.width != (m.minimap.open ? kMinimapOpen : kMinimapRest)},
         {"peek", m.minimap.peek_t != ((m.cfg.peek && m.minimap.hover_y >= 0.0f) ? 1.0f : 0.0f)},
         {"live tail", m.tab().tail_t != (tail_wanted(m) ? 1.0f : 0.0f)},
+        {"recentre", m.origin_goal >= 0.0f && m.metrics.origin_x != m.origin_goal},
         {"sticky header", m.tab().sticky_t != (sticky_of(m) ? 1.0f : 0.0f)},
         {"link dropped", m.tab().link.dropped && m.time - m.tab().link.dropped_at < 0.3},
     };

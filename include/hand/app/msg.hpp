@@ -105,7 +105,10 @@ struct ScrollBy { float rows = 0.0f; };                            ///< + = into
 struct ScrollLive {};                                              ///< back to the live screen
 struct ScrollTop {};                                               ///< the oldest line kept
 struct ScrollToPrompt { std::int64_t prompt_row = 0; };            ///< a command's prompt at the top
-struct ScrollToLine { std::int64_t line = 0; };                    ///< a history line (0 = oldest) at the top
+/// A history line (0 = oldest) at the top. `follow`: a drag on the
+/// scrollbar -- the view tracks the pointer exactly (fractional, no glide);
+/// otherwise (a press, a jump) it glides there.
+struct ScrollToLine { double line = 0; bool follow = false; };
 struct JumpPrompt { Step step; };                                  ///< the previous / next prompt
 struct ClearScrollback {};                                         ///< screen and history; the shell redraws
 using ScrollMsg = std::variant<ScrollBy, ScrollLive, ScrollTop, ScrollToPrompt, ScrollToLine, JumpPrompt, ClearScrollback>;
