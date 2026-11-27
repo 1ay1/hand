@@ -2,8 +2,9 @@
 // hand::fx — every effect hand performs, and nothing else.
 //
 // update() never touches the world: it returns a Cmd naming one of these
-// (Cmd::run for a quick one on the loop, Cmd::task for one that may block),
-// with the values it chose as arguments. They are the ONLY code under
+// (Cmd::run for one that must keep its order -- run on mayag's world lane,
+// one worker, never the UI thread -- Cmd::task for one that may block for
+// long), with the values it chose as arguments. They are the ONLY code under
 // src/app that may write a pty, read or write a file, start a process or ask
 // the OS anything (tests/purity.cmake); each is a plain function of its
 // arguments, so the runtime can run it after the step that asked.

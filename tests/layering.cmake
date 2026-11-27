@@ -58,11 +58,13 @@ macro(violation msg)
     math(EXPR bad "${bad}+1")
 endmacro()
 
+include(${CMAKE_CURRENT_LIST_DIR}/../external/mayag/tests/lint/lines.cmake)
 foreach(f ${files})
     file(RELATIVE_PATH rel ${ROOT} ${f})
     layer_of(${f} layer)
-    file(STRINGS ${f} lines)
-    foreach(l ${lines})
+    lint_lines(${f} lines)   # one element per line (file(STRINGS) merges lines at a `[`)
+    foreach(l IN LISTS lines)
+        lint_unescape(l)
         string(REGEX REPLACE "//.*" "" code "${l}")   # prose about jaal is not a use of it
         # rule 3
         if(code MATCHES "jaal/|jaal::|JAAL_")

@@ -238,18 +238,31 @@ std::string downloads_dir() {
     return std::filesystem::temp_directory_path().string();
 }
 
+namespace {
+/// ShellExecute may hand the verb to a shell extension, which needs COM on
+/// the calling thread (MSDN: "initialize COM before you call ShellExecute").
+/// These run on mayag's world lane -- a worker, never the UI thread, because
+/// waking a browser can take a second -- so the lane thread joins an STA
+/// here, once per call, balanced.
+void shell_open(const wchar_t* file, const wchar_t* args) {
+    const HRESULT co = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    ::ShellExecuteW(nullptr, L"open", file, args, nullptr, SW_SHOWNORMAL);
+    if (SUCCEEDED(co)) ::CoUninitialize();
+}
+}  // namespace
+
 void reveal(const std::string& path) {
     const std::wstring args = L"/select,\"" + widen(path) + L"\"";
-    ::ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
+    shell_open(L"explorer.exe", args.c_str());
 }
 
 void open_path(const std::string& path) {
-    ::ShellExecuteW(nullptr, L"open", widen(path).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    shell_open(widen(path).c_str(), nullptr);
 }
 
 void open_url(const std::string& url) {
     // the registered handler for the scheme (the default browser for http)
-    ::ShellExecuteW(nullptr, L"open", widen(url).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    shell_open(widen(url).c_str(), nullptr);
 }
 
 std::string host_name() {

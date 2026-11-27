@@ -27,8 +27,9 @@ struct App {
     using Session = hand::Session;
     using Model = hand::Model;
     using Msg = msg::Any;
-    /// `run`: an effect on the loop thread after the step (a pty write, a
-    /// save); `task` (core): one that may block, on the pool.
+    /// `run`: an effect after the step, in order, on mayag's world lane --
+    /// never the UI thread (a pty write, a save); `task` (core): one that may
+    /// block for long, on the pool.
     using Cmd = mayag::Cmd<Msg, mayag::set_title, mayag::write_clipboard, mayag::read_clipboard, mayag::window_action,
                            mayag::world>;
     using Sub = mayag::Sub<Msg>;

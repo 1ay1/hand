@@ -75,6 +75,12 @@ add_executable(mayag_pacing ${PROJECT_SOURCE_DIR}/external/mayag/tests/test_paci
 target_link_libraries(mayag_pacing PRIVATE mayag)
 add_test(NAME mayag_pacing COMMAND mayag_pacing)
 set_tests_properties(mayag_pacing PROPERTIES LABELS "perf")
+# The world can't stall the UI: a slow world effect (mayag::run) runs on the
+# host's world lane while the loop keeps folding; order and exit-drain kept.
+add_executable(mayag_world_lane ${PROJECT_SOURCE_DIR}/external/mayag/tests/test_world_lane.cpp)
+target_link_libraries(mayag_world_lane PRIVATE mayag)
+add_test(NAME mayag_world_lane COMMAND mayag_world_lane)
+set_tests_properties(mayag_world_lane PROPERTIES LABELS "perf" TIMEOUT 30)
 add_test(NAME mayag_one_pacing COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}/external/mayag/include/mayag
          -P ${PROJECT_SOURCE_DIR}/external/mayag/tests/lint/one_pacing.cmake)
 set_tests_properties(mayag_one_pacing PROPERTIES LABELS "static")
