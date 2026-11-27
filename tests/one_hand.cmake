@@ -32,13 +32,15 @@ foreach(l IN LISTS allow_lines)
     list(APPEND granted ${CMAKE_MATCH_1})
 endforeach()
 
+include(${CMAKE_CURRENT_LIST_DIR}/../external/mayag/tests/lint/lines.cmake)
 file(GLOB_RECURSE files RELATIVE ${ROOT} ${ROOT}/src/*.cpp ${ROOT}/src/*.hpp ${ROOT}/include/hand/*.hpp)
 set(bad 0)
 foreach(rel ${files})
     if(rel MATCHES "^src/core/" OR rel MATCHES "^include/hand/core/")
         continue()   # the OS seam
     endif()
-    file(STRINGS ${ROOT}/${rel} hits REGEX "^[ \t]*#[ \t]*(if|ifdef|ifndef|elif)[ \t].*(_WIN32|__APPLE__|__linux__|__unix__|TARGET_OS_|MAYAG_OS_|JAAL_OS_)")
+    # lint_grep, not file(STRINGS REGEX): a COUNT must not merge two hits at a `[`
+    lint_grep(${ROOT}/${rel} "^[ \t]*#[ \t]*(if|ifdef|ifndef|elif)[ \t].*(_WIN32|__APPLE__|__linux__|__unix__|TARGET_OS_|MAYAG_OS_|JAAL_OS_)" hits)
     list(LENGTH hits n)
     set(allowed 0)
     if(DEFINED grant_${rel})
